@@ -24,16 +24,24 @@ export interface AuthRequest extends Request {
 }
 
 export async function requireAuth(req: AuthRequest, res: Response, next: NextFunction) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res.status(401).json({ error: "Missing or invalid authorization header" });
-  }
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Missing or invalid authorization header" });
+    }
 
-  const token = authHeader.split(" ")[1];
-  const { data, error } = await supabase.auth.getUser(token);
-  if (error || !data?.user) {
-    return res.status(401).json({ error: "Invalid auth token" });
-  }
+    const token = authHeader.split(" ")[1];
+    if (!token || token.length < 10) {
+      return res.status(401).json({ error: "Invalid auth token format" });
+    }
+
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error || !data?.user) {
+      const isExpired = error?.message?.toLowerCase().includes("expired") || error?.status === 401;
+      return res.status(401).json({
+        error: isExpired ? "Session expired. Please sign in again." : "Invalid auth token",
+      });
+    }
 
   const user = data.user;
   // Support role/church_id stored in root metadata, app metadata, or user metadata.
@@ -54,4 +62,8 @@ export async function requireAuth(req: AuthRequest, res: Response, next: NextFun
     church_id,
   };
   next();
+  } catch (err: any) {
+    console.error("requireAuth error:", err?.message || err);
+    return res.status(500).json({ error: "Authentication service unavailable. Please try again." });
+  }
 }

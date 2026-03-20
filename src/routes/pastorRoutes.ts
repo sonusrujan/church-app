@@ -13,6 +13,7 @@ import {
 import { logSuperAdminAudit } from "../utils/superAdminAudit";
 
 const router = Router();
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function resolveScopedChurchId(req: AuthRequest, requestedChurchId?: string) {
   if (!req.user) {
@@ -110,6 +111,9 @@ router.patch("/:id", requireAuth, requireRegisteredUser, async (req: AuthRequest
     }
 
     const pastorId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!pastorId || !UUID_REGEX.test(pastorId)) {
+      return res.status(400).json({ error: "Invalid pastor ID format" });
+    }
     const pastor = await updatePastor(churchId, pastorId, {
       full_name: req.body?.full_name,
       phone_number: req.body?.phone_number,
@@ -140,6 +144,9 @@ router.get("/:id", requireAuth, requireRegisteredUser, async (req: AuthRequest, 
     }
 
     const pastorId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!pastorId || !UUID_REGEX.test(pastorId)) {
+      return res.status(400).json({ error: "Invalid pastor ID format" });
+    }
     const churchId = resolveScopedChurchId(req, String(req.query.church_id || ""));
     if (!churchId) {
       return res.status(400).json({ error: "church_id is required" });
@@ -167,6 +174,9 @@ router.delete("/:id", requireAuth, requireRegisteredUser, async (req: AuthReques
     }
 
     const pastorId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!pastorId || !UUID_REGEX.test(pastorId)) {
+      return res.status(400).json({ error: "Invalid pastor ID format" });
+    }
     const churchId = resolveScopedChurchId(req, req.body?.church_id || req.query.church_id);
     if (!churchId) {
       return res.status(400).json({ error: "church_id is required" });
@@ -194,6 +204,9 @@ router.post("/:id/transfer", requireAuth, requireRegisteredUser, async (req: Aut
     }
 
     const pastorId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!pastorId || !UUID_REGEX.test(pastorId)) {
+      return res.status(400).json({ error: "Invalid pastor ID format" });
+    }
     const fromChurchId = resolveScopedChurchId(req, req.body?.from_church_id || req.body?.church_id);
     const toChurchId = typeof req.body?.to_church_id === "string" ? req.body.to_church_id.trim() : "";
 

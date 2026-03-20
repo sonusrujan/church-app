@@ -9,6 +9,7 @@ import { getEffectivePaymentConfig } from "../services/churchPaymentService";
 import { createReceiptNumber, generateReceiptPdfBuffer } from "../services/receiptService";
 
 const router = Router();
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type DashboardSubscription = {
   id: string;
@@ -93,19 +94,17 @@ function isDueSubscription(subscription: DashboardSubscription, now = new Date()
 function computeNextDueDate(previousDueDate: string, billingCycle: string) {
   const base = new Date(previousDueDate);
   if (Number.isNaN(base.getTime())) {
-    const fallback = new Date();
-    fallback.setDate(fallback.getDate() + 30);
-    return fallback.toISOString().slice(0, 10);
+    // Fallback: next month's 5th
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth() + 1, 5).toISOString().slice(0, 10);
   }
 
   const normalizedCycle = (billingCycle || "monthly").toLowerCase();
   if (normalizedCycle === "yearly") {
-    base.setFullYear(base.getFullYear() + 1);
-  } else {
-    base.setMonth(base.getMonth() + 1);
+    return new Date(base.getFullYear() + 1, base.getMonth(), 5).toISOString().slice(0, 10);
   }
-
-  return base.toISOString().slice(0, 10);
+  // Monthly: always the 5th of next month from the base date
+  return new Date(base.getFullYear(), base.getMonth() + 1, 5).toISOString().slice(0, 10);
 }
 
 function normalizeSelectedSubscriptionIds(value: unknown): string[] {
@@ -144,13 +143,17 @@ async function resolvePaymentConfig(req: AuthRequest) {
 }
 
 router.get("/config", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
-  const paymentConfig = await resolvePaymentConfig(req);
-  return res.json({
-    payments_enabled: paymentConfig.payments_enabled,
-    key_id: paymentConfig.payments_enabled ? paymentConfig.key_id : "",
-    source: paymentConfig.source,
-    reason: paymentConfig.reason,
-  });
+  try {
+    const paymentConfig = await resolvePaymentConfig(req);
+    return res.json({
+      payments_enabled: paymentConfig.payments_enabled,
+      key_id: paymentConfig.payments_enabled ? paymentConfig.key_id : "",
+      source: paymentConfig.source,
+      reason: paymentConfig.reason,
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message || "Failed to load payment configuration" });
+  }
 });
 
 router.post("/order", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
@@ -497,11 +500,16 @@ router.post("/subscription/verify", requireAuth, requireRegisteredUser, async (r
         ownedSubscription.billing_cycle
       );
 
+      // One-time adjustment subscriptions get cancelled after payment
+      const isAdjustment = (ownedSubscription.plan_name || "").includes("Adjustment");
+      const newStatus = isAdjustment ? "cancelled" : "active";
+      const newNextDate = isAdjustment ? ownedSubscription.next_payment_date : nextDue;
+
       const { error: updateSubscriptionError } = await supabaseAdmin
         .from("subscriptions")
         .update({
-          status: "active",
-          next_payment_date: nextDue,
+          status: newStatus,
+          next_payment_date: newNextDate,
         })
         .eq("id", selectedId)
         .eq("member_id", dashboard.member.id);
@@ -512,7 +520,7 @@ router.post("/subscription/verify", requireAuth, requireRegisteredUser, async (r
 
       updatedSubscriptions.push({
         subscription_id: selectedId,
-        next_payment_date: nextDue,
+        next_payment_date: newNextDate,
       });
 
       try {
@@ -521,13 +529,14 @@ router.post("/subscription/verify", requireAuth, requireRegisteredUser, async (r
           subscription_id: selectedId,
           event_type: "subscription_due_paid",
           status_before: ownedSubscription.status,
-          status_after: "active",
+          status_after: newStatus,
           amount: numericAmount,
           source: "payment_gateway",
           metadata: {
             paid_via: "pay_now",
-            next_payment_date: nextDue,
+            next_payment_date: newNextDate,
             transaction_id: razorpay_payment_id,
+            is_adjustment: isAdjustment,
           },
         });
       } catch {
@@ -553,8 +562,8 @@ router.get("/:paymentId/receipt", requireAuth, requireRegisteredUser, async (req
     }
 
     const paymentId = typeof req.params.paymentId === "string" ? req.params.paymentId.trim() : "";
-    if (!paymentId) {
-      return res.status(400).json({ error: "paymentId is required" });
+    if (!paymentId || !UUID_REGEX.test(paymentId)) {
+      return res.status(400).json({ error: "Invalid payment ID format" });
     }
 
     const dashboard = await getCurrentMemberDashboard(req);

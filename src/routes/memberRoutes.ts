@@ -15,6 +15,7 @@ import { isSuperAdminEmail } from "../middleware/requireSuperAdmin";
 import { logSuperAdminAudit } from "../utils/superAdminAudit";
 
 const router = Router();
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function resolveScopedChurchId(req: AuthRequest, requestedChurchId?: string) {
   if (!req.user) {
@@ -137,6 +138,9 @@ router.get("/:id", requireAuth, requireRegisteredUser, async (req: AuthRequest, 
     }
 
     const memberId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!memberId || !UUID_REGEX.test(memberId)) {
+      return res.status(400).json({ error: "Invalid member ID format" });
+    }
     const churchId = resolveScopedChurchId(req, String(req.query.church_id || ""));
     const member = await getMemberById(memberId, churchId || undefined);
     if (!member) {
@@ -160,6 +164,9 @@ router.get("/:id/delete-impact", requireAuth, requireRegisteredUser, async (req:
     }
 
     const memberId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!memberId || !UUID_REGEX.test(memberId)) {
+      return res.status(400).json({ error: "Invalid member ID format" });
+    }
     const churchId = resolveScopedChurchId(req, String(req.query.church_id || ""));
     if (!churchId) {
       return res.status(400).json({ error: "church_id is required" });
@@ -183,6 +190,9 @@ router.patch("/:id", requireAuth, requireRegisteredUser, async (req: AuthRequest
     }
 
     const memberId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!memberId || !UUID_REGEX.test(memberId)) {
+      return res.status(400).json({ error: "Invalid member ID format" });
+    }
     const churchId = resolveScopedChurchId(req, req.body?.church_id);
     if (!churchId) {
       return res.status(400).json({ error: "church_id is required" });
@@ -224,6 +234,9 @@ router.delete("/:id", requireAuth, requireRegisteredUser, async (req: AuthReques
     }
 
     const memberId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!memberId || !UUID_REGEX.test(memberId)) {
+      return res.status(400).json({ error: "Invalid member ID format" });
+    }
     const churchId = resolveScopedChurchId(req, req.body?.church_id || req.query.church_id);
     if (!churchId) {
       return res.status(400).json({ error: "church_id is required" });

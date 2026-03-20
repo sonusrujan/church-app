@@ -3,11 +3,18 @@ import type { Session } from "@supabase/supabase-js";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import {
   CalendarDays,
+  Church,
+  CreditCard,
   History,
   LayoutDashboard,
   LogOut,
   Shield,
+  ShieldCheck,
+  UserPlus,
   UserRound,
+  Users,
+  Activity,
+  ChevronRight,
 } from "lucide-react";
 import {
   AreaChart,
@@ -21,6 +28,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { apiRequest } from "./lib/api";
+import shalomLogo from "./assets/shalom-logo.png";
 import { hasSupabaseConfig, supabase } from "./lib/supabase";
 
 const mockGrowthData = [
@@ -429,6 +437,7 @@ function App() {
   const [superChurchEditLocation, setSuperChurchEditLocation] = useState("");
   const [superChurchEditPhone, setSuperChurchEditPhone] = useState("");
   const [superChurchDeleteImpact, setSuperChurchDeleteImpact] = useState<ChurchDeleteImpact | null>(null);
+  const [superChurchIncome, setSuperChurchIncome] = useState<IncomeSummary | null>(null);
   const [superPastorFromChurchId, setSuperPastorFromChurchId] = useState("");
   const [superPastorQuery, setSuperPastorQuery] = useState("");
   const [superPastorResults, setSuperPastorResults] = useState<PastorRow[]>([]);
@@ -455,6 +464,9 @@ function App() {
   const [selectedDueSubscriptionIds, setSelectedDueSubscriptionIds] = useState<string[]>([]);
   const [paymentsEnabled, setPaymentsEnabled] = useState(false);
   const [paymentConfigError, setPaymentConfigError] = useState("");
+  const [activeAdminTab, setActiveAdminTab] = useState<
+    "members" | "churches" | "pastors" | "admins" | "pre-register" | "roles" | "create-church" | "payments" | "events" | "activity"
+  >("members");
   const [showOperationConfirmModal, setShowOperationConfirmModal] = useState(false);
   const [operationConfirmTitle, setOperationConfirmTitle] = useState("");
   const [operationConfirmDescription, setOperationConfirmDescription] = useState("");
@@ -676,8 +688,15 @@ function App() {
       }
       return result;
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Request failed";
-      setNotice({ tone: "error", text: message });
+      const message = error instanceof Error ? error.message : "An unexpected error occurred.";
+      const isNetworkError = message.toLowerCase().includes("network") || message.toLowerCase().includes("timed out");
+      const isAuthError = message.toLowerCase().includes("session expired") || message.toLowerCase().includes("sign in");
+      if (isAuthError && supabase) {
+        await supabase.auth.signOut().catch(() => {});
+        setSession(null);
+        setAuthContext(null);
+      }
+      setNotice({ tone: "error", text: isNetworkError ? `${message} Check your connection.` : message });
       return null;
     } finally {
       setBusyKey("");
@@ -1212,8 +1231,15 @@ function App() {
       return;
     }
 
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (error) {
+        console.error("Failed to restore session:", error.message);
+        setNotice({ tone: "error", text: "Failed to restore your session. Please sign in again." });
+      }
       setSession(data.session);
+      setLoadingSession(false);
+    }).catch((err) => {
+      console.error("Supabase session error:", err);
       setLoadingSession(false);
     });
 
@@ -1442,19 +1468,32 @@ function App() {
   ]);
 
   async function signInWithGoogle() {
-    if (!supabase) return;
+    if (!supabase) {
+      setNotice({ tone: "error", text: "Authentication service is not configured. Contact your administrator." });
+      return;
+    }
     setBusyKey("login");
     setNotice({ tone: "neutral", text: "Redirecting to Google OAuth..." });
 
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: `${window.location.origin}/dashboard`,
-      },
-    });
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}/dashboard`,
+        },
+      });
 
-    if (error) {
-      setNotice({ tone: "error", text: error.message });
+      if (error) {
+        const msg = error.message.toLowerCase();
+        if (msg.includes("popup") || msg.includes("cancelled") || msg.includes("canceled")) {
+          setNotice({ tone: "neutral", text: "Sign-in was cancelled." });
+        } else {
+          setNotice({ tone: "error", text: `Sign-in failed: ${error.message}` });
+        }
+        setBusyKey("");
+      }
+    } catch (err) {
+      setNotice({ tone: "error", text: "Sign-in failed due to a network error. Please try again." });
       setBusyKey("");
     }
   }
@@ -1462,13 +1501,16 @@ function App() {
   async function signOut() {
     if (!supabase) return;
     setBusyKey("logout");
-    const { error } = await supabase.auth.signOut();
-    setBusyKey("");
-    if (error) {
-      setNotice({ tone: "error", text: error.message });
-      return;
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        console.error("Sign-out error:", error.message);
+      }
+    } catch (err) {
+      console.error("Sign-out exception:", err);
     }
-
+    // Always clear local state even if Supabase call failed
+    setBusyKey("");
     setSession(null);
     setAuthContext(null);
     setMemberDashboard(null);
@@ -1865,6 +1907,18 @@ function App() {
     setSuperChurchEditLocation(church.location || "");
     setSuperChurchEditPhone(church.contact_phone || "");
     setSuperChurchDeleteImpact(null);
+    setSuperChurchIncome(null);
+    loadSuperChurchIncome(church.id);
+  }
+
+  async function loadSuperChurchIncome(churchId: string) {
+    if (!isSuperAdmin || !churchId) return;
+    const summary = await withAuthRequest(
+      "super-church-income",
+      () => apiRequest<IncomeSummary>(`/api/admins/income?church_id=${encodeURIComponent(churchId)}`, { token }),
+      "Church income loaded."
+    );
+    if (summary) setSuperChurchIncome(summary);
   }
 
   async function superUpdateChurch() {
@@ -2500,7 +2554,7 @@ function App() {
           element={
             <div className="auth-shell">
               <section className="auth-card">
-                <p className="auth-eyebrow">SHALOM</p>
+                <img src={shalomLogo} alt="Shalom" className="auth-logo" />
                 <h1>Sign In</h1>
                 <p>
                   Continue with Google to access your profile and church workspace. Only registered
@@ -2559,10 +2613,10 @@ function App() {
 
   return (
     <div className={`app-layout ${workspaceToneClass}`}>
-      <aside className="sidebar">
+      <nav className="sidebar">
         <div className="brand-block">
-          <p className="auth-eyebrow">SHALOM</p>
-          <h2>{isSuperAdmin ? "Super Admin" : isChurchAdmin ? "Admin Workspace" : "Member Workspace"}</h2>
+          <img src={shalomLogo} alt="Shalom" className="nav-logo" />
+          <span className="brand-name">Shalom</span>
         </div>
         <nav className="nav-stack">
           <p className="nav-section-label">Main</p>
@@ -2626,7 +2680,7 @@ function App() {
             {busyKey === "logout" ? "Signing out..." : "Sign Out"}
           </span>
         </button>
-      </aside>
+      </nav>
 
       <main className="main-area">
         <header className="topbar">
@@ -2954,83 +3008,95 @@ function App() {
             path="/profile"
             element={
               <section className="page-grid">
-                <article className="panel profile-panel">
-                  <h3>Profile Settings</h3>
-                  <p className="muted">Update your profile details and keep your member info current.</p>
+                {/* ── Profile Header Card ── */}
+                <article className="panel panel-wide profile-header-card">
+                  <div className="profile-header">
+                    <div className="profile-avatar-lg">
+                      {authContext.profile.avatar_url ? (
+                        <img className="avatar avatar-lg" src={authContext.profile.avatar_url} alt={profileName || userEmail} />
+                      ) : (
+                        <div className="avatar avatar-lg avatar-fallback">{initials(profileName, userEmail)}</div>
+                      )}
+                    </div>
+                    <div className="profile-header-info">
+                      <h2>{profileName || userEmail}</h2>
+                      <span className="profile-role-badge">
+                        {isSuperAdmin ? "Super Admin" : isChurchAdmin ? "Admin" : "Member"}
+                      </span>
+                      <p className="muted">{authContext.profile.email}</p>
+                    </div>
+                  </div>
+                </article>
 
+                {/* ── Personal Details ── */}
+                <article className="panel">
+                  <h3>Personal Details</h3>
                   <div className="field-stack">
                     <label>
                       Full Name
                       <input
                         value={profileName}
-                        onChange={(event) => setProfileName(event.target.value)}
+                        onChange={(e) => setProfileName(e.target.value)}
                         placeholder="Your full name"
                       />
                     </label>
-
-                    <label>
-                      Profile Image URL
-                      <input
-                        value={profileAvatarUrl}
-                        onChange={(event) => setProfileAvatarUrl(event.target.value)}
-                        placeholder="https://example.com/avatar.jpg"
-                      />
-                    </label>
-
-                    <label>
-                      Address
-                      <textarea
-                        value={profileAddress}
-                        onChange={(event) => setProfileAddress(event.target.value)}
-                        placeholder="Kochi, Kerala"
-                      />
-                    </label>
-
                     <label>
                       Phone Number
                       <input
                         value={profilePhone}
-                        onChange={(event) => setProfilePhone(event.target.value)}
+                        onChange={(e) => setProfilePhone(e.target.value)}
                         placeholder="+91 9XXXXXXXXX"
                       />
                     </label>
-
                     <label>
-                      Alternate Phone Number
+                      Alternate Phone
                       <input
                         value={profileAltPhone}
-                        onChange={(event) => setProfileAltPhone(event.target.value)}
+                        onChange={(e) => setProfileAltPhone(e.target.value)}
                         placeholder="Optional alternate number"
                       />
                     </label>
-
-                    {!isSuperAdmin ? (
-                      <>
-                        <div className="actions-row">
-                          <button
-                            className="btn"
-                            type="button"
-                            onClick={() => setProfileSubscriptionEditable((current) => !current)}
-                          >
-                            {profileSubscriptionEditable ? "Lock Subscription" : "Edit Subscription"}
-                          </button>
-                        </div>
-                        <label>
-                          Monthly Subscription Amount
-                          <input
-                            type="number"
-                            min={200}
-                            step="1"
-                            value={profileSubscriptionAmount}
-                            onChange={(event) => setProfileSubscriptionAmount(event.target.value)}
-                            placeholder="Minimum 200"
-                            disabled={!profileSubscriptionEditable}
-                          />
-                        </label>
-                      </>
-                    ) : null}
+                    <label>
+                      Address
+                      <textarea
+                        value={profileAddress}
+                        onChange={(e) => setProfileAddress(e.target.value)}
+                        placeholder="Kochi, Kerala"
+                      />
+                    </label>
                   </div>
+                </article>
 
+                {/* ── Subscription ── */}
+                <article className="panel">
+                  <h3>Subscription</h3>
+                  {!isSuperAdmin ? (
+                    <div className="field-stack">
+                      <div className="actions-row">
+                        <button
+                          className="btn"
+                          type="button"
+                          onClick={() => setProfileSubscriptionEditable((c) => !c)}
+                        >
+                          {profileSubscriptionEditable ? "Lock Subscription" : "Edit Subscription"}
+                        </button>
+                      </div>
+                      <label>
+                        Monthly Amount
+                        <input
+                          type="number"
+                          min={200}
+                          step="1"
+                          value={profileSubscriptionAmount}
+                          onChange={(e) => setProfileSubscriptionAmount(e.target.value)}
+                          placeholder="Minimum 200"
+                          disabled={!profileSubscriptionEditable}
+                        />
+                      </label>
+                    </div>
+                  ) : (
+                    <p className="muted">Super admins do not have subscriptions.</p>
+                  )}
                   <div className="actions-row">
                     <button
                       className="btn btn-primary"
@@ -3042,44 +3108,22 @@ function App() {
                   </div>
                 </article>
 
-                <article className="panel">
-                  <h3>Preview</h3>
-                  <div className="user-badge preview-badge">
-                    {profileAvatarUrl.trim() ? (
-                      <img className="avatar" src={profileAvatarUrl} alt={profileName || userEmail} />
-                    ) : (
-                      <div className="avatar avatar-fallback">{initials(profileName, userEmail)}</div>
-                    )}
-                    <div>
-                      <strong>{profileName || userEmail}</strong>
-                      <span>{authContext.profile.email}</span>
-                      <span>{profilePhone || "Phone not set"}</span>
-                      <span>{profileAddress || "Address not set"}</span>
-                    </div>
-                  </div>
-                </article>
-
+                {/* ── Family Members ── */}
                 {!isSuperAdmin ? (
                   <article className="panel panel-wide">
                     <h3>Family Members</h3>
                     <div className="list-stack">
                       {memberDashboard?.family_members?.length ? (
-                        memberDashboard.family_members.map((familyMember) => (
-                          <div key={familyMember.id} className="list-item">
-                            <strong>{familyMember.full_name}</strong>
+                        memberDashboard.family_members.map((fm) => (
+                          <div key={fm.id} className="list-item">
+                            <strong>{fm.full_name}</strong>
                             <span>
-                              {familyMember.relation || "Relation not set"}
-                              {familyMember.gender ? ` | ${familyMember.gender}` : ""}
-                              {familyMember.age !== null && familyMember.age !== undefined
-                                ? ` | Age ${familyMember.age}`
-                                : ""}
+                              {fm.relation || "Relation not set"}
+                              {fm.gender ? ` | ${fm.gender}` : ""}
+                              {fm.age !== null && fm.age !== undefined ? ` | Age ${fm.age}` : ""}
                             </span>
-                            <span>
-                              DOB: {familyMember.dob ? formatDate(familyMember.dob) : "Not set"}
-                            </span>
-                            <span>
-                              Subscription: {familyMember.has_subscription ? "Enabled" : "Not enabled"}
-                            </span>
+                            <span>DOB: {fm.dob ? formatDate(fm.dob) : "Not set"}</span>
+                            <span>Subscription: {fm.has_subscription ? "Enabled" : "Not enabled"}</span>
                           </div>
                         ))
                       ) : (
@@ -3088,78 +3132,25 @@ function App() {
                     </div>
 
                     <div className="field-stack">
-                      <label>
-                        Name
-                        <input
-                          value={familyMemberName}
-                          onChange={(event) => setFamilyMemberName(event.target.value)}
-                          placeholder="Family member full name"
-                        />
-                      </label>
-                      <label>
-                        Gender
-                        <input
-                          value={familyMemberGender}
-                          onChange={(event) => setFamilyMemberGender(event.target.value)}
-                          placeholder="Male / Female / Other"
-                        />
-                      </label>
-                      <label>
-                        Relation
-                        <input
-                          value={familyMemberRelation}
-                          onChange={(event) => setFamilyMemberRelation(event.target.value)}
-                          placeholder="Spouse, Son, Daughter..."
-                        />
-                      </label>
-                      <label>
-                        Age
-                        <input
-                          type="number"
-                          min={0}
-                          step="1"
-                          value={familyMemberAge}
-                          onChange={(event) => setFamilyMemberAge(event.target.value)}
-                          placeholder="Age"
-                        />
-                      </label>
-                      <label>
-                        DOB
-                        <input
-                          type="date"
-                          value={familyMemberDob}
-                          onChange={(event) => setFamilyMemberDob(event.target.value)}
-                        />
-                      </label>
+                      <label>Name<input value={familyMemberName} onChange={(e) => setFamilyMemberName(e.target.value)} placeholder="Family member full name" /></label>
+                      <label>Gender<input value={familyMemberGender} onChange={(e) => setFamilyMemberGender(e.target.value)} placeholder="Male / Female / Other" /></label>
+                      <label>Relation<input value={familyMemberRelation} onChange={(e) => setFamilyMemberRelation(e.target.value)} placeholder="Spouse, Son, Daughter..." /></label>
+                      <label>Age<input type="number" min={0} step="1" value={familyMemberAge} onChange={(e) => setFamilyMemberAge(e.target.value)} placeholder="Age" /></label>
+                      <label>DOB<input type="date" value={familyMemberDob} onChange={(e) => setFamilyMemberDob(e.target.value)} /></label>
                       <label className="checkbox-line">
-                        <input
-                          type="checkbox"
-                          checked={familyMemberWithSubscription}
-                          onChange={(event) => setFamilyMemberWithSubscription(event.target.checked)}
-                        />
+                        <input type="checkbox" checked={familyMemberWithSubscription} onChange={(e) => setFamilyMemberWithSubscription(e.target.checked)} />
                         Add individual subscription on this family member
                       </label>
                       {familyMemberWithSubscription ? (
                         <label>
                           Subscription Amount
-                          <input
-                            type="number"
-                            min={1}
-                            step="1"
-                            value={familyMemberSubscriptionAmount}
-                            onChange={(event) => setFamilyMemberSubscriptionAmount(event.target.value)}
-                            placeholder="If empty, primary member amount is used"
-                          />
+                          <input type="number" min={1} step="1" value={familyMemberSubscriptionAmount} onChange={(e) => setFamilyMemberSubscriptionAmount(e.target.value)} placeholder="If empty, primary member amount is used" />
                         </label>
                       ) : null}
                     </div>
 
                     <div className="actions-row">
-                      <button
-                        className="btn"
-                        onClick={addFamilyMember}
-                        disabled={busyKey === "add-family-member"}
-                      >
+                      <button className="btn" onClick={addFamilyMember} disabled={busyKey === "add-family-member"}>
                         {busyKey === "add-family-member" ? "Adding..." : "+ Add Family Member"}
                       </button>
                     </div>
@@ -3365,768 +3356,522 @@ function App() {
             path="/admin-tools"
             element={
               isAdminUser ? (
-                <section className="page-grid" onClickCapture={handleAdminToolsActionConfirmCapture}>
-                  {isSuperAdmin ? (
-                    <article className="panel panel-wide">
-                      <h3>Super Admin Operation Tree</h3>
-                      <p className="muted">
-                        Structured controls for members, churches, pastors, and admins with safe-delete previews.
-                      </p>
+                <div className="admin-console" onClickCapture={handleAdminToolsActionConfirmCapture}>
+                  {/* ── Tree Navigation Sidebar ── */}
+                  <nav className="admin-tree-nav">
+                    <p className="admin-tree-title">Console</p>
 
-                      <div className="list-stack">
-                        <details className="list-item" open>
-                          <summary><strong>Member Operations</strong></summary>
-                          <div className="field-stack">
-                            <label>
-                              Church
-                              <select value={superMemberChurchId} onChange={(event) => setSuperMemberChurchId(event.target.value)}>
-                                <option value="">Select church</option>
-                                {churches.map((church) => (
-                                  <option key={church.id} value={church.id}>
-                                    {church.name} ({church.unique_id || church.church_code || church.id.slice(0, 8)})
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            <label>
-                              Search Member
-                              <input
-                                value={superMemberQuery}
-                                onChange={(event) => setSuperMemberQuery(event.target.value)}
-                                placeholder="Name, email, phone, membership id"
-                              />
-                            </label>
-                            <div className="actions-row">
-                              <button className="btn" onClick={superSearchMembers} disabled={busyKey === "super-members-search"}>
-                                {busyKey === "super-members-search" ? "Searching..." : "Search Members"}
-                              </button>
-                            </div>
+                    {isSuperAdmin ? (
+                      <>
+                        <p className="admin-tree-group">Operations</p>
+                        <button className={`admin-tree-item${activeAdminTab === "members" ? " active" : ""}`} onClick={() => setActiveAdminTab("members")}>
+                          <Users size={16} /> <span>Members</span> <ChevronRight size={14} className="admin-tree-arrow" />
+                        </button>
+                        <button className={`admin-tree-item${activeAdminTab === "churches" ? " active" : ""}`} onClick={() => setActiveAdminTab("churches")}>
+                          <Church size={16} /> <span>Churches</span> <ChevronRight size={14} className="admin-tree-arrow" />
+                        </button>
+                        <button className={`admin-tree-item${activeAdminTab === "pastors" ? " active" : ""}`} onClick={() => setActiveAdminTab("pastors")}>
+                          <UserRound size={16} /> <span>Pastors</span> <ChevronRight size={14} className="admin-tree-arrow" />
+                        </button>
+                        <button className={`admin-tree-item${activeAdminTab === "admins" ? " active" : ""}`} onClick={() => setActiveAdminTab("admins")}>
+                          <ShieldCheck size={16} /> <span>Admins</span> <ChevronRight size={14} className="admin-tree-arrow" />
+                        </button>
 
-                            <div className="list-stack">
-                              {superMemberResults.length ? (
-                                superMemberResults.slice(0, 8).map((member) => (
-                                  <div key={member.id} className="list-item">
-                                    <strong>{member.full_name}</strong>
-                                    <span>{member.email}</span>
-                                    <span>{member.membership_id || "No membership id"}</span>
-                                    <div className="actions-row">
-                                      <button className="btn" onClick={() => void superFetchMemberDetails(member.id)}>Fetch Details</button>
-                                    </div>
-                                  </div>
-                                ))
-                              ) : (
-                                <p className="muted empty-state">No member search results yet.</p>
-                              )}
-                            </div>
+                        <p className="admin-tree-group">Setup</p>
+                        <button className={`admin-tree-item${activeAdminTab === "create-church" ? " active" : ""}`} onClick={() => setActiveAdminTab("create-church")}>
+                          <Church size={16} /> <span>Create Church</span> <ChevronRight size={14} className="admin-tree-arrow" />
+                        </button>
+                        <button className={`admin-tree-item${activeAdminTab === "roles" ? " active" : ""}`} onClick={() => setActiveAdminTab("roles")}>
+                          <Shield size={16} /> <span>Role Management</span> <ChevronRight size={14} className="admin-tree-arrow" />
+                        </button>
+                        <button className={`admin-tree-item${activeAdminTab === "payments" ? " active" : ""}`} onClick={() => setActiveAdminTab("payments")}>
+                          <CreditCard size={16} /> <span>Payment Gateway</span> <ChevronRight size={14} className="admin-tree-arrow" />
+                        </button>
+                      </>
+                    ) : null}
 
-                            {superMemberSelectedId ? (
-                              <>
-                                <label>
-                                  Member Name
-                                  <input
-                                    value={superMemberEditName}
-                                    onChange={(event) => setSuperMemberEditName(event.target.value)}
-                                    placeholder="Member full name"
-                                  />
-                                </label>
-                                <label>
-                                  Verification Status
-                                  <input
-                                    value={superMemberEditStatus}
-                                    onChange={(event) => setSuperMemberEditStatus(event.target.value)}
-                                    placeholder="pending / verified"
-                                  />
-                                </label>
-                                <div className="actions-row">
-                                  <button className="btn" onClick={superUpdateMember} disabled={busyKey === "super-member-update"}>
-                                    {busyKey === "super-member-update" ? "Updating..." : "Update Member"}
-                                  </button>
-                                  <button className="btn" onClick={superPreviewMemberDelete} disabled={busyKey === "super-member-impact"}>
-                                    {busyKey === "super-member-impact" ? "Loading..." : "Preview Delete Impact"}
-                                  </button>
-                                  <button className="btn btn-danger" onClick={superDeleteMember} disabled={busyKey === "super-member-delete"}>
-                                    {busyKey === "super-member-delete" ? "Deleting..." : "Delete Member"}
-                                  </button>
-                                </div>
-                                {superMemberDeleteImpact ? (
-                                  <div className="notice notice-error">
-                                    Cascading impact: Family {superMemberDeleteImpact.family_members}, Subscriptions {superMemberDeleteImpact.subscriptions}, Payments {superMemberDeleteImpact.payments}
-                                  </div>
-                                ) : null}
-                              </>
-                            ) : null}
-                          </div>
-                        </details>
-
-                        <details className="list-item" open>
-                          <summary><strong>Church Operations</strong></summary>
-                          <div className="field-stack">
-                            <label>
-                              Search Church
-                              <input
-                                value={superChurchQuery}
-                                onChange={(event) => setSuperChurchQuery(event.target.value)}
-                                placeholder="Church name, code, location"
-                              />
-                            </label>
-                            <div className="actions-row">
-                              <button className="btn" onClick={superSearchChurches} disabled={busyKey === "super-church-search"}>
-                                {busyKey === "super-church-search" ? "Searching..." : "Search Churches"}
-                              </button>
-                            </div>
-
-                            <div className="list-stack">
-                              {superChurchResults.length ? (
-                                superChurchResults.slice(0, 8).map((church) => (
-                                  <div key={church.id} className="list-item">
-                                    <strong>{church.name}</strong>
-                                    <span>{church.unique_id || church.church_code || "No code"}</span>
-                                    <span>{church.location || "Location not set"}</span>
-                                    <div className="actions-row">
-                                      <button className="btn" onClick={() => superSelectChurch(church)}>Select Church</button>
-                                    </div>
-                                  </div>
-                                ))
-                              ) : (
-                                <p className="muted empty-state">No church search results yet.</p>
-                              )}
-                            </div>
-
-                            {superChurchSelectedId ? (
-                              <>
-                                <label>
-                                  Church Name
-                                  <input value={superChurchEditName} onChange={(event) => setSuperChurchEditName(event.target.value)} />
-                                </label>
-                                <label>
-                                  Address
-                                  <input value={superChurchEditAddress} onChange={(event) => setSuperChurchEditAddress(event.target.value)} />
-                                </label>
-                                <label>
-                                  Location
-                                  <input value={superChurchEditLocation} onChange={(event) => setSuperChurchEditLocation(event.target.value)} />
-                                </label>
-                                <label>
-                                  Contact Phone
-                                  <input value={superChurchEditPhone} onChange={(event) => setSuperChurchEditPhone(event.target.value)} />
-                                </label>
-                                <div className="actions-row">
-                                  <button className="btn" onClick={superUpdateChurch} disabled={busyKey === "super-church-update"}>
-                                    {busyKey === "super-church-update" ? "Updating..." : "Update Church"}
-                                  </button>
-                                  <button className="btn" onClick={superPreviewChurchDelete} disabled={busyKey === "super-church-impact"}>
-                                    {busyKey === "super-church-impact" ? "Loading..." : "Preview Delete Impact"}
-                                  </button>
-                                  <button className="btn btn-danger" onClick={superDeleteChurch} disabled={busyKey === "super-church-delete"}>
-                                    {busyKey === "super-church-delete" ? "Deleting..." : "Delete Church"}
-                                  </button>
-                                </div>
-                                {superChurchDeleteImpact ? (
-                                  <div className="notice notice-error">
-                                    Impact: Users {superChurchDeleteImpact.users}, Members {superChurchDeleteImpact.members}, Pastors {superChurchDeleteImpact.pastors}, Events {superChurchDeleteImpact.church_events}, Notifications {superChurchDeleteImpact.church_notifications}, Prayer Requests {superChurchDeleteImpact.prayer_requests}, Payments {superChurchDeleteImpact.payments}
-                                  </div>
-                                ) : null}
-                              </>
-                            ) : null}
-                          </div>
-                        </details>
-
-                        <details className="list-item" open>
-                          <summary><strong>Pastor Operations</strong></summary>
-                          <div className="field-stack">
-                            <label>
-                              Source Church
-                              <select value={superPastorFromChurchId} onChange={(event) => setSuperPastorFromChurchId(event.target.value)}>
-                                <option value="">Select church</option>
-                                {churches.map((church) => (
-                                  <option key={church.id} value={church.id}>
-                                    {church.name} ({church.unique_id || church.church_code || church.id.slice(0, 8)})
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            <label>
-                              Search Pastor
-                              <input
-                                value={superPastorQuery}
-                                onChange={(event) => setSuperPastorQuery(event.target.value)}
-                                placeholder="Name, phone, email"
-                              />
-                            </label>
-                            <div className="actions-row">
-                              <button className="btn" onClick={superSearchPastors} disabled={busyKey === "super-pastor-search"}>
-                                {busyKey === "super-pastor-search" ? "Searching..." : "Search Pastors"}
-                              </button>
-                            </div>
-
-                            <div className="list-stack">
-                              {superPastorResults.length ? (
-                                superPastorResults.slice(0, 8).map((pastor) => (
-                                  <div key={pastor.id} className="list-item">
-                                    <strong>{pastor.full_name}</strong>
-                                    <span>{pastor.phone_number}</span>
-                                    <span>{pastor.email || "No email"}</span>
-                                    <div className="actions-row">
-                                      <button className="btn" onClick={() => superSelectPastor(pastor)}>Select Pastor</button>
-                                    </div>
-                                  </div>
-                                ))
-                              ) : (
-                                <p className="muted empty-state">No pastor search results yet.</p>
-                              )}
-                            </div>
-
-                            {superPastorSelectedId ? (
-                              <>
-                                <label>
-                                  Pastor Name
-                                  <input value={superPastorEditName} onChange={(event) => setSuperPastorEditName(event.target.value)} />
-                                </label>
-                                <label>
-                                  Pastor Phone
-                                  <input value={superPastorEditPhone} onChange={(event) => setSuperPastorEditPhone(event.target.value)} />
-                                </label>
-                                <label>
-                                  Pastor Email
-                                  <input value={superPastorEditEmail} onChange={(event) => setSuperPastorEditEmail(event.target.value)} />
-                                </label>
-                                <label>
-                                  Transfer To Church
-                                  <select value={superPastorTargetChurchId} onChange={(event) => setSuperPastorTargetChurchId(event.target.value)}>
-                                    <option value="">Select target church</option>
-                                    {churches
-                                      .filter((church) => church.id !== superPastorFromChurchId)
-                                      .map((church) => (
-                                        <option key={church.id} value={church.id}>
-                                          {church.name} ({church.unique_id || church.church_code || church.id.slice(0, 8)})
-                                        </option>
-                                      ))}
-                                  </select>
-                                </label>
-                                <div className="actions-row">
-                                  <button className="btn" onClick={superUpdatePastor} disabled={busyKey === "super-pastor-update"}>
-                                    {busyKey === "super-pastor-update" ? "Updating..." : "Update Pastor"}
-                                  </button>
-                                  <button className="btn" onClick={superTransferPastor} disabled={busyKey === "super-pastor-transfer"}>
-                                    {busyKey === "super-pastor-transfer" ? "Transferring..." : "Transfer Pastor"}
-                                  </button>
-                                  <button className="btn btn-danger" onClick={superDeletePastor} disabled={busyKey === "super-pastor-delete"}>
-                                    {busyKey === "super-pastor-delete" ? "Deleting..." : "Delete Pastor"}
-                                  </button>
-                                </div>
-                              </>
-                            ) : null}
-                          </div>
-                        </details>
-
-                        <details className="list-item" open>
-                          <summary><strong>Admin Operations</strong></summary>
-                          <div className="field-stack">
-                            <label>
-                              Church Filter
-                              <select value={superAdminChurchId} onChange={(event) => setSuperAdminChurchId(event.target.value)}>
-                                <option value="">All churches</option>
-                                {churches.map((church) => (
-                                  <option key={church.id} value={church.id}>
-                                    {church.name} ({church.unique_id || church.church_code || church.id.slice(0, 8)})
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            <label>
-                              Search Admin
-                              <input
-                                value={superAdminQuery}
-                                onChange={(event) => setSuperAdminQuery(event.target.value)}
-                                placeholder="Name or email"
-                              />
-                            </label>
-                            <div className="actions-row">
-                              <button className="btn" onClick={superSearchAdmins} disabled={busyKey === "super-admin-search"}>
-                                {busyKey === "super-admin-search" ? "Searching..." : "Search Admins"}
-                              </button>
-                            </div>
-
-                            <div className="list-stack">
-                              {superAdminResults.length ? (
-                                superAdminResults.slice(0, 8).map((admin) => (
-                                  <div key={admin.id} className="list-item">
-                                    <strong>{admin.full_name || admin.email}</strong>
-                                    <span>{admin.email}</span>
-                                    <span>{admin.church_id || "No church"}</span>
-                                    <div className="actions-row">
-                                      <button className="btn" onClick={() => superSelectAdmin(admin)}>Select Admin</button>
-                                    </div>
-                                  </div>
-                                ))
-                              ) : (
-                                <p className="muted empty-state">No admin search results yet.</p>
-                              )}
-                            </div>
-
-                            {superAdminSelectedId ? (
-                              <>
-                                <label>
-                                  Admin Name
-                                  <input value={superAdminEditName} onChange={(event) => setSuperAdminEditName(event.target.value)} />
-                                </label>
-                                <label>
-                                  Assign Church
-                                  <select value={superAdminTargetChurchId} onChange={(event) => setSuperAdminTargetChurchId(event.target.value)}>
-                                    <option value="">Select church</option>
-                                    {churches.map((church) => (
-                                      <option key={church.id} value={church.id}>
-                                        {church.name} ({church.unique_id || church.church_code || church.id.slice(0, 8)})
-                                      </option>
-                                    ))}
-                                  </select>
-                                </label>
-                                <div className="actions-row">
-                                  <button className="btn" onClick={superUpdateAdmin} disabled={busyKey === "super-admin-update"}>
-                                    {busyKey === "super-admin-update" ? "Updating..." : "Update Admin"}
-                                  </button>
-                                  <button className="btn btn-danger" onClick={superDeleteAdmin} disabled={busyKey === "super-admin-delete"}>
-                                    {busyKey === "super-admin-delete" ? "Removing..." : "Remove Admin Role"}
-                                  </button>
-                                </div>
-                              </>
-                            ) : null}
-                          </div>
-                        </details>
-                      </div>
-                    </article>
-                  ) : null}
-
-                  <article className="panel">
-                    <h3>Pre-register Member</h3>
-                    <p className="muted">Create member access by email with optional profile details.</p>
-                    <div className="field-stack">
-                      <label>
-                        Member Email
-                        <input
-                          value={preRegEmail}
-                          onChange={(event) => setPreRegEmail(event.target.value)}
-                          placeholder="member@church.com"
-                        />
-                      </label>
-                      <label>
-                        Full Name
-                        <input
-                          value={preRegName}
-                          onChange={(event) => setPreRegName(event.target.value)}
-                          placeholder="Member Name"
-                        />
-                      </label>
-                      <label>
-                        Membership ID
-                        <input
-                          value={preRegMembershipId}
-                          onChange={(event) => setPreRegMembershipId(event.target.value)}
-                          placeholder="M-1003"
-                        />
-                      </label>
-                      <label>
-                        Address
-                        <input
-                          value={preRegAddress}
-                          onChange={(event) => setPreRegAddress(event.target.value)}
-                          placeholder="Kochi"
-                        />
-                      </label>
-                      <label>
-                        Subscription Amount
-                        <input
-                          value={preRegAmount}
-                          onChange={(event) => setPreRegAmount(event.target.value)}
-                          placeholder="500"
-                        />
-                      </label>
-                      {isSuperAdmin ? (
-                        <label>
-                          Church
-                          <select
-                            value={preRegChurchId}
-                            onChange={(event) => setPreRegChurchId(event.target.value)}
-                          >
-                            <option value="">Use your own church</option>
-                            {churches.map((church) => (
-                              <option key={church.id} value={church.id}>
-                                {church.name} ({church.unique_id || church.church_code || church.id.slice(0, 8)})
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      ) : null}
-                    </div>
-                    <button
-                      className="btn btn-primary"
-                      onClick={preRegisterMember}
-                      disabled={busyKey === "pre-register"}
-                    >
-                      {busyKey === "pre-register" ? "Saving..." : "Pre-register"}
+                    <p className="admin-tree-group">General</p>
+                    <button className={`admin-tree-item${activeAdminTab === "pre-register" ? " active" : ""}`} onClick={() => setActiveAdminTab("pre-register")}>
+                      <UserPlus size={16} /> <span>Pre-register</span> <ChevronRight size={14} className="admin-tree-arrow" />
                     </button>
-                  </article>
+                    <button className={`admin-tree-item${activeAdminTab === "events" ? " active" : ""}`} onClick={() => setActiveAdminTab("events")}>
+                      <CalendarDays size={16} /> <span>Events & Alerts</span> <ChevronRight size={14} className="admin-tree-arrow" />
+                    </button>
+                    <button className={`admin-tree-item${activeAdminTab === "activity" ? " active" : ""}`} onClick={() => setActiveAdminTab("activity")}>
+                      <Activity size={16} /> <span>Activity Log</span> <ChevronRight size={14} className="admin-tree-arrow" />
+                    </button>
+                  </nav>
 
-                  {isSuperAdmin ? (
-                    <article className="panel">
-                      <h3>Role Management</h3>
-                      <div className="field-stack">
-                        <label>
-                          Grant Email
-                          <input
-                            value={grantEmail}
-                            onChange={(event) => setGrantEmail(event.target.value)}
-                            placeholder="new-admin@church.com"
-                          />
-                        </label>
-                        <label>
-                          Grant Church
-                          <select value={grantChurchId} onChange={(event) => setGrantChurchId(event.target.value)}>
-                            <option value="">Use current church</option>
-                            {churches.map((church) => (
-                              <option key={church.id} value={church.id}>
-                                {church.name} ({church.unique_id || church.church_code || church.id.slice(0, 8)})
-                              </option>
-                            ))}
-                          </select>
-                        </label>
+                  {/* ── Content Area ── */}
+                  <section className="admin-content">
+
+                    {/* ═══ Member Operations ═══ */}
+                    {activeAdminTab === "members" && isSuperAdmin ? (
+                      <article className="panel">
+                        <h3>Member Operations</h3>
+                        <div className="field-stack">
+                          <label>
+                            Church
+                            <select value={superMemberChurchId} onChange={(e) => setSuperMemberChurchId(e.target.value)}>
+                              <option value="">Select church</option>
+                              {churches.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.unique_id || c.church_code || c.id.slice(0, 8)})</option>)}
+                            </select>
+                          </label>
+                          <label>
+                            Search Member
+                            <input value={superMemberQuery} onChange={(e) => setSuperMemberQuery(e.target.value)} placeholder="Name, email, phone, membership id" />
+                          </label>
+                          <div className="actions-row">
+                            <button className="btn" onClick={superSearchMembers} disabled={busyKey === "super-members-search"}>
+                              {busyKey === "super-members-search" ? "Searching..." : "Search Members"}
+                            </button>
+                          </div>
+                          <div className="list-stack">
+                            {superMemberResults.length ? (
+                              superMemberResults.slice(0, 8).map((m) => (
+                                <div key={m.id} className="list-item">
+                                  <strong>{m.full_name}</strong>
+                                  <span>{m.email}</span>
+                                  <span>{m.membership_id || "No membership id"}</span>
+                                  <div className="actions-row">
+                                    <button className="btn" onClick={() => void superFetchMemberDetails(m.id)}>Fetch Details</button>
+                                  </div>
+                                </div>
+                              ))
+                            ) : <p className="muted empty-state">No member search results yet.</p>}
+                          </div>
+                          {superMemberSelectedId ? (
+                            <>
+                              <label>Member Name<input value={superMemberEditName} onChange={(e) => setSuperMemberEditName(e.target.value)} placeholder="Member full name" /></label>
+                              <label>Verification Status<input value={superMemberEditStatus} onChange={(e) => setSuperMemberEditStatus(e.target.value)} placeholder="pending / verified" /></label>
+                              <div className="actions-row">
+                                <button className="btn" onClick={superUpdateMember} disabled={busyKey === "super-member-update"}>
+                                  {busyKey === "super-member-update" ? "Updating..." : "Update Member"}
+                                </button>
+                                <button className="btn" onClick={superPreviewMemberDelete} disabled={busyKey === "super-member-impact"}>
+                                  {busyKey === "super-member-impact" ? "Loading..." : "Preview Delete Impact"}
+                                </button>
+                                <button className="btn btn-danger" onClick={superDeleteMember} disabled={busyKey === "super-member-delete"}>
+                                  {busyKey === "super-member-delete" ? "Deleting..." : "Delete Member"}
+                                </button>
+                              </div>
+                              {superMemberDeleteImpact ? (
+                                <div className="notice notice-error">
+                                  Cascading impact: Family {superMemberDeleteImpact.family_members}, Subscriptions {superMemberDeleteImpact.subscriptions}, Payments {superMemberDeleteImpact.payments}
+                                </div>
+                              ) : null}
+                            </>
+                          ) : null}
+                        </div>
+                      </article>
+                    ) : null}
+
+                    {/* ═══ Church Operations ═══ */}
+                    {activeAdminTab === "churches" && isSuperAdmin ? (
+                      <article className="panel">
+                        <h3>Church Operations</h3>
+                        <div className="field-stack">
+                          <label>Search Church<input value={superChurchQuery} onChange={(e) => setSuperChurchQuery(e.target.value)} placeholder="Church name, code, location" /></label>
+                          <div className="actions-row">
+                            <button className="btn" onClick={superSearchChurches} disabled={busyKey === "super-church-search"}>
+                              {busyKey === "super-church-search" ? "Searching..." : "Search Churches"}
+                            </button>
+                          </div>
+                          <div className="list-stack">
+                            {superChurchResults.length ? (
+                              superChurchResults.slice(0, 8).map((c) => (
+                                <div key={c.id} className="list-item">
+                                  <strong>{c.name}</strong>
+                                  <span>{c.unique_id || c.church_code || "No code"}</span>
+                                  <span>{c.location || "Location not set"}</span>
+                                  <div className="actions-row"><button className="btn" onClick={() => superSelectChurch(c)}>Select Church</button></div>
+                                </div>
+                              ))
+                            ) : <p className="muted empty-state">No church search results yet.</p>}
+                          </div>
+                          {superChurchSelectedId ? (
+                            <>
+                              <label>Church Name<input value={superChurchEditName} onChange={(e) => setSuperChurchEditName(e.target.value)} /></label>
+                              <label>Address<input value={superChurchEditAddress} onChange={(e) => setSuperChurchEditAddress(e.target.value)} /></label>
+                              <label>Location<input value={superChurchEditLocation} onChange={(e) => setSuperChurchEditLocation(e.target.value)} /></label>
+                              <label>Contact Phone<input value={superChurchEditPhone} onChange={(e) => setSuperChurchEditPhone(e.target.value)} /></label>
+                              <div className="actions-row">
+                                <button className="btn" onClick={superUpdateChurch} disabled={busyKey === "super-church-update"}>
+                                  {busyKey === "super-church-update" ? "Updating..." : "Update Church"}
+                                </button>
+                                <button className="btn" onClick={superPreviewChurchDelete} disabled={busyKey === "super-church-impact"}>
+                                  {busyKey === "super-church-impact" ? "Loading..." : "Preview Delete Impact"}
+                                </button>
+                                <button className="btn btn-danger" onClick={superDeleteChurch} disabled={busyKey === "super-church-delete"}>
+                                  {busyKey === "super-church-delete" ? "Deleting..." : "Delete Church"}
+                                </button>
+                              </div>
+                              {superChurchDeleteImpact ? (
+                                <div className="notice notice-error">
+                                  Impact: Users {superChurchDeleteImpact.users}, Members {superChurchDeleteImpact.members}, Pastors {superChurchDeleteImpact.pastors}, Events {superChurchDeleteImpact.church_events}, Notifications {superChurchDeleteImpact.church_notifications}, Prayer Requests {superChurchDeleteImpact.prayer_requests}, Payments {superChurchDeleteImpact.payments}
+                                </div>
+                              ) : null}
+
+                              {/* ── Church Income Summary ── */}
+                              <h3 style={{ marginTop: '1.5rem' }}>Church Income</h3>
+                              {superChurchIncome ? (
+                                <>
+                                  <div className="stats-grid">
+                                    <div className="stat"><span>Daily</span><strong>{formatAmount(superChurchIncome.daily_income)}</strong></div>
+                                    <div className="stat"><span>Monthly</span><strong>{formatAmount(superChurchIncome.monthly_income)}</strong></div>
+                                    <div className="stat"><span>Yearly</span><strong>{formatAmount(superChurchIncome.yearly_income)}</strong></div>
+                                    <div className="stat"><span>Successful Payments</span><strong>{superChurchIncome.successful_payments_count || 0}</strong></div>
+                                  </div>
+                                  <div style={{ width: '100%', height: 260, marginTop: '1rem' }}>
+                                    <ResponsiveContainer>
+                                      <BarChart data={mockIncomeData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e8e8ed" opacity={0.5} />
+                                        <XAxis dataKey="day" stroke="#86868b" fontSize={12} tickLine={false} axisLine={false} />
+                                        <YAxis stroke="#86868b" fontSize={12} tickLine={false} axisLine={false} />
+                                        <Tooltip
+                                          cursor={{ fill: 'rgba(0, 0, 0, 0.02)' }}
+                                          contentStyle={{ backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #e8e8ed', boxShadow: '0 2px 10px rgba(0,0,0,0.06)' }}
+                                        />
+                                        <Bar dataKey="income" fill="#0071e3" radius={[4, 4, 0, 0]} />
+                                      </BarChart>
+                                    </ResponsiveContainer>
+                                  </div>
+                                </>
+                              ) : (
+                                <p className="muted">Loading income data...</p>
+                              )}
+                              <div className="actions-row">
+                                <button className="btn" onClick={() => loadSuperChurchIncome(superChurchSelectedId)} disabled={busyKey === "super-church-income"}>
+                                  {busyKey === "super-church-income" ? "Refreshing..." : "Refresh Income"}
+                                </button>
+                              </div>
+                            </>
+                          ) : null}
+                        </div>
+                      </article>
+                    ) : null}
+
+                    {/* ═══ Pastor Operations ═══ */}
+                    {activeAdminTab === "pastors" ? (
+                      <article className="panel">
+                        <h3>Pastors</h3>
+                        <div className="field-stack">
+                          {isSuperAdmin ? (
+                            <>
+                              <label>
+                                Source Church
+                                <select value={superPastorFromChurchId} onChange={(e) => setSuperPastorFromChurchId(e.target.value)}>
+                                  <option value="">Select church</option>
+                                  {churches.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.unique_id || c.church_code || c.id.slice(0, 8)})</option>)}
+                                </select>
+                              </label>
+                              <label>
+                                Search Pastor
+                                <input value={superPastorQuery} onChange={(e) => setSuperPastorQuery(e.target.value)} placeholder="Name, phone, email" />
+                              </label>
+                              <div className="actions-row">
+                                <button className="btn" onClick={superSearchPastors} disabled={busyKey === "super-pastor-search"}>
+                                  {busyKey === "super-pastor-search" ? "Searching..." : "Search Pastors"}
+                                </button>
+                              </div>
+                              <div className="list-stack">
+                                {superPastorResults.length ? (
+                                  superPastorResults.slice(0, 8).map((p) => (
+                                    <div key={p.id} className="list-item">
+                                      <strong>{p.full_name}</strong>
+                                      <span>{p.phone_number}</span>
+                                      <span>{p.email || "No email"}</span>
+                                      <div className="actions-row"><button className="btn" onClick={() => superSelectPastor(p)}>Select Pastor</button></div>
+                                    </div>
+                                  ))
+                                ) : <p className="muted empty-state">No pastor search results yet.</p>}
+                              </div>
+                              {superPastorSelectedId ? (
+                                <>
+                                  <label>Pastor Name<input value={superPastorEditName} onChange={(e) => setSuperPastorEditName(e.target.value)} /></label>
+                                  <label>Pastor Phone<input value={superPastorEditPhone} onChange={(e) => setSuperPastorEditPhone(e.target.value)} /></label>
+                                  <label>Pastor Email<input value={superPastorEditEmail} onChange={(e) => setSuperPastorEditEmail(e.target.value)} /></label>
+                                  <label>
+                                    Transfer To Church
+                                    <select value={superPastorTargetChurchId} onChange={(e) => setSuperPastorTargetChurchId(e.target.value)}>
+                                      <option value="">Select target church</option>
+                                      {churches.filter((c) => c.id !== superPastorFromChurchId).map((c) => (
+                                        <option key={c.id} value={c.id}>{c.name} ({c.unique_id || c.church_code || c.id.slice(0, 8)})</option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                  <div className="actions-row">
+                                    <button className="btn" onClick={superUpdatePastor} disabled={busyKey === "super-pastor-update"}>
+                                      {busyKey === "super-pastor-update" ? "Updating..." : "Update Pastor"}
+                                    </button>
+                                    <button className="btn" onClick={superTransferPastor} disabled={busyKey === "super-pastor-transfer"}>
+                                      {busyKey === "super-pastor-transfer" ? "Transferring..." : "Transfer Pastor"}
+                                    </button>
+                                    <button className="btn btn-danger" onClick={superDeletePastor} disabled={busyKey === "super-pastor-delete"}>
+                                      {busyKey === "super-pastor-delete" ? "Deleting..." : "Delete Pastor"}
+                                    </button>
+                                  </div>
+                                </>
+                              ) : null}
+                            </>
+                          ) : null}
+
+                          {/* Shared pastor add form (admin + super admin) */}
+                          <label>
+                            Church *
+                            <select
+                              value={isSuperAdmin ? pastorChurchId : authContext?.auth.church_id || ""}
+                              onChange={(e) => { if (isSuperAdmin) setPastorChurchId(e.target.value); }}
+                              disabled={!isSuperAdmin}
+                            >
+                              {isSuperAdmin ? <option value="">Select church</option> : null}
+                              {(isSuperAdmin ? churches : churches.slice(0, 1)).map((c) => (
+                                <option key={c.id} value={c.id}>{c.name} ({c.unique_id || c.church_code || c.id.slice(0, 8)})</option>
+                              ))}
+                              {!isSuperAdmin && !churches.length && authContext?.auth.church_id ? (
+                                <option value={authContext.auth.church_id}>Current Church</option>
+                              ) : null}
+                            </select>
+                          </label>
+                          {isSuperAdmin ? (
+                            <label>
+                              Transfer Target Church
+                              <select value={pastorTransferChurchId} onChange={(e) => setPastorTransferChurchId(e.target.value)}>
+                                <option value="">Select target church</option>
+                                {churches.filter((c) => c.id !== pastorChurchId).map((c) => (
+                                  <option key={c.id} value={c.id}>{c.name} ({c.unique_id || c.church_code || c.id.slice(0, 8)})</option>
+                                ))}
+                              </select>
+                            </label>
+                          ) : null}
+                          <label>Name<input value={pastorName} onChange={(e) => setPastorName(e.target.value)} placeholder="Pastor name" /></label>
+                          <label>Phone Number<input value={pastorPhone} onChange={(e) => setPastorPhone(e.target.value)} placeholder="+91..." /></label>
+                          <label>Email<input value={pastorEmail} onChange={(e) => setPastorEmail(e.target.value)} placeholder="pastor@church.com" /></label>
+                          <label>Details<textarea value={pastorDetails} onChange={(e) => setPastorDetails(e.target.value)} placeholder="Ministry details" /></label>
+                        </div>
                         <div className="actions-row">
-                          <button className="btn btn-primary" onClick={grantAdmin} disabled={busyKey === "grant"}>
-                            {busyKey === "grant" ? "Granting..." : "Grant Admin"}
+                          <button className="btn btn-primary" onClick={createPastorRecord} disabled={busyKey === "create-pastor"}>
+                            {busyKey === "create-pastor" ? "Adding..." : "Add Pastor"}
+                          </button>
+                          <button className="btn" onClick={loadPastors} disabled={busyKey === "pastors"}>
+                            {busyKey === "pastors" ? "Refreshing..." : "Refresh Pastors"}
                           </button>
                         </div>
-                        <label>
-                          Revoke Email
-                          <input
-                            value={revokeEmail}
-                            onChange={(event) => setRevokeEmail(event.target.value)}
-                            placeholder="remove-admin@church.com"
-                          />
-                        </label>
-                        <button className="btn btn-danger" onClick={revokeAdmin} disabled={busyKey === "revoke"}>
-                          {busyKey === "revoke" ? "Revoking..." : "Revoke Admin"}
-                        </button>
-                      </div>
-                    </article>
-                  ) : null}
-
-                  {isSuperAdmin ? (
-                    <article className="panel">
-                      <h3>Create Church</h3>
-                      <p className="muted">New churches get a generated 6-digit unique ID.</p>
-                      <div className="field-stack">
-                        <label>
-                          Church Name
-                          <input
-                            value={churchCreateName}
-                            onChange={(event) => setChurchCreateName(event.target.value)}
-                            placeholder="Shalom City Church"
-                          />
-                        </label>
-                        <label>
-                          Address
-                          <input
-                            value={churchCreateAddress}
-                            onChange={(event) => setChurchCreateAddress(event.target.value)}
-                            placeholder="Church address"
-                          />
-                        </label>
-                        <label>
-                          Location
-                          <input
-                            value={churchCreateLocation}
-                            onChange={(event) => setChurchCreateLocation(event.target.value)}
-                            placeholder="Kochi"
-                          />
-                        </label>
-                        <label>
-                          Contact Phone
-                          <input
-                            value={churchCreatePhone}
-                            onChange={(event) => setChurchCreatePhone(event.target.value)}
-                            placeholder="+91..."
-                          />
-                        </label>
-                        <label>
-                          Dedicated Admin Emails
-                          <input
-                            value={churchCreateAdmins}
-                            onChange={(event) => setChurchCreateAdmins(event.target.value)}
-                            placeholder="admin1@mail.com, admin2@mail.com"
-                          />
-                        </label>
-                      </div>
-                      <button
-                        className="btn btn-primary"
-                        onClick={createChurchRecord}
-                        disabled={busyKey === "create-church"}
-                      >
-                        {busyKey === "create-church" ? "Creating..." : "Create Church"}
-                      </button>
-                    </article>
-                  ) : null}
-
-                  <article className="panel">
-                    <h3>Pastors</h3>
-                    <div className="field-stack">
-                      <label>
-                        Church *
-                        <select
-                          value={isSuperAdmin ? pastorChurchId : authContext?.auth.church_id || ""}
-                          onChange={(event) => {
-                            if (isSuperAdmin) {
-                              setPastorChurchId(event.target.value);
-                            }
-                          }}
-                          disabled={!isSuperAdmin}
-                        >
-                          {isSuperAdmin ? <option value="">Select church</option> : null}
-                          {(isSuperAdmin ? churches : churches.slice(0, 1)).map((church) => (
-                            <option key={church.id} value={church.id}>
-                              {church.name} ({church.unique_id || church.church_code || church.id.slice(0, 8)})
-                            </option>
-                          ))}
-                          {!isSuperAdmin && !churches.length && authContext?.auth.church_id ? (
-                            <option value={authContext.auth.church_id}>Current Church</option>
-                          ) : null}
-                        </select>
-                      </label>
-
-                      {isSuperAdmin ? (
-                        <label>
-                          Transfer Target Church
-                          <select
-                            value={pastorTransferChurchId}
-                            onChange={(event) => setPastorTransferChurchId(event.target.value)}
-                          >
-                            <option value="">Select target church</option>
-                            {churches
-                              .filter((church) => church.id !== pastorChurchId)
-                              .map((church) => (
-                                <option key={church.id} value={church.id}>
-                                  {church.name} ({church.unique_id || church.church_code || church.id.slice(0, 8)})
-                                </option>
-                              ))}
-                          </select>
-                        </label>
-                      ) : null}
-
-                      <label>
-                        Name
-                        <input
-                          value={pastorName}
-                          onChange={(event) => setPastorName(event.target.value)}
-                          placeholder="Pastor name"
-                        />
-                      </label>
-                      <label>
-                        Phone Number
-                        <input
-                          value={pastorPhone}
-                          onChange={(event) => setPastorPhone(event.target.value)}
-                          placeholder="+91..."
-                        />
-                      </label>
-                      <label>
-                        Email
-                        <input
-                          value={pastorEmail}
-                          onChange={(event) => setPastorEmail(event.target.value)}
-                          placeholder="pastor@church.com"
-                        />
-                      </label>
-                      <label>
-                        Details
-                        <textarea
-                          value={pastorDetails}
-                          onChange={(event) => setPastorDetails(event.target.value)}
-                          placeholder="Ministry details"
-                        />
-                      </label>
-                    </div>
-                    <div className="actions-row">
-                      <button
-                        className="btn btn-primary"
-                        onClick={createPastorRecord}
-                        disabled={busyKey === "create-pastor"}
-                      >
-                        {busyKey === "create-pastor" ? "Adding..." : "Add Pastor"}
-                      </button>
-                      <button className="btn" onClick={loadPastors} disabled={busyKey === "pastors"}>
-                        {busyKey === "pastors" ? "Refreshing..." : "Refresh Pastors"}
-                      </button>
-                    </div>
-                    <div className="list-stack">
-                      {pastors.length ? (
-                        pastors.slice(0, 6).map((pastor) => (
-                          <div key={pastor.id} className="list-item">
-                            <strong>{pastor.full_name}</strong>
-                            <span>{pastor.phone_number}</span>
-                            <span>{pastor.email || "No email"}</span>
-                            <div className="actions-row">
-                              {isSuperAdmin ? (
-                                <button
-                                  className="btn"
-                                  onClick={() => void transferPastorRecord(pastor.id)}
-                                  disabled={busyKey === "transfer-pastor" || !pastorTransferChurchId}
-                                >
-                                  {busyKey === "transfer-pastor" ? "Transferring..." : "Transfer Pastor"}
-                                </button>
-                              ) : null}
-                              <button
-                                className="btn btn-danger"
-                                onClick={() => void deletePastorRecord(pastor.id)}
-                                disabled={busyKey === "delete-pastor"}
-                              >
-                                {busyKey === "delete-pastor" ? "Deleting..." : "Delete Pastor"}
-                              </button>
-                            </div>
-                          </div>
-                        ))
-                      ) : (
-                        <p className="muted empty-state">No pastors configured yet.</p>
-                      )}
-                    </div>
-                  </article>
-
-                  <article className="panel">
-                    <h3>Church Payment Gateway</h3>
-                    <p className="muted">Configure Razorpay credentials per church.</p>
-                    <div className="field-stack">
-                      {isSuperAdmin ? (
-                        <label>
-                          Church
-                          <select
-                            value={paymentConfigChurchId}
-                            onChange={(event) => setPaymentConfigChurchId(event.target.value)}
-                          >
-                            <option value="">Select church</option>
-                            {churches.map((church) => (
-                              <option key={church.id} value={church.id}>
-                                {church.name} ({church.unique_id || church.church_code || church.id.slice(0, 8)})
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      ) : null}
-
-                      <label className="checkbox-line">
-                        <input
-                          type="checkbox"
-                          checked={churchPaymentEnabled}
-                          onChange={(event) => setChurchPaymentEnabled(event.target.checked)}
-                        />
-                        Enable payments for this church
-                      </label>
-
-                      <label>
-                        Razorpay Key ID
-                        <input
-                          value={churchPaymentKeyId}
-                          onChange={(event) => setChurchPaymentKeyId(event.target.value)}
-                          placeholder="rzp_live_..."
-                        />
-                      </label>
-
-                      <label>
-                        Razorpay Key Secret
-                        <input
-                          type="password"
-                          value={churchPaymentKeySecret}
-                          onChange={(event) => setChurchPaymentKeySecret(event.target.value)}
-                          placeholder={churchPaymentHasSecret ? "Secret saved (enter only to rotate)" : "Paste key secret"}
-                        />
-                      </label>
-                    </div>
-
-                    <div className="actions-row">
-                      <button
-                        className="btn"
-                        onClick={() => void loadChurchPaymentSettings()}
-                        disabled={busyKey === "church-payment-config"}
-                      >
-                        {busyKey === "church-payment-config" ? "Loading..." : "Load Config"}
-                      </button>
-                      <button
-                        className="btn btn-primary"
-                        onClick={saveChurchPaymentSettings}
-                        disabled={busyKey === "save-church-payment-config" || !churchPaymentSchemaReady}
-                      >
-                        {busyKey === "save-church-payment-config" ? "Saving..." : "Save Payment Config"}
-                      </button>
-                    </div>
-
-                    {!churchPaymentSchemaReady ? (
-                      <p className="muted">Payment schema missing. Run db/shalom_expansion_migration.sql first.</p>
+                        <div className="list-stack">
+                          {pastors.length ? (
+                            pastors.slice(0, 6).map((p) => (
+                              <div key={p.id} className="list-item">
+                                <strong>{p.full_name}</strong>
+                                <span>{p.phone_number}</span>
+                                <span>{p.email || "No email"}</span>
+                                <div className="actions-row">
+                                  {isSuperAdmin ? (
+                                    <button className="btn" onClick={() => void transferPastorRecord(p.id)} disabled={busyKey === "transfer-pastor" || !pastorTransferChurchId}>
+                                      {busyKey === "transfer-pastor" ? "Transferring..." : "Transfer Pastor"}
+                                    </button>
+                                  ) : null}
+                                  <button className="btn btn-danger" onClick={() => void deletePastorRecord(p.id)} disabled={busyKey === "delete-pastor"}>
+                                    {busyKey === "delete-pastor" ? "Deleting..." : "Delete Pastor"}
+                                  </button>
+                                </div>
+                              </div>
+                            ))
+                          ) : <p className="muted empty-state">No pastors configured yet.</p>}
+                        </div>
+                      </article>
                     ) : null}
-                  </article>
 
-                  <article className="panel">
-                    <h3>Events & Notifications</h3>
-                    <div className="field-stack">
-                      <label>
-                        Event Title
-                        <input
-                          value={eventTitle}
-                          onChange={(event) => setEventTitle(event.target.value)}
-                          placeholder="Sunday Service"
-                        />
-                      </label>
-                      <label>
-                        Event Message
-                        <textarea
-                          value={eventMessage}
-                          onChange={(event) => setEventMessage(event.target.value)}
-                          placeholder="Event details"
-                        />
-                      </label>
-                      <label>
-                        Event Date
-                        <input
-                          type="datetime-local"
-                          value={eventDate}
-                          onChange={(event) => setEventDate(event.target.value)}
-                        />
-                      </label>
-                    </div>
-                    <div className="actions-row">
-                      <button className="btn btn-primary" onClick={postEvent} disabled={busyKey === "post-event"}>
-                        {busyKey === "post-event" ? "Posting..." : "Post Event"}
-                      </button>
-                    </div>
+                    {/* ═══ Admin Operations ═══ */}
+                    {activeAdminTab === "admins" && isSuperAdmin ? (
+                      <article className="panel">
+                        <h3>Admin Operations</h3>
+                        <div className="field-stack">
+                          <label>
+                            Church Filter
+                            <select value={superAdminChurchId} onChange={(e) => setSuperAdminChurchId(e.target.value)}>
+                              <option value="">All churches</option>
+                              {churches.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.unique_id || c.church_code || c.id.slice(0, 8)})</option>)}
+                            </select>
+                          </label>
+                          <label>Search Admin<input value={superAdminQuery} onChange={(e) => setSuperAdminQuery(e.target.value)} placeholder="Name or email" /></label>
+                          <div className="actions-row">
+                            <button className="btn" onClick={superSearchAdmins} disabled={busyKey === "super-admin-search"}>
+                              {busyKey === "super-admin-search" ? "Searching..." : "Search Admins"}
+                            </button>
+                          </div>
+                          <div className="list-stack">
+                            {superAdminResults.length ? (
+                              superAdminResults.slice(0, 8).map((a) => (
+                                <div key={a.id} className="list-item">
+                                  <strong>{a.full_name || a.email}</strong>
+                                  <span>{a.email}</span>
+                                  <span>{a.church_id || "No church"}</span>
+                                  <div className="actions-row"><button className="btn" onClick={() => superSelectAdmin(a)}>Select Admin</button></div>
+                                </div>
+                              ))
+                            ) : <p className="muted empty-state">No admin search results yet.</p>}
+                          </div>
+                          {superAdminSelectedId ? (
+                            <>
+                              <label>Admin Name<input value={superAdminEditName} onChange={(e) => setSuperAdminEditName(e.target.value)} /></label>
+                              <label>
+                                Assign Church
+                                <select value={superAdminTargetChurchId} onChange={(e) => setSuperAdminTargetChurchId(e.target.value)}>
+                                  <option value="">Select church</option>
+                                  {churches.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.unique_id || c.church_code || c.id.slice(0, 8)})</option>)}
+                                </select>
+                              </label>
+                              <div className="actions-row">
+                                <button className="btn" onClick={superUpdateAdmin} disabled={busyKey === "super-admin-update"}>
+                                  {busyKey === "super-admin-update" ? "Updating..." : "Update Admin"}
+                                </button>
+                                <button className="btn btn-danger" onClick={superDeleteAdmin} disabled={busyKey === "super-admin-delete"}>
+                                  {busyKey === "super-admin-delete" ? "Removing..." : "Remove Admin Role"}
+                                </button>
+                              </div>
+                            </>
+                          ) : null}
+                        </div>
+                      </article>
+                    ) : null}
 
-                    <div className="field-stack">
-                      <label>
-                        Notification Title
-                        <input
-                          value={notificationTitle}
-                          onChange={(event) => setNotificationTitle(event.target.value)}
-                          placeholder="Important Notice"
-                        />
-                      </label>
-                      <label>
-                        Notification Message
-                        <textarea
-                          value={notificationMessage}
-                          onChange={(event) => setNotificationMessage(event.target.value)}
-                          placeholder="Notification details"
-                        />
-                      </label>
-                    </div>
-                    <button
-                      className="btn btn-primary"
-                      onClick={postNotification}
-                      disabled={busyKey === "post-notification"}
-                    >
-                      {busyKey === "post-notification" ? "Posting..." : "Post Notification"}
-                    </button>
-                  </article>
+                    {/* ═══ Pre-register Member ═══ */}
+                    {activeAdminTab === "pre-register" ? (
+                      <article className="panel">
+                        <h3>Pre-register Member</h3>
+                        <p className="muted">Create member access by email with optional profile details.</p>
+                        <div className="field-stack">
+                          <label>Member Email<input value={preRegEmail} onChange={(e) => setPreRegEmail(e.target.value)} placeholder="member@church.com" /></label>
+                          <label>Full Name<input value={preRegName} onChange={(e) => setPreRegName(e.target.value)} placeholder="Member Name" /></label>
+                          <label>Membership ID<input value={preRegMembershipId} onChange={(e) => setPreRegMembershipId(e.target.value)} placeholder="M-1003" /></label>
+                          <label>Address<input value={preRegAddress} onChange={(e) => setPreRegAddress(e.target.value)} placeholder="Kochi" /></label>
+                          <label>Subscription Amount<input value={preRegAmount} onChange={(e) => setPreRegAmount(e.target.value)} placeholder="500" /></label>
+                          {isSuperAdmin ? (
+                            <label>
+                              Church
+                              <select value={preRegChurchId} onChange={(e) => setPreRegChurchId(e.target.value)}>
+                                <option value="">Use your own church</option>
+                                {churches.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.unique_id || c.church_code || c.id.slice(0, 8)})</option>)}
+                              </select>
+                            </label>
+                          ) : null}
+                        </div>
+                        <button className="btn btn-primary" onClick={preRegisterMember} disabled={busyKey === "pre-register"}>
+                          {busyKey === "pre-register" ? "Saving..." : "Pre-register"}
+                        </button>
+                      </article>
+                    ) : null}
 
-                  <article className="panel panel-wide">
-                    <h3>Activity Console</h3>
-                    {preRegResult ? <pre>{JSON.stringify(preRegResult, null, 2)}</pre> : <p className="muted empty-state">No pre-registration activity yet.</p>}
-                  </article>
-                </section>
+                    {/* ═══ Role Management ═══ */}
+                    {activeAdminTab === "roles" && isSuperAdmin ? (
+                      <article className="panel">
+                        <h3>Role Management</h3>
+                        <div className="field-stack">
+                          <label>Grant Email<input value={grantEmail} onChange={(e) => setGrantEmail(e.target.value)} placeholder="new-admin@church.com" /></label>
+                          <label>
+                            Grant Church
+                            <select value={grantChurchId} onChange={(e) => setGrantChurchId(e.target.value)}>
+                              <option value="">Use current church</option>
+                              {churches.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.unique_id || c.church_code || c.id.slice(0, 8)})</option>)}
+                            </select>
+                          </label>
+                          <div className="actions-row">
+                            <button className="btn btn-primary" onClick={grantAdmin} disabled={busyKey === "grant"}>
+                              {busyKey === "grant" ? "Granting..." : "Grant Admin"}
+                            </button>
+                          </div>
+                          <label>Revoke Email<input value={revokeEmail} onChange={(e) => setRevokeEmail(e.target.value)} placeholder="remove-admin@church.com" /></label>
+                          <button className="btn btn-danger" onClick={revokeAdmin} disabled={busyKey === "revoke"}>
+                            {busyKey === "revoke" ? "Revoking..." : "Revoke Admin"}
+                          </button>
+                        </div>
+                      </article>
+                    ) : null}
+
+                    {/* ═══ Create Church ═══ */}
+                    {activeAdminTab === "create-church" && isSuperAdmin ? (
+                      <article className="panel">
+                        <h3>Create Church</h3>
+                        <p className="muted">New churches get a generated 6-digit unique ID.</p>
+                        <div className="field-stack">
+                          <label>Church Name<input value={churchCreateName} onChange={(e) => setChurchCreateName(e.target.value)} placeholder="Shalom City Church" /></label>
+                          <label>Address<input value={churchCreateAddress} onChange={(e) => setChurchCreateAddress(e.target.value)} placeholder="Church address" /></label>
+                          <label>Location<input value={churchCreateLocation} onChange={(e) => setChurchCreateLocation(e.target.value)} placeholder="Kochi" /></label>
+                          <label>Contact Phone<input value={churchCreatePhone} onChange={(e) => setChurchCreatePhone(e.target.value)} placeholder="+91..." /></label>
+                          <label>Dedicated Admin Emails<input value={churchCreateAdmins} onChange={(e) => setChurchCreateAdmins(e.target.value)} placeholder="admin1@mail.com, admin2@mail.com" /></label>
+                        </div>
+                        <button className="btn btn-primary" onClick={createChurchRecord} disabled={busyKey === "create-church"}>
+                          {busyKey === "create-church" ? "Creating..." : "Create Church"}
+                        </button>
+                      </article>
+                    ) : null}
+
+                    {/* ═══ Payment Gateway ═══ */}
+                    {activeAdminTab === "payments" && isSuperAdmin ? (
+                      <article className="panel">
+                        <h3>Church Payment Gateway</h3>
+                        <p className="muted">Configure Razorpay credentials per church.</p>
+                        <div className="field-stack">
+                          <label>
+                            Church
+                            <select value={paymentConfigChurchId} onChange={(e) => setPaymentConfigChurchId(e.target.value)}>
+                              <option value="">Select church</option>
+                              {churches.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.unique_id || c.church_code || c.id.slice(0, 8)})</option>)}
+                            </select>
+                          </label>
+                          <label className="checkbox-line">
+                            <input type="checkbox" checked={churchPaymentEnabled} onChange={(e) => setChurchPaymentEnabled(e.target.checked)} />
+                            Enable payments for this church
+                          </label>
+                          <label>Razorpay Key ID<input value={churchPaymentKeyId} onChange={(e) => setChurchPaymentKeyId(e.target.value)} placeholder="rzp_live_..." /></label>
+                          <label>Razorpay Key Secret<input type="password" value={churchPaymentKeySecret} onChange={(e) => setChurchPaymentKeySecret(e.target.value)} placeholder={churchPaymentHasSecret ? "Secret saved (enter only to rotate)" : "Paste key secret"} /></label>
+                        </div>
+                        <div className="actions-row">
+                          <button className="btn" onClick={() => void loadChurchPaymentSettings()} disabled={busyKey === "church-payment-config"}>
+                            {busyKey === "church-payment-config" ? "Loading..." : "Load Config"}
+                          </button>
+                          <button className="btn btn-primary" onClick={saveChurchPaymentSettings} disabled={busyKey === "save-church-payment-config" || !churchPaymentSchemaReady}>
+                            {busyKey === "save-church-payment-config" ? "Saving..." : "Save Payment Config"}
+                          </button>
+                        </div>
+                        {!churchPaymentSchemaReady ? <p className="muted">Payment schema missing. Run db/shalom_expansion_migration.sql first.</p> : null}
+                      </article>
+                    ) : null}
+
+                    {/* ═══ Events & Notifications ═══ */}
+                    {activeAdminTab === "events" ? (
+                      <article className="panel">
+                        <h3>Events & Notifications</h3>
+                        <div className="field-stack">
+                          <label>Event Title<input value={eventTitle} onChange={(e) => setEventTitle(e.target.value)} placeholder="Sunday Service" /></label>
+                          <label>Event Message<textarea value={eventMessage} onChange={(e) => setEventMessage(e.target.value)} placeholder="Event details" /></label>
+                          <label>Event Date<input type="datetime-local" value={eventDate} onChange={(e) => setEventDate(e.target.value)} /></label>
+                        </div>
+                        <div className="actions-row">
+                          <button className="btn btn-primary" onClick={postEvent} disabled={busyKey === "post-event"}>
+                            {busyKey === "post-event" ? "Posting..." : "Post Event"}
+                          </button>
+                        </div>
+                        <div className="field-stack" style={{ marginTop: "1.5rem" }}>
+                          <label>Notification Title<input value={notificationTitle} onChange={(e) => setNotificationTitle(e.target.value)} placeholder="Important Notice" /></label>
+                          <label>Notification Message<textarea value={notificationMessage} onChange={(e) => setNotificationMessage(e.target.value)} placeholder="Notification details" /></label>
+                        </div>
+                        <button className="btn btn-primary" onClick={postNotification} disabled={busyKey === "post-notification"}>
+                          {busyKey === "post-notification" ? "Posting..." : "Post Notification"}
+                        </button>
+                      </article>
+                    ) : null}
+
+                    {/* ═══ Activity Log ═══ */}
+                    {activeAdminTab === "activity" ? (
+                      <article className="panel">
+                        <h3>Activity Console</h3>
+                        {preRegResult ? <pre>{JSON.stringify(preRegResult, null, 2)}</pre> : <p className="muted empty-state">No pre-registration activity yet.</p>}
+                      </article>
+                    ) : null}
+
+                  </section>
+                </div>
               ) : (
                 <Navigate to="/dashboard" replace />
               )

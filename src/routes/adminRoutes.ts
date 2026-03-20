@@ -61,6 +61,9 @@ router.get(
   async (req: AuthRequest, res) => {
     try {
       const adminId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      if (!adminId || !UUID_REGEX.test(adminId)) {
+        return res.status(400).json({ error: "Invalid admin ID format" });
+      }
       const admin = await getAdminById(adminId);
       if (!admin) {
         return res.status(404).json({ error: "Admin not found" });
@@ -80,6 +83,9 @@ router.patch(
   async (req: AuthRequest, res) => {
     try {
       const adminId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      if (!adminId || !UUID_REGEX.test(adminId)) {
+        return res.status(400).json({ error: "Invalid admin ID format" });
+      }
       const updated = await updateAdminById(adminId, {
         full_name: req.body?.full_name,
         church_id: req.body?.church_id,
@@ -105,6 +111,9 @@ router.delete(
   async (req: AuthRequest, res) => {
     try {
       const adminId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      if (!adminId || !UUID_REGEX.test(adminId)) {
+        return res.status(400).json({ error: "Invalid admin ID format" });
+      }
       const result = await removeAdminById(adminId);
       logSuperAdminAudit(req, "admin.role.remove", {
         admin_id: adminId,

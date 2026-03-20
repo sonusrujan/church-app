@@ -9,20 +9,32 @@ const router = Router();
 
 router.post("/create", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
   try {
-    const { member_id, plan_name, amount, billing_cycle, start_date, next_payment_date } = req.body;
+    const { member_id, plan_name, amount, billing_cycle } = req.body;
     if (!req.user) return res.status(401).json({ error: "Unauthenticated" });
 
     if (req.user.role !== "admin" && !isSuperAdminEmail(req.user.email)) {
       return res.status(403).json({ error: "Only admin can create subscriptions" });
     }
 
+    // Church subscriptions always start on the 5th of the month
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth();
+    const startDate = now.getDate() <= 5
+      ? new Date(year, month, 5)
+      : new Date(year, month + 1, 5);
+    const cycle = billing_cycle || "monthly";
+    const nextPaymentDate = cycle === "yearly"
+      ? new Date(startDate.getFullYear() + 1, startDate.getMonth(), 5)
+      : new Date(startDate.getFullYear(), startDate.getMonth() + 1, 5);
+
     const result = await createSubscription({
       member_id,
       plan_name,
       amount,
-      billing_cycle,
-      start_date,
-      next_payment_date,
+      billing_cycle: cycle,
+      start_date: startDate.toISOString().slice(0, 10),
+      next_payment_date: nextPaymentDate.toISOString().slice(0, 10),
     });
     return res.json(result);
   } catch (err: any) {

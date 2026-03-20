@@ -19,6 +19,7 @@ import {
 import { logSuperAdminAudit } from "../utils/superAdminAudit";
 
 const router = Router();
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function resolveScopedChurchId(req: AuthRequest, requestedChurchId?: string) {
   if (!req.user) {
@@ -96,6 +97,9 @@ router.get("/search", requireAuth, requireRegisteredUser, requireSuperAdmin, asy
 router.get("/id/:id", requireAuth, requireRegisteredUser, requireSuperAdmin, async (req: AuthRequest, res) => {
   try {
     const churchId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!churchId || !UUID_REGEX.test(churchId)) {
+      return res.status(400).json({ error: "Invalid church ID format" });
+    }
     const church = await getChurchById(churchId);
     if (!church) {
       return res.status(404).json({ error: "Church not found" });
@@ -137,6 +141,9 @@ router.post(
 router.patch("/id/:id", requireAuth, requireRegisteredUser, requireSuperAdmin, async (req: AuthRequest, res) => {
   try {
     const churchId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!churchId || !UUID_REGEX.test(churchId)) {
+      return res.status(400).json({ error: "Invalid church ID format" });
+    }
     const updated = await updateChurch(churchId, {
       name: req.body?.name,
       address: req.body?.address,
@@ -157,6 +164,9 @@ router.patch("/id/:id", requireAuth, requireRegisteredUser, requireSuperAdmin, a
 router.get("/id/:id/delete-impact", requireAuth, requireRegisteredUser, requireSuperAdmin, async (req: AuthRequest, res) => {
   try {
     const churchId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!churchId || !UUID_REGEX.test(churchId)) {
+      return res.status(400).json({ error: "Invalid church ID format" });
+    }
     const impact = await getChurchDeleteImpact(churchId);
     return res.json(impact);
   } catch (err: any) {
@@ -167,6 +177,9 @@ router.get("/id/:id/delete-impact", requireAuth, requireRegisteredUser, requireS
 router.delete("/id/:id", requireAuth, requireRegisteredUser, requireSuperAdmin, async (req: AuthRequest, res) => {
   try {
     const churchId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!churchId || !UUID_REGEX.test(churchId)) {
+      return res.status(400).json({ error: "Invalid church ID format" });
+    }
     const force =
       req.body?.force === true ||
       String(req.query.force || "").toLowerCase() === "true";

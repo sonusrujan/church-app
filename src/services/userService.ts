@@ -5,6 +5,7 @@ import {
   recordSubscriptionEvent,
   type SubscriptionEventRow,
 } from "./subscriptionTrackingService";
+import { createSubscription } from "./subscriptionService";
 import { buildPaymentReceiptDownloadPath } from "./receiptService";
 
 export interface SyncUserProfileInput {
@@ -680,13 +681,16 @@ export async function addFamilyMemberForCurrentUser(input: AddFamilyMemberInput)
 
   let subscription: SubscriptionRow | null = null;
   if (wantsSubscription) {
-    const startDate = new Date();
-    const nextDate = new Date(startDate);
-    if (billingCycle === "yearly") {
-      nextDate.setFullYear(nextDate.getFullYear() + 1);
-    } else {
-      nextDate.setMonth(nextDate.getMonth() + 1);
-    }
+    // Church subscriptions always start on the 5th of the month
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth();
+    const startDate = now.getDate() <= 5
+      ? new Date(year, month, 5)
+      : new Date(year, month + 1, 5);
+    const nextDate = billingCycle === "yearly"
+      ? new Date(startDate.getFullYear() + 1, startDate.getMonth(), 5)
+      : new Date(startDate.getFullYear(), startDate.getMonth() + 1, 5);
 
     const createdWithFamilyColumn = await supabaseAdmin
       .from("subscriptions")
@@ -888,6 +892,94 @@ export async function updateCurrentUserProfile(input: UpdateUserProfileInput) {
           { err: eventErr, memberId: memberRow.id },
           "updateCurrentUserProfile subscription amount event insert failed"
         );
+      }
+    }
+
+    // Auto-create or update subscription when amount is set
+    if (nextSubscriptionAmount && nextSubscriptionAmount >= 200) {
+      try {
+        const { data: existingSubs } = await supabaseAdmin
+          .from("subscriptions")
+          .select("id, status, amount, next_payment_date")
+          .eq("member_id", memberRow.id)
+          .is("family_member_id", null)
+          .in("status", ["active", "overdue"])
+          .limit(1);
+
+        if (!existingSubs || existingSubs.length === 0) {
+          // No active subscription — create one starting on the 5th, immediately due
+          const now = new Date();
+          const year = now.getFullYear();
+          const month = now.getMonth();
+          const startDate = now.getDate() <= 5
+            ? new Date(year, month, 5)
+            : new Date(year, month + 1, 5);
+          // Set next_payment_date = start_date so it shows as due immediately
+          await createSubscription({
+            member_id: memberRow.id,
+            plan_name: memberRow.full_name || input.full_name || "Monthly Subscription",
+            amount: nextSubscriptionAmount,
+            billing_cycle: "monthly",
+            start_date: startDate.toISOString().slice(0, 10),
+            next_payment_date: startDate.toISOString().slice(0, 10),
+            status: "overdue",
+          });
+          logger.info({ memberId: memberRow.id, amount: nextSubscriptionAmount }, "Auto-created overdue subscription from profile save");
+        } else {
+          // Existing active/overdue subscription — handle amount change
+          const sub = existingSubs[0] as { id: string; status: string; amount: number | string; next_payment_date: string };
+          const oldAmount = Number(sub.amount);
+          const newAmount = nextSubscriptionAmount;
+
+          if (Math.abs(oldAmount - newAmount) > 0.0001) {
+            const nextDue = new Date(sub.next_payment_date);
+            const now = new Date();
+            const alreadyPaidThisCycle = nextDue.getTime() > now.getTime() && sub.status === "active";
+
+            if (alreadyPaidThisCycle && newAmount > oldAmount) {
+              // Already paid this cycle at the old amount — create an adjustment due for the difference
+              const difference = newAmount - oldAmount;
+              const adjustmentDueDate = now.toISOString().slice(0, 10);
+
+              await supabaseAdmin.from("subscriptions").insert([{
+                member_id: memberRow.id,
+                plan_name: `${memberRow.full_name || "Subscription"} – Adjustment`,
+                amount: difference,
+                billing_cycle: "monthly",
+                start_date: adjustmentDueDate,
+                next_payment_date: adjustmentDueDate,
+                status: "overdue",
+              }]);
+              logger.info({ memberId: memberRow.id, difference, subscriptionId: sub.id }, "Created adjustment subscription for amount increase");
+            }
+
+            // Update the main subscription amount for future cycles
+            await supabaseAdmin
+              .from("subscriptions")
+              .update({ amount: newAmount })
+              .eq("id", sub.id);
+            logger.info({ memberId: memberRow.id, subscriptionId: sub.id, oldAmount, newAmount }, "Updated subscription amount from profile save");
+
+            try {
+              await recordSubscriptionEvent({
+                member_id: memberRow.id,
+                subscription_id: sub.id,
+                event_type: "subscription_amount_updated",
+                amount: newAmount,
+                source: "member",
+                metadata: {
+                  previous_amount: oldAmount,
+                  updated_amount: newAmount,
+                  adjustment_created: alreadyPaidThisCycle && newAmount > oldAmount,
+                },
+              });
+            } catch {
+              // Non-blocking
+            }
+          }
+        }
+      } catch (subErr) {
+        logger.warn({ err: subErr, memberId: memberRow.id }, "Auto-subscription creation/update failed");
       }
     }
   }

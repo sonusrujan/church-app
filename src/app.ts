@@ -80,6 +80,12 @@ app.use("/api/churches", churchRoutes);
 app.use("/api/pastors", pastorRoutes);
 app.use("/api/engagement", engagementRoutes);
 
+// 404 handler for unknown routes
+app.use((_req: express.Request, res: express.Response) => {
+  res.status(404).json({ error: "Route not found" });
+});
+
+// Global error handler
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   logger.error({ err }, "unhandled error");
   res.status(500).json({ error: "Internal server error" });
