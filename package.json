@@ -24,6 +24,7 @@
     "pino": "^10.3.1",
     "pino-http": "^11.0.0",
     "razorpay": "^2.9.6",
+    "recharts": "^3.8.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {

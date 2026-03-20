@@ -9,8 +9,38 @@ import {
   Shield,
   UserRound,
 } from "lucide-react";
+import {
+  AreaChart,
+  Area,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
 import { apiRequest } from "./lib/api";
 import { hasSupabaseConfig, supabase } from "./lib/supabase";
+
+const mockGrowthData = [
+  { month: "Jan", members: 120, attendance: 200 },
+  { month: "Feb", members: 135, attendance: 220 },
+  { month: "Mar", members: 160, attendance: 270 },
+  { month: "Apr", members: 190, attendance: 310 },
+  { month: "May", members: 210, attendance: 340 },
+  { month: "Jun", members: 250, attendance: 400 },
+];
+
+const mockIncomeData = [
+  { day: "Mon", income: 420 },
+  { day: "Tue", income: 380 },
+  { day: "Wed", income: 850 },
+  { day: "Thu", income: 300 },
+  { day: "Fri", income: 640 },
+  { day: "Sat", income: 1100 },
+  { day: "Sun", income: 3200 },
+];
 
 type ProfileRow = {
   id: string;
@@ -2661,6 +2691,37 @@ function App() {
                   </article>
 
                   <article className="panel">
+                    <h3>Growth Metrics</h3>
+                    <div style={{ width: '100%', height: 260 }}>
+                      <ResponsiveContainer>
+                        <AreaChart
+                          data={mockGrowthData}
+                          margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
+                        >
+                          <defs>
+                            <linearGradient id="colorMembers" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8}/>
+                              <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                            </linearGradient>
+                            <linearGradient id="colorAttendance" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#10b981" stopOpacity={0.8}/>
+                              <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                            </linearGradient>
+                          </defs>
+                          <XAxis dataKey="month" stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} />
+                          <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} />
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" opacity={0.5} />
+                          <Tooltip 
+                            contentStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.9)', borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
+                          />
+                          <Area type="monotone" dataKey="attendance" stroke="#10b981" fillOpacity={1} fill="url(#colorAttendance)" />
+                          <Area type="monotone" dataKey="members" stroke="#3b82f6" fillOpacity={1} fill="url(#colorMembers)" />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </article>
+
+                  <article className="panel">
                     <h3>Church Directory</h3>
                     <div className="list-stack">
                       {churches.length === 0 ? (
@@ -2737,6 +2798,22 @@ function App() {
                           <strong>{incomeSummary?.successful_payments_count || 0}</strong>
                         </div>
                       </div>
+
+                      <div style={{ width: '100%', height: 260, marginTop: '2rem', marginBottom: '1rem' }}>
+                        <ResponsiveContainer>
+                          <BarChart data={mockIncomeData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" opacity={0.5} />
+                            <XAxis dataKey="day" stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} />
+                            <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} />
+                            <Tooltip 
+                              cursor={{ fill: 'rgba(241, 245, 249, 0.5)' }}
+                              contentStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.9)', borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
+                            />
+                            <Bar dataKey="income" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+
                       <div className="actions-row">
                         <button className="btn" onClick={loadIncomeSummary} disabled={busyKey === "income"}>
                           {busyKey === "income" ? "Refreshing..." : "Refresh Income"}
