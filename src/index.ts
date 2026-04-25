@@ -745,9 +745,10 @@ async function runMigrations() {
             ON payments (transaction_id)
             WHERE transaction_id IS NOT NULL AND subscription_id IS NULL;
 
-          -- 2) Subscription reminder dedup (one per subscription+type per day)
+          -- 2) Subscription reminder dedup (one per subscription+type per UTC day)
+          -- date_trunc on timestamptz is STABLE; index expressions require IMMUTABLE.
           CREATE UNIQUE INDEX IF NOT EXISTS uq_subscription_reminders_daily
-            ON subscription_reminders (subscription_id, reminder_type, (date_trunc('day', sent_at)))
+            ON subscription_reminders (subscription_id, reminder_type, ((sent_at AT TIME ZONE 'UTC')::date))
             WHERE subscription_id IS NOT NULL;
 
           -- 3) Membership request approval race

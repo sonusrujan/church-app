@@ -338,33 +338,6 @@ function App() {
                         autoFocus
                       />
                     </label>
-                    <div className="otp-resend-row">
-                      {auth.otpResendIn > 0 ? (
-                        <span className="otp-resend-timer">
-                          {t("auth.otpResendIn", { seconds: auth.otpResendIn })}
-                        </span>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            className="link-btn"
-                            onClick={() => auth.sendOtp("sms")}
-                            disabled={busyKey === "login"}
-                          >
-                            {t("auth.otpResendSms")}
-                          </button>
-                          <button
-                            type="button"
-                            className="link-btn"
-                            onClick={() => auth.sendOtp("call")}
-                            disabled={busyKey === "login"}
-                          >
-                            {t("auth.otpResendCall")}
-                          </button>
-                        </>
-                      )}
-                    </div>
-                    <p className="otp-voice-hint">{t("auth.otpVoiceHint")}</p>
                     <div className="actions-row">
                       <button type="button" className="btn" onClick={() => { auth.setOtpStep("phone"); auth.setOtpInput(""); setNotice({ tone: "neutral", text: t("auth.enterPhonePrompt") }); }} disabled={busyKey === "login"}>
                         {t("auth.changeNumber")}

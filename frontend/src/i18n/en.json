@@ -106,11 +106,6 @@
     "dashboardRefreshed": "Member dashboard refreshed.",
     "confirmCheckboxRequired": "Please check the confirmation box to proceed.",
     "otpSentSuccess": "OTP sent! Check your phone and enter the code below.",
-    "otpVoiceSent": "We're calling you with the code. Please pick up the phone.",
-    "otpResendIn": "You can resend the code in {{seconds}}s",
-    "otpResendSms": "Resend OTP via SMS",
-    "otpResendCall": "Get OTP via call",
-    "otpVoiceHint": "Not getting the SMS? Wait for the timer, then ask us to call you with the code instead.",
     "signedOut": "You have been signed out.",
     "adminWorkspaceReady": "Welcome back. Admin workspace is ready.",
     "memberDashboardReady": "Welcome back. Member dashboard is ready.",
@@ -1800,30 +1795,7 @@
     "churchExtraControl": "Maintain complete control over member accounts."
   },
   "historyPage": {
-    "title": "Payment History",
-    "subtitle": "Subscription and donation activity for you and your family.",
-    "selectPerson": "Select person",
-    "allFamilyMembers": "All family members",
-    "monthAndYear": "Month / Type",
-    "status": "Status",
-    "paidAmount": "Amount",
-    "paidBy": "Paid by",
-    "paidDate": "Paid date",
-    "receipt": "Receipt",
-    "downloadBtn": "Download",
-    "noEntries": "No history yet.",
-    "goToDashboard": "Go to dashboard",
-    "errorLoadFailed": "Failed to load history.",
-    "errorDownloadReceiptFailed": "Failed to download receipt.",
-    "paginationInfo": "{{start}}–{{end}} of {{total}}",
-    "statusPaid": "Paid",
-    "statusImported": "Imported",
-    "statusUnpaid": "Unpaid",
-    "statusDonation": "Donation",
-    "donationLabel": "Donation",
-    "reportIssue": "Report issue",
-    "reportPlaceholder": "Describe the issue",
-    "reportSubmitted": "Report submitted."
+    "errorDownloadReceiptFailed": "Failed to download receipt."
   },
   "checkout": {
     "title": "Payment Summary",
@@ -1837,14 +1809,5 @@
   },
   "offline": {
     "message": "You are offline. Some features may be unavailable."
-  },
-  "churchPicker": {
-    "title": "Choose your church",
-    "subtitle": "You belong to multiple churches. Pick the one you'd like to manage.",
-    "searchPlaceholder": "Search churches…",
-    "noMatches": "No matching churches found.",
-    "unnamedChurch": "Unnamed Church",
-    "admin": "Admin",
-    "member": "Member"
   }
 }

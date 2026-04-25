@@ -28,9 +28,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_txn_nosub
 -- subscription+due_date+channel.
 -- ═══════════════════════════════════════════════════════════════════════════
 
--- Use date_trunc on sent_at to make "one reminder per subscription+type per day" unique.
+-- One reminder per subscription+type per UTC day. Use ((sent_at AT TIME ZONE 'UTC')::date)
+-- because date_trunc on timestamptz is STABLE, not IMMUTABLE, and Postgres rejects STABLE
+-- expressions in indexes.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_subscription_reminders_daily
-  ON subscription_reminders (subscription_id, reminder_type, (date_trunc('day', sent_at)))
+  ON subscription_reminders (subscription_id, reminder_type, ((sent_at AT TIME ZONE 'UTC')::date))
   WHERE subscription_id IS NOT NULL;
 
 -- ═══════════════════════════════════════════════════════════════════════════
