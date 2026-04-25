@@ -1,51 +1,157 @@
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
-import { Heart, Users, Eye, Award, ArrowLeft } from "lucide-react";
+import { useState, useEffect, useMemo } from "react";
+import { useNavigate, useSearchParams, Link } from "react-router-dom";
+import { Heart, Users, Eye, Award, ChevronRight, MapPin, Church, ExternalLink } from "lucide-react";
 import shalomLogo from "../assets/shalom-logo.png";
 import { useI18n } from "../i18n";
 import { isValidEmail } from "../types";
-import { API_BASE_URL } from "../lib/api";
+import { apiRequest } from "../lib/api";
 
 const PRESET_AMOUNTS = [100, 500, 1000, 2500, 5000, 10000];
-const DEFAULT_FUND_OPTIONS = [
-  "General Offering",
-  "Building Fund",
-  "Mission & Outreach",
-  "Youth Ministry",
-  "Community Aid",
-  "Other",
-];
 
-export default function PublicDonationPage({ isLoggedIn = false }: { isLoggedIn?: boolean }) {
+type FundOption = { name: string; description: string };
+
+type Diocese = { id: string; name: string };
+type ChurchItem = { id: string; name: string; location?: string | null };
+
+type Props = {
+  isLoggedIn?: boolean;
+  userChurch?: { id: string; name: string; platform_fee_enabled?: boolean; platform_fee_percentage?: number };
+};
+
+export default function PublicDonationPage({ isLoggedIn = false, userChurch }: Props) {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { t } = useI18n();
 
-  const [fundOptions, setFundOptions] = useState<string[]>(DEFAULT_FUND_OPTIONS);
+  // URL params for QR/link pre-fill
+  const urlChurchId = searchParams.get("church") || "";
+  const urlFund = searchParams.get("fund") || "";
+
+  // Diocese → Church browsing state
+  const [dioceses, setDioceses] = useState<Diocese[]>([]);
+  const [selectedDioceseId, setSelectedDioceseId] = useState("");
+  const [churches, setChurches] = useState<ChurchItem[]>([]);
+  const [loadingChurches, setLoadingChurches] = useState(false);
+
+  // Selected church
+  const [selectedChurchId, setSelectedChurchId] = useState(urlChurchId || userChurch?.id || "");
+  const [selectedChurchName, setSelectedChurchName] = useState(userChurch?.name || "");
+
+  const DEFAULT_FUND_OPTIONS: FundOption[] = useMemo(() => [
+    { name: t("donation.fundGeneralOffering"), description: "" },
+    { name: t("donation.fundBuildingFund"), description: "" },
+    { name: t("donation.fundMissionOutreach"), description: "" },
+    { name: t("donation.fundYouthMinistry"), description: "" },
+    { name: t("donation.fundCommunityAid"), description: "" },
+    { name: t("donation.fundOther"), description: "" },
+  ], [t]);
+
+  // Fund selection
+  const [fundOptions, setFundOptions] = useState<FundOption[]>([]);
+  const [fund, setFund] = useState(urlFund || t("donation.fundGeneralOffering"));
+
+  // Amount
   const [amount, setAmount] = useState("");
   const [customAmount, setCustomAmount] = useState("");
-  const [fund, setFund] = useState("");
+
+  // Donor info (all mandatory)
   const [donorName, setDonorName] = useState("");
   const [donorEmail, setDonorEmail] = useState("");
+  const [donorPhone, setDonorPhone] = useState("");
   const [emailWarning, setEmailWarning] = useState("");
   const [message, setMessage] = useState("");
 
-  // Fetch dynamic fund options
+  // Whether user pre-selected a church via URL or login
+  const isChurchPreSelected = !!(urlChurchId || userChurch?.id);
+  const [loadError, setLoadError] = useState("");
+
+  // Platform-configured public donation fee percentage
+  const [publicFeePercent, setPublicFeePercent] = useState(5);
+
+  // Fetch the superadmin-configured public donation fee on mount
   useEffect(() => {
-    fetch(`${API_BASE_URL}/api/donation-funds/public`)
-      .then((r) => (r.ok ? r.json() : DEFAULT_FUND_OPTIONS))
-      .then((data: string[]) => {
+    apiRequest<{ public_donation_fee_percent?: number }>("/api/payments/public/config")
+      .then((data) => {
+        if (data?.public_donation_fee_percent != null) {
+          setPublicFeePercent(Number(data.public_donation_fee_percent));
+        }
+      })
+      .catch(() => { /* default to 5% */ });
+  }, []);
+
+  // Initialize fund options from translated defaults
+  useEffect(() => {
+    if (!fundOptions.length) setFundOptions(DEFAULT_FUND_OPTIONS);
+  }, [DEFAULT_FUND_OPTIONS]);
+
+  // Fetch dioceses on mount (only if no pre-selected church)
+  useEffect(() => {
+    if (isChurchPreSelected) return;
+    apiRequest<Diocese[]>("/api/diocese/public-list")
+      .then((data) => {
+        if (Array.isArray(data)) setDioceses(data);
+      })
+      .catch(() => { setLoadError(t("errors.loadFailed") || "Failed to load. Please refresh."); });
+  }, [isChurchPreSelected]);
+
+  // Fetch churches when diocese is selected
+  useEffect(() => {
+    if (!selectedDioceseId) { setChurches([]); return; }
+    setLoadingChurches(true);
+    apiRequest<ChurchItem[]>(`/api/diocese/public-churches?diocese_id=${encodeURIComponent(selectedDioceseId)}`)
+      .then((data) => {
+        if (Array.isArray(data)) setChurches(data);
+      })
+      .catch(() => { setLoadError(t("errors.loadFailed") || "Failed to load. Please refresh."); })
+      .finally(() => setLoadingChurches(false));
+  }, [selectedDioceseId]);
+
+  // When URL has church param, resolve the actual church name from the API
+  useEffect(() => {
+    if (!urlChurchId || selectedChurchName) return;
+    // Set temporary placeholder while loading
+    setSelectedChurchName("...");
+    apiRequest<{ name: string }>(`/api/churches/public-info?church_id=${encodeURIComponent(urlChurchId)}`)
+      .then((data) => { if (data?.name) setSelectedChurchName(data.name); })
+      .catch(() => { setSelectedChurchName(t("donation.selectedChurch")); });
+  }, [urlChurchId, selectedChurchName]);
+
+  // Fetch funds when church is selected
+  useEffect(() => {
+    if (!selectedChurchId) return;
+    apiRequest<FundOption[]>(`/api/donation-funds/public?church_id=${encodeURIComponent(selectedChurchId)}`)
+      .then((data) => {
         if (Array.isArray(data) && data.length > 0) {
           setFundOptions(data);
-          setFund(data[0]);
+          const names = data.map((d) => d.name);
+          if (urlFund && names.includes(urlFund)) {
+            setFund(urlFund);
+          } else if (!fund || !names.includes(fund)) {
+            setFund(data[0].name);
+          }
         }
       })
       .catch(() => {
-        setFund(DEFAULT_FUND_OPTIONS[0]);
+        setFundOptions(DEFAULT_FUND_OPTIONS);
+        if (!fund) setFund(DEFAULT_FUND_OPTIONS[0].name);
       });
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedChurchId]);
 
   const selectedAmount = customAmount ? Number(customAmount) : Number(amount);
   const isValidAmount = Number.isFinite(selectedAmount) && selectedAmount > 0;
+  const isFormValid = useMemo(() => {
+    return (
+      !!selectedChurchId &&
+      isValidAmount &&
+      !!fund &&
+      !!donorName.trim() &&
+      !!donorEmail.trim() &&
+      isValidEmail(donorEmail.trim()) &&
+      !!donorPhone.trim() &&
+      donorPhone.trim().length >= 10
+    );
+  }, [selectedChurchId, isValidAmount, fund, donorName, donorEmail, donorPhone]);
 
   function handlePresetClick(value: number) {
     setAmount(String(value));
@@ -53,160 +159,289 @@ export default function PublicDonationPage({ isLoggedIn = false }: { isLoggedIn?
   }
 
   function handleCustomAmountChange(value: string) {
-    // Allow only numbers and one decimal point
     const cleaned = value.replace(/[^0-9.]/g, "").replace(/(\..*?)\..*/g, "$1");
     setCustomAmount(cleaned);
     setAmount("");
   }
 
+  function handleSelectChurch(church: ChurchItem) {
+    setSelectedChurchId(church.id);
+    setSelectedChurchName(church.name);
+  }
+
+  function handleChangeChurch() {
+    setSelectedChurchId("");
+    setSelectedChurchName("");
+    setSelectedDioceseId("");
+    setFundOptions(DEFAULT_FUND_OPTIONS);
+    setFund("");
+  }
+
   function handleContinue() {
-    if (!isValidAmount) return;
+    if (!isFormValid) return;
     const trimmedEmail = donorEmail.trim();
-    if (trimmedEmail && !isValidEmail(trimmedEmail)) {
-      setEmailWarning("Invalid email address");
+    if (!isValidEmail(trimmedEmail)) {
+      setEmailWarning(t("donation.invalidEmail"));
       return;
     }
+    // Logged-in members of the selected church use the church's configured fee.
+    // Public (unauthenticated) donors use the superadmin-configured platform fee.
+    const feeEnabled = isOwnChurchDonation && userChurch?.platform_fee_enabled !== undefined
+      ? !!userChurch.platform_fee_enabled
+      : true;
+    const feePct = isOwnChurchDonation && userChurch?.platform_fee_percentage !== undefined
+      ? Number(userChurch.platform_fee_percentage)
+      : publicFeePercent;
     navigate("/donate/checkout", {
       state: {
         amount: selectedAmount,
         fund,
+        churchId: selectedChurchId,
+        churchName: selectedChurchName,
         donorName: donorName.trim(),
-        donorEmail: donorEmail.trim(),
+        donorEmail: trimmedEmail,
+        donorPhone: donorPhone.trim(),
         message: message.trim(),
+        platformFeeEnabled: feeEnabled,
+        platformFeePercent: feePct,
       },
     });
   }
 
+  // Whether the user is in their own church context (not public browsing)
+  const isOwnChurchDonation = isLoggedIn && !!userChurch;
+
   return (
-    <div className="public-donation-shell">
-      {/* Nav bar */}
+    <div className={`public-donation-shell ${isOwnChurchDonation ? "church-donation-mode" : ""}`}>
+      {/* Nav bar — only for non-logged-in users */}
+      {!isLoggedIn && (
       <nav className="public-donation-nav">
         <div className="public-donation-nav-inner">
           <div className="public-donation-brand">
-            {isLoggedIn ? (
-              <button
-                className="public-donation-back-btn"
-                onClick={() => navigate("/dashboard")}
-                aria-label="Back to Dashboard"
-              >
-                <ArrowLeft size={20} />
-              </button>
-            ) : null}
             <img src={shalomLogo} alt="Shalom" className="public-donation-logo" />
             <span className="public-donation-brand-name">Shalom</span>
           </div>
-          <a href={isLoggedIn ? "/dashboard" : "/signin"} className="btn btn-ghost public-donation-signin-link">
-            {isLoggedIn ? t("donation.backToDashboard") : t("donation.signIn")}
+          <a href="/signin" className="btn btn-ghost public-donation-signin-link">
+            {t("donation.signIn")}
           </a>
         </div>
       </nav>
+      )}
 
-      {/* Hero */}
+      {/* Hero — only for public (non-logged-in) users */}
+      {!isOwnChurchDonation && (
       <section className="public-donation-hero">
         <div className="public-donation-hero-badge">
           <Heart size={16} />
           <span>{t("donation.giveWithPurpose")}</span>
         </div>
         <h1>{t("donation.supportMission")}</h1>
-        <p>
-          {t("donation.heroDescription")}
-        </p>
+        <p>{t("donation.heroDescription")}</p>
       </section>
+      )}
+
+      {/* Church header for logged-in users */}
+      {isOwnChurchDonation && (
+        <section className="church-donation-header">
+          <Church size={22} />
+          <div>
+            <h2>{t("donation.donateToYourChurch")}</h2>
+            <p className="muted">{selectedChurchName}</p>
+          </div>
+        </section>
+      )}
 
       {/* Donation Form */}
       <section className="public-donation-form-section">
-        {/* Step 1: Amount */}
-        <div className="public-donation-step">
-          <div className="public-donation-step-header">
-            <span className="public-donation-step-number">1</span>
-            <h2>{t("donation.chooseAmount")}</h2>
+
+        {loadError && (
+          <div className="notice notice-error" style={{ marginBottom: 16 }}>
+            {loadError}
+            <button className="btn btn-sm" style={{ marginLeft: 8 }} onClick={() => window.location.reload()}>{t("common.retry")}</button>
           </div>
-          <div className="public-donation-amount-grid">
-            {PRESET_AMOUNTS.map((val) => (
-              <button
-                key={val}
-                className={`public-donation-amount-btn ${amount === String(val) && !customAmount ? "selected" : ""}`}
-                onClick={() => handlePresetClick(val)}
-                type="button"
-              >
-                ₹{val.toLocaleString("en-IN")}
-              </button>
-            ))}
+        )}
+
+        {/* Step 1: Select Church (skip if pre-selected) */}
+        {!selectedChurchId ? (
+          <div className="public-donation-step">
+            <div className="public-donation-step-header">
+              <span className="public-donation-step-number">1</span>
+              <h2>{t("donation.selectChurch")}</h2>
+            </div>
+
+            {/* Diocese selector */}
+            <label className="public-donation-label">{t("donation.chooseDiocese")}</label>
+            <select
+              className="public-donation-select"
+              value={selectedDioceseId}
+              onChange={(e) => { setSelectedDioceseId(e.target.value); setSelectedChurchId(""); setSelectedChurchName(""); }}
+            >
+              <option value="">{t("donation.selectDiocesePlaceholder")}</option>
+              {dioceses.map((d) => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
+
+            {/* Churches list */}
+            {selectedDioceseId && (
+              <div className="public-donation-church-list">
+                {loadingChurches ? (
+                  <p className="public-donation-loading">{t("common.loading")}...</p>
+                ) : churches.length === 0 ? (
+                  <p className="public-donation-empty">{t("donation.noChurchesInDiocese")}</p>
+                ) : (
+                  churches.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      className="public-donation-church-card"
+                      onClick={() => handleSelectChurch(c)}
+                    >
+                      <div className="public-donation-church-info">
+                        <Church size={18} />
+                        <div>
+                          <strong>{c.name}</strong>
+                          {c.location && <span className="public-donation-church-loc"><MapPin size={12} /> {c.location}</span>}
+                        </div>
+                      </div>
+                      <ChevronRight size={18} />
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
           </div>
-          <div className="public-donation-custom-amount">
-            <span className="public-donation-currency-symbol">₹</span>
-            <input
-              type="text"
-              inputMode="decimal"
-              placeholder={t("donation.enterCustomAmount")}
-              value={customAmount}
-              onChange={(e) => handleCustomAmountChange(e.target.value)}
-              maxLength={10}
-            />
+        ) : (
+          /* Church selected — show summary with change option */
+          <div className="public-donation-step public-donation-step-done">
+            <div className="public-donation-step-header">
+              <span className="public-donation-step-number public-donation-step-check">✓</span>
+              <h2>{t("donation.churchSelected")}</h2>
+            </div>
+            <div className="public-donation-selected-church">
+              <Church size={18} />
+              <strong>{selectedChurchName}</strong>
+              {!isChurchPreSelected && (
+                <button type="button" className="btn btn-ghost btn-sm" onClick={handleChangeChurch}>
+                  {t("common.change")}
+                </button>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Step 2: Fund */}
-        <div className="public-donation-step">
-          <div className="public-donation-step-header">
-            <span className="public-donation-step-number">2</span>
-            <h2>{t("donation.selectFund")}</h2>
+        {selectedChurchId && (
+          <div className="public-donation-step">
+            <div className="public-donation-step-header">
+              <span className="public-donation-step-number">2</span>
+              <h2>{t("donation.selectFund")}</h2>
+            </div>
+            <select
+              className="public-donation-select"
+              value={fund}
+              onChange={(e) => setFund(e.target.value)}
+            >
+              {fundOptions.map((f) => (
+                <option key={f.name} value={f.name}>{f.name}</option>
+              ))}
+            </select>
+            {(() => { const sel = fundOptions.find((f) => f.name === fund); return sel?.description ? <p className="muted" style={{ fontSize: "0.85rem", marginTop: "0.5rem" }}>{sel.description}</p> : null; })()}
           </div>
-          <select
-            className="public-donation-select"
-            value={fund}
-            onChange={(e) => setFund(e.target.value)}
-          >
-            {fundOptions.map((f) => (
-              <option key={f} value={f}>{f}</option>
-            ))}
-          </select>
-        </div>
+        )}
 
-        {/* Step 3: Donor Info */}
-        <div className="public-donation-step">
-          <div className="public-donation-step-header">
-            <span className="public-donation-step-number">3</span>
-            <h2>{t("donation.yourInfo")} <span className="public-donation-optional">({t("common.optional")})</span></h2>
+        {/* Step 3: Amount */}
+        {selectedChurchId && fund && (
+          <div className="public-donation-step">
+            <div className="public-donation-step-header">
+              <span className="public-donation-step-number">3</span>
+              <h2>{t("donation.chooseAmount")}</h2>
+            </div>
+            <div className="public-donation-amount-grid">
+              {PRESET_AMOUNTS.map((val) => (
+                <button
+                  key={val}
+                  className={`public-donation-amount-btn ${amount === String(val) && !customAmount ? "selected" : ""}`}
+                  onClick={() => handlePresetClick(val)}
+                  type="button"
+                >
+                  ₹{val.toLocaleString("en-IN")}
+                </button>
+              ))}
+            </div>
+            <div className="public-donation-custom-amount">
+              <span className="public-donation-currency-symbol">₹</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder={t("donation.enterCustomAmount")}
+                value={customAmount}
+                onChange={(e) => handleCustomAmountChange(e.target.value)}
+                maxLength={10}
+              />
+            </div>
           </div>
-          <div className="public-donation-fields">
-            <input
-              type="text"
-              placeholder={t("donation.fullName")}
-              value={donorName}
-              onChange={(e) => setDonorName(e.target.value)}
-              maxLength={200}
-            />
-            <input
-              type="email"
-              placeholder={t("donation.emailAddress")}
-              value={donorEmail}
-              onChange={(e) => { setDonorEmail(e.target.value); if (emailWarning) setEmailWarning(""); }}
-              onBlur={() => { const v = donorEmail.trim(); if (v && !isValidEmail(v)) setEmailWarning("Invalid email address"); else setEmailWarning(""); }}
-              maxLength={254}
-            />
-            {emailWarning && <span className="field-error">{emailWarning}</span>}
-            <textarea
-              placeholder={t("donation.leaveMsgPlaceholder")}
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              maxLength={500}
-              rows={3}
-            />
+        )}
+
+        {/* Step 4: Donor Info (all mandatory) */}
+        {selectedChurchId && fund && isValidAmount && (
+          <div className="public-donation-step">
+            <div className="public-donation-step-header">
+              <span className="public-donation-step-number">4</span>
+              <h2>{t("donation.yourInfo")} <span style={{ color: "#e53e3e", fontSize: "0.85em" }}>*</span></h2>
+            </div>
+            <div className="public-donation-fields">
+              <input
+                type="text"
+                placeholder={t("donation.fullName") + " *"}
+                value={donorName}
+                onChange={(e) => setDonorName(e.target.value)}
+                maxLength={200}
+                required
+              />
+              <input
+                type="email"
+                placeholder={t("donation.emailAddress") + " *"}
+                value={donorEmail}
+                onChange={(e) => { setDonorEmail(e.target.value); if (emailWarning) setEmailWarning(""); }}
+                onBlur={() => { const v = donorEmail.trim(); if (v && !isValidEmail(v)) setEmailWarning(t("donation.invalidEmail")); else setEmailWarning(""); }}
+                maxLength={254}
+                required
+              />
+              {emailWarning && <span className="field-error">{emailWarning}</span>}
+              <input
+                type="tel"
+                placeholder={t("donation.phoneNumber") + " *"}
+                value={donorPhone}
+                onChange={(e) => setDonorPhone(e.target.value.replace(/[^0-9+\- ]/g, ""))}
+                maxLength={20}
+                required
+              />
+              <textarea
+                placeholder={t("donation.leaveMsgPlaceholder")}
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                maxLength={500}
+                rows={3}
+              />
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Continue Button */}
-        <button
-          className="btn btn-primary public-donation-continue-btn"
-          onClick={handleContinue}
-          disabled={!isValidAmount}
-        >
-          {t("donation.continueToPayment")} — ₹{isValidAmount ? selectedAmount.toLocaleString("en-IN") : "0"}
-        </button>
+        {selectedChurchId && (
+          <button
+            className="btn btn-primary public-donation-continue-btn"
+            onClick={handleContinue}
+            disabled={!isFormValid}
+          >
+            {t("donation.continueToPayment")} — ₹{isValidAmount ? selectedAmount.toLocaleString("en-IN") : "0"}
+          </button>
+        )}
       </section>
 
-      {/* Trust Badges */}
+      {/* Trust Badges — only for public users */}
+      {!isOwnChurchDonation && (
       <section className="public-donation-trust">
         <div className="public-donation-trust-item">
           <Users size={20} />
@@ -230,6 +465,17 @@ export default function PublicDonationPage({ isLoggedIn = false }: { isLoggedIn?
           </div>
         </div>
       </section>
+      )}
+
+      {/* Link to public donation page for logged-in users */}
+      {isOwnChurchDonation && (
+        <section className="church-donation-public-link">
+          <Link to="/donate/public" className="btn btn-ghost">
+            <ExternalLink size={16} />
+            {t("donation.donateToAnotherChurch")}
+          </Link>
+        </section>
+      )}
 
       {/* Footer */}
       <footer className="public-donation-footer">

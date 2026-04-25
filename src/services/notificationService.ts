@@ -1,10 +1,10 @@
-import { db, rawQuery } from "./dbClient";
+import { db, rawQuery, getClient } from "./dbClient";
 import { logger } from "../utils/logger";
 import { enqueueJob } from "./jobQueueService";
 // AWS SNS imports — kept for future use
 // import { SNSClient, PublishCommand } from "@aws-sdk/client-sns";
 import Twilio from "twilio";
-import { AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, APP_NAME, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_MESSAGING_SERVICE_SID } from "../config";
+import { AWS_REGION, APP_NAME, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_MESSAGING_SERVICE_SID } from "../config";
 import webpush from "web-push";
 import https from "https";
 import net from "net";
@@ -82,46 +82,61 @@ export interface SendNotificationInput {
 
 /**
  * Queue a notification for async delivery.
+ * Uses a transaction to ensure delivery record + job are created atomically.
  */
 export async function queueNotification(input: SendNotificationInput): Promise<string> {
-  // Record in notification_deliveries table
-  const { data: delivery, error } = await db
-    .from("notification_deliveries")
-    .insert({
-      church_id: input.church_id,
-      recipient_user_id: input.recipient_user_id || null,
-      recipient_phone: input.recipient_phone || null,
-      recipient_email: input.recipient_email || null,
-      channel: input.channel,
-      notification_type: input.notification_type,
-      subject: input.subject || null,
-      body: input.body,
-      status: "pending",
-      metadata: input.metadata || {},
-    })
-    .select("id")
-    .single<{ id: string }>();
+  const client = await getClient();
+  try {
+    await client.query("BEGIN");
 
-  if (error) {
-    logger.error({ err: error }, "queueNotification failed");
-    throw error;
+    // Insert notification_deliveries record
+    const deliveryResult = await client.query(
+      `INSERT INTO notification_deliveries
+       (church_id, recipient_user_id, recipient_phone, recipient_email, channel, notification_type, subject, body, status, metadata)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9)
+       RETURNING id`,
+      [
+        input.church_id,
+        input.recipient_user_id || null,
+        input.recipient_phone || null,
+        input.recipient_email || null,
+        input.channel,
+        input.notification_type,
+        input.subject || null,
+        input.body,
+        JSON.stringify(input.metadata || {}),
+      ]
+    );
+    const deliveryId = deliveryResult.rows[0].id as string;
+
+    // Insert job_queue record in the same transaction
+    const jobType = input.channel === "email" ? "send_email" : input.channel === "sms" ? "send_sms" : "send_push";
+    await client.query(
+      `INSERT INTO job_queue (job_type, payload, scheduled_for, max_attempts, status, attempts)
+       VALUES ($1, $2, NOW(), 3, 'pending', 0)`,
+      [
+        jobType,
+        JSON.stringify({
+          delivery_id: deliveryId,
+          channel: input.channel,
+          to: input.recipient_email || input.recipient_phone || "",
+          recipient_user_id: input.recipient_user_id || "",
+          subject: input.subject || "",
+          body: input.body,
+          url: (input.metadata?.url as string) || "",
+        }),
+      ]
+    );
+
+    await client.query("COMMIT");
+    return deliveryId;
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    logger.error({ err }, "queueNotification failed");
+    throw err;
+  } finally {
+    client.release();
   }
-
-  // Enqueue a job for async delivery
-  await enqueueJob({
-    job_type: input.channel === "email" ? "send_email" : input.channel === "sms" ? "send_sms" : "send_push",
-    payload: {
-      delivery_id: delivery.id,
-      channel: input.channel,
-      to: input.recipient_email || input.recipient_phone || "",
-      recipient_user_id: input.recipient_user_id || "",
-      subject: input.subject || "",
-      body: input.body,
-      url: (input.metadata?.url as string) || "",
-    },
-  });
-
-  return delivery.id;
 }
 
 /**
@@ -282,43 +297,66 @@ export async function notifyChurchMembers(input: {
     return { queued: 0 };
   }
 
-  // Batch insert all deliveries at once
+  // Batch insert all deliveries + jobs atomically per batch
   const BATCH_SIZE = 500;
   for (let i = 0; i < deliveryRows.length; i += BATCH_SIZE) {
     const batch = deliveryRows.slice(i, i + BATCH_SIZE);
     const jobBatch = jobRows.slice(i, i + BATCH_SIZE);
 
+    const client = await getClient();
     try {
-      const { data: inserted, error: insertErr } = await db
-        .from("notification_deliveries")
-        .insert(batch)
-        .select("id");
+      await client.query("BEGIN");
 
-      if (insertErr) {
-        logger.error({ err: insertErr, batchStart: i, churchId: input.church_id }, "notifyChurchMembers: delivery insert failed");
-        continue;
+      // Build bulk INSERT for notification_deliveries
+      const deliveryValues: unknown[] = [];
+      const deliveryPlaceholders: string[] = [];
+      batch.forEach((row, idx) => {
+        const base = idx * 9;
+        deliveryPlaceholders.push(`($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, 'pending', $${base + 8}::jsonb)`);
+        deliveryValues.push(
+          row.church_id, row.recipient_user_id || null, row.recipient_phone || null,
+          row.recipient_email || null, row.channel, row.notification_type,
+          row.body, JSON.stringify(row.metadata || {})
+        );
+      });
+
+      const insertResult = await client.query(
+        `INSERT INTO notification_deliveries
+         (church_id, recipient_user_id, recipient_phone, recipient_email, channel, notification_type, body, status, metadata)
+         VALUES ${deliveryPlaceholders.join(", ")}
+         RETURNING id`,
+        deliveryValues
+      );
+      const inserted = insertResult.rows as Array<{ id: string }>;
+
+      if (inserted.length > 0) {
+        // Build bulk INSERT for job_queue
+        const jobValues: unknown[] = [];
+        const jobPlaceholders: string[] = [];
+        inserted.forEach((row, idx) => {
+          const base = idx * 2;
+          jobPlaceholders.push(`($${base + 1}, $${base + 2}::jsonb, NOW(), 3, 'pending', 0)`);
+          jobValues.push(
+            jobBatch[idx]?.job_type || "send_email",
+            JSON.stringify({ ...jobBatch[idx]?.payload, delivery_id: row.id })
+          );
+        });
+
+        await client.query(
+          `INSERT INTO job_queue (job_type, payload, scheduled_for, max_attempts, status, attempts)
+           VALUES ${jobPlaceholders.join(", ")}`,
+          jobValues
+        );
+
+        queued += inserted.length;
       }
 
-      // Enqueue jobs referencing the delivery IDs
-      if (inserted && inserted.length > 0) {
-        const jobInserts = inserted.map((row: any, idx: number) => ({
-          job_type: jobBatch[idx]?.job_type || "send_email",
-          payload: {
-            ...jobBatch[idx]?.payload,
-            delivery_id: row.id,
-          },
-          status: "pending",
-        }));
-
-        const { error: jobErr } = await db.from("job_queue").insert(jobInserts);
-        if (jobErr) {
-          logger.error({ err: jobErr, batchStart: i, churchId: input.church_id }, "notifyChurchMembers: job_queue insert failed");
-        } else {
-          queued += inserted.length;
-        }
-      }
+      await client.query("COMMIT");
     } catch (err) {
-      logger.error({ err, batchStart: i, churchId: input.church_id }, "notifyChurchMembers: batch insert exception");
+      await client.query("ROLLBACK").catch(() => {});
+      logger.error({ err, batchStart: i, churchId: input.church_id }, "notifyChurchMembers: batch insert failed");
+    } finally {
+      client.release();
     }
   }
 

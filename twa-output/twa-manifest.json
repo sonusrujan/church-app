@@ -1,0 +1,50 @@
+{
+  "packageId": "com.shalomapp.twa",
+  "host": "shalomapp.in",
+  "name": "Shalom Church App",
+  "launcherName": "Shalom",
+  "display": "standalone",
+  "themeColor": "#2E2A5A",
+  "themeColorDark": "#1A1840",
+  "navigationColor": "#2E2A5A",
+  "navigationColorDark": "#1A1840",
+  "navigationDividerColor": "#2E2A5A",
+  "navigationDividerColorDark": "#1A1840",
+  "backgroundColor": "#FFFFFF",
+  "enableNotifications": true,
+  "startUrl": "/",
+  "iconUrl": "https://shalomapp.in/icon-512.png",
+  "maskableIconUrl": "https://shalomapp.in/icon-512.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "./android.keystore",
+    "alias": "shalom"
+  },
+  "appVersionName": "1.0",
+  "appVersionCode": 2,
+  "shortcuts": [],
+  "generatorApp": "bubblewrap-cli",
+  "webManifestUrl": "https://shalomapp.in/manifest.json",
+  "fallbackType": "customtabs",
+  "features": {
+    "locationDelegation": {
+      "enabled": false
+    },
+    "playBilling": {
+      "enabled": false
+    }
+  },
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "minSdkVersion": 21,
+  "orientation": "portrait",
+  "fingerprints": [],
+  "additionalTrustedOrigins": [],
+  "retainedBundles": [],
+  "displayOverride": [],
+  "appVersion": "1.0"
+}

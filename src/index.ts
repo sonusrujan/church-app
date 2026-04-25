@@ -1,3 +1,6 @@
+import { initSentry, Sentry } from "./sentry";
+initSentry();
+
 import app from "./app";
 import { PORT } from "./config";
 import { startScheduledJobs } from "./jobs/scheduler";
@@ -7,6 +10,17 @@ import { logger } from "./utils/logger";
 async function runMigrations() {
   const client = await getClient();
   try {
+    // Advisory lock prevents concurrent DDL from multiple ECS tasks
+    const lockId = 8675309; // arbitrary constant
+    const { rows: lockResult } = await client.query(
+      `SELECT pg_try_advisory_lock($1) AS acquired`, [lockId]
+    );
+    if (!lockResult[0]?.acquired) {
+      logger.info("Another instance is running migrations, skipping");
+      return;
+    }
+
+    try {
     // Create tracking table if not exists
     await client.query(`
       CREATE TABLE IF NOT EXISTS _migrations (
@@ -490,6 +504,134 @@ async function runMigrations() {
           $fn$;
         `,
       },
+      {
+        name: "019_public_donation_fee_config",
+        sql: `
+          ALTER TABLE platform_config
+            ADD COLUMN IF NOT EXISTS public_donation_fee_percent numeric(5,2) NOT NULL DEFAULT 5.00;
+        `,
+      },
+      {
+        name: "020_subscription_monthly_ledger",
+        sql: `
+          CREATE TABLE IF NOT EXISTS subscription_monthly_dues (
+            id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+            subscription_id uuid NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE,
+            member_id uuid NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+            church_id uuid NOT NULL REFERENCES churches(id) ON DELETE CASCADE,
+            due_month date NOT NULL,
+            status text NOT NULL DEFAULT 'pending'
+              CHECK (status IN ('pending', 'paid', 'imported_paid')),
+            paid_payment_id uuid REFERENCES payments(id) ON DELETE SET NULL,
+            source text NOT NULL DEFAULT 'system',
+            created_at timestamptz NOT NULL DEFAULT now(),
+            updated_at timestamptz NOT NULL DEFAULT now(),
+            UNIQUE (subscription_id, due_month)
+          );
+          CREATE INDEX IF NOT EXISTS idx_subscription_monthly_dues_subscription
+            ON subscription_monthly_dues(subscription_id, due_month);
+          CREATE INDEX IF NOT EXISTS idx_subscription_monthly_dues_member
+            ON subscription_monthly_dues(member_id, due_month DESC);
+          CREATE INDEX IF NOT EXISTS idx_subscription_monthly_dues_church
+            ON subscription_monthly_dues(church_id, due_month DESC);
+          CREATE INDEX IF NOT EXISTS idx_subscription_monthly_dues_pending
+            ON subscription_monthly_dues(subscription_id, status, due_month)
+            WHERE status = 'pending';
+
+          CREATE TABLE IF NOT EXISTS payment_month_allocations (
+            id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+            payment_id uuid NOT NULL REFERENCES payments(id) ON DELETE CASCADE,
+            subscription_id uuid NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE,
+            member_id uuid NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+            church_id uuid NOT NULL REFERENCES churches(id) ON DELETE CASCADE,
+            covered_month date NOT NULL,
+            monthly_amount numeric NOT NULL,
+            person_name text,
+            created_at timestamptz NOT NULL DEFAULT now(),
+            UNIQUE (subscription_id, covered_month),
+            UNIQUE (payment_id, covered_month)
+          );
+          CREATE INDEX IF NOT EXISTS idx_payment_month_allocations_member
+            ON payment_month_allocations(member_id, covered_month DESC);
+          CREATE INDEX IF NOT EXISTS idx_payment_month_allocations_payment
+            ON payment_month_allocations(payment_id);
+          CREATE INDEX IF NOT EXISTS idx_payment_month_allocations_subscription
+            ON payment_month_allocations(subscription_id, covered_month DESC);
+
+          CREATE OR REPLACE FUNCTION update_subscription_monthly_dues_updated_at()
+          RETURNS trigger AS $$
+          BEGIN NEW.updated_at = now(); RETURN NEW; END;
+          $$ LANGUAGE plpgsql;
+
+          DROP TRIGGER IF EXISTS trg_subscription_monthly_dues_updated_at ON subscription_monthly_dues;
+          CREATE TRIGGER trg_subscription_monthly_dues_updated_at
+          BEFORE UPDATE ON subscription_monthly_dues
+          FOR EACH ROW EXECUTE FUNCTION update_subscription_monthly_dues_updated_at();
+        `,
+      },
+      {
+        name: "021_payment_allocations_due_id",
+        sql: `
+          ALTER TABLE payment_month_allocations
+            ADD COLUMN IF NOT EXISTS due_id uuid REFERENCES subscription_monthly_dues(id) ON DELETE SET NULL;
+          CREATE INDEX IF NOT EXISTS idx_payment_month_allocations_due_id
+            ON payment_month_allocations(due_id);
+        `,
+      },
+      {
+        name: "028_schema_hardening_razorpay_cleanup",
+        sql: `
+          -- Drop old per-church Razorpay API key columns (Razorpay Routes model replaces them)
+          ALTER TABLE churches DROP COLUMN IF EXISTS razorpay_key_id;
+          ALTER TABLE churches DROP COLUMN IF EXISTS razorpay_key_secret;
+
+          -- RLS on payment_refunds
+          ALTER TABLE payment_refunds ENABLE ROW LEVEL SECURITY;
+          DROP POLICY IF EXISTS payment_refunds_tenant ON payment_refunds;
+          CREATE POLICY payment_refunds_tenant ON payment_refunds
+            USING (church_id::text = current_setting('app.church_id', true));
+
+          -- Backfill payments.church_id NULLs then enforce NOT NULL
+          UPDATE payments p
+          SET church_id = m.church_id
+          FROM members m
+          WHERE p.member_id = m.id AND p.church_id IS NULL AND m.church_id IS NOT NULL;
+
+          DO $$ BEGIN
+            ALTER TABLE payments ALTER COLUMN church_id SET NOT NULL;
+          EXCEPTION WHEN others THEN NULL;
+          END $$;
+
+          -- Partial unique: one active subscription per member+plan+church
+          CREATE UNIQUE INDEX IF NOT EXISTS uq_subscriptions_active_member_plan
+            ON subscriptions(member_id, plan_name, church_id)
+            WHERE status NOT IN ('cancelled', 'expired');
+
+          -- Per-church unique on pastors.email (replace broken global unique)
+          DO $$ BEGIN
+            ALTER TABLE pastors DROP CONSTRAINT IF EXISTS pastors_email_key;
+          EXCEPTION WHEN others THEN NULL;
+          END $$;
+          DROP INDEX IF EXISTS pastors_email_key;
+          CREATE UNIQUE INDEX IF NOT EXISTS uq_pastors_email_per_church
+            ON pastors(church_id, email)
+            WHERE email IS NOT NULL AND deleted_at IS NULL;
+
+          -- Performance indexes
+          CREATE INDEX IF NOT EXISTS idx_prayer_requests_church_created
+            ON prayer_requests(church_id, created_at DESC);
+          CREATE INDEX IF NOT EXISTS idx_announcements_church_created
+            ON announcements(church_id, created_at DESC)
+            WHERE deleted_at IS NULL;
+          CREATE INDEX IF NOT EXISTS idx_payments_member_date
+            ON payments(member_id, payment_date DESC);
+          CREATE INDEX IF NOT EXISTS idx_payment_refunds_church
+            ON payment_refunds(church_id);
+          CREATE INDEX IF NOT EXISTS idx_payment_transfers_razorpay_id
+            ON payment_transfers(razorpay_transfer_id)
+            WHERE razorpay_transfer_id IS NOT NULL;
+        `,
+      },
     ];
 
     for (const m of migrations) {
@@ -505,6 +647,10 @@ async function runMigrations() {
         await client.query("COMMIT");
         logger.info(`Migration ${m.name} applied.`);
       }
+    }
+    } finally {
+      // Release advisory lock
+      await client.query(`SELECT pg_advisory_unlock($1)`, [lockId]).catch(() => {});
     }
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
@@ -553,4 +699,14 @@ runMigrations().then(() => {
 
   process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
   process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+
+  process.on("unhandledRejection", (reason) => {
+    logger.error({ err: reason }, "Unhandled promise rejection — initiating shutdown");
+    gracefulShutdown("unhandledRejection");
+  });
+
+  process.on("uncaughtException", (err) => {
+    logger.fatal({ err }, "Uncaught exception — initiating shutdown");
+    gracefulShutdown("uncaughtException");
+  });
 });

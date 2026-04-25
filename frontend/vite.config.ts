@@ -2,8 +2,9 @@ import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import { writeFileSync, readFileSync } from 'fs'
 import { resolve } from 'path'
+import { createHash } from 'crypto'
 
-// Stamp the service worker with a build-time hash on each build
+// Stamp the service worker with a content-based hash on each build
 function swVersionPlugin() {
   return {
     name: 'sw-version-stamp',
@@ -11,8 +12,8 @@ function swVersionPlugin() {
       const swPath = resolve(__dirname, 'dist', 'sw.js');
       try {
         let content = readFileSync(swPath, 'utf-8');
-        const buildHash = Date.now().toString(36);
-        content = content.replace(/const CACHE_VERSION = "[^"]+";/, `const CACHE_VERSION = "${buildHash}";`);
+        const buildHash = createHash('sha256').update(content).digest('hex').slice(0, 12);
+        content = content.replace(/__BUILD_TIMESTAMP__/g, buildHash);
         writeFileSync(swPath, content);
       } catch { /* sw.js might not exist in dev */ }
     },
@@ -23,6 +24,7 @@ function swVersionPlugin() {
 export default defineConfig({
   plugins: [react(), swVersionPlugin()],
   build: {
+    sourcemap: false,
     rollupOptions: {
       output: {
         manualChunks(id: string) {

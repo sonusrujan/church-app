@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.shalomapp.twa",
+      "sha256_cert_fingerprints": [
+        "BE:B4:10:19:B5:84:02:46:C1:FB:8B:F0:9E:48:9C:F3:5B:81:A3:68:FB:B2:66:5E:3A:F0:DF:3B:85:6E:70:C6"
+      ]
+    }
+  }
+]

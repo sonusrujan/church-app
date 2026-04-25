@@ -1,3 +1,4 @@
+import { UUID_REGEX } from "../utils/validation";
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { requireAuth, AuthRequest } from "../middleware/requireAuth";
@@ -16,9 +17,9 @@ import {
 import { isSuperAdminEmail } from "../middleware/requireSuperAdmin";
 import { logSuperAdminAudit } from "../utils/superAdminAudit";
 import { persistAuditLog } from "../utils/auditLog";
+import { validate, createMemberSchema, linkMemberSchema, updateMemberSchema } from "../utils/zodSchemas";
 
 const router = Router();
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const memberWriteLimiter = rateLimit({
   windowMs: 60_000,
@@ -55,7 +56,7 @@ router.get("/list", requireAuth, requireRegisteredUser, async (req: AuthRequest,
 
     const churchId = resolveScopedChurchId(req, String(req.query.church_id || ""));
 
-    const limit = Number(req.query.limit) || 100;
+    const limit = Math.min(Number(req.query.limit) || 100, 500);
     const offset = Number(req.query.offset) || 0;
     const result = await listMembers(churchId || undefined, limit, offset);
     return res.json(result);
@@ -64,7 +65,7 @@ router.get("/list", requireAuth, requireRegisteredUser, async (req: AuthRequest,
   }
 });
 
-router.post("/create", requireAuth, requireRegisteredUser, memberWriteLimiter, async (req: AuthRequest, res) => {
+router.post("/create", requireAuth, requireRegisteredUser, memberWriteLimiter, validate(createMemberSchema), async (req: AuthRequest, res) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: "Unauthenticated" });
@@ -75,7 +76,7 @@ router.post("/create", requireAuth, requireRegisteredUser, memberWriteLimiter, a
       return res.status(403).json({ error: "Only admin can create members" });
     }
 
-    const { full_name, email, address, membership_id, subscription_amount, church_id } = req.body;
+    const { full_name, email, address, membership_id, phone_number, subscription_amount, church_id, occupation, confirmation_taken, age, gender, dob } = req.body;
 
     const targetChurchId = requesterIsSuperAdmin
       ? (typeof church_id === "string" && church_id.trim()) || req.user.church_id
@@ -90,8 +91,14 @@ router.post("/create", requireAuth, requireRegisteredUser, memberWriteLimiter, a
       email,
       address,
       membership_id,
+      phone_number: typeof phone_number === "string" ? phone_number : undefined,
       subscription_amount,
       church_id: targetChurchId,
+      occupation: typeof occupation === "string" ? occupation : undefined,
+      confirmation_taken: typeof confirmation_taken === "boolean" ? confirmation_taken : undefined,
+      age: typeof age === "number" ? age : undefined,
+      gender: typeof gender === "string" ? gender : undefined,
+      dob: typeof dob === "string" ? dob : undefined,
     });
     logSuperAdminAudit(req, "member.create", {
       church_id: targetChurchId,
@@ -107,7 +114,7 @@ router.post("/create", requireAuth, requireRegisteredUser, memberWriteLimiter, a
   }
 });
 
-router.post("/link", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+router.post("/link", requireAuth, requireRegisteredUser, validate(linkMemberSchema), async (req: AuthRequest, res) => {
   try {
     const { email } = req.body;
     if (!req.user) return res.status(401).json({ error: "Unauthenticated" });
@@ -163,7 +170,7 @@ router.get("/:id", requireAuth, requireRegisteredUser, async (req: AuthRequest, 
       return res.status(403).json({ error: "Only admin can fetch member details" });
     }
 
-    const memberId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const memberId = String(req.params.id || "").trim();
     if (!memberId || !UUID_REGEX.test(memberId)) {
       return res.status(400).json({ error: "Invalid member ID format" });
     }
@@ -192,7 +199,7 @@ router.get("/:id/delete-impact", requireAuth, requireRegisteredUser, async (req:
       return res.status(403).json({ error: "Only admin can inspect member delete impact" });
     }
 
-    const memberId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const memberId = String(req.params.id || "").trim();
     if (!memberId || !UUID_REGEX.test(memberId)) {
       return res.status(400).json({ error: "Invalid member ID format" });
     }
@@ -208,7 +215,7 @@ router.get("/:id/delete-impact", requireAuth, requireRegisteredUser, async (req:
   }
 });
 
-router.patch("/:id", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+router.patch("/:id", requireAuth, requireRegisteredUser, validate(updateMemberSchema), async (req: AuthRequest, res) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: "Unauthenticated" });
@@ -218,7 +225,7 @@ router.patch("/:id", requireAuth, requireRegisteredUser, async (req: AuthRequest
       return res.status(403).json({ error: "Only admin can update members" });
     }
 
-    const memberId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const memberId = String(req.params.id || "").trim();
     if (!memberId || !UUID_REGEX.test(memberId)) {
       return res.status(400).json({ error: "Invalid member ID format" });
     }
@@ -239,6 +246,11 @@ router.patch("/:id", requireAuth, requireRegisteredUser, async (req: AuthRequest
         typeof req.body?.subscription_amount === "number"
           ? req.body.subscription_amount
           : undefined,
+      occupation: req.body?.occupation,
+      confirmation_taken: req.body?.confirmation_taken,
+      gender: req.body?.gender,
+      dob: req.body?.dob,
+      age: typeof req.body?.age === "number" ? req.body.age : undefined,
     });
 
     logSuperAdminAudit(req, "member.update", {
@@ -263,7 +275,7 @@ router.delete("/:id", requireAuth, requireRegisteredUser, async (req: AuthReques
       return res.status(403).json({ error: "Only admin can delete members" });
     }
 
-    const memberId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const memberId = String(req.params.id || "").trim();
     if (!memberId || !UUID_REGEX.test(memberId)) {
       return res.status(400).json({ error: "Invalid member ID format" });
     }

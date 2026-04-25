@@ -458,7 +458,7 @@ export default function DioceseTab() {
                         <div><span className="field-label">{t("adminTabs.diocese.labelPhoto")}</span>
                           <PhotoUpload
                             currentUrl={newPhoto}
-                            onUploaded={(url) => { setNewPhoto(url); setNotice({ tone: "success", text: "Photo uploaded" }); }}
+                            onUploaded={(url) => { setNewPhoto(url); setNotice({ tone: "success", text: t("adminTabs.diocese.successPhotoUploaded") }); }}
                             onDeleted={() => setNewPhoto("")}
                             onError={(msg) => setNotice({ tone: "error", text: msg })}
                             token={token || ""}
@@ -494,7 +494,7 @@ export default function DioceseTab() {
                                   <div><span className="field-label">Photo</span>
                                     <PhotoUpload
                                       currentUrl={editPhoto}
-                                      onUploaded={(url) => { setEditPhoto(url); setNotice({ tone: "success", text: "Photo updated" }); }}
+                                      onUploaded={(url) => { setEditPhoto(url); setNotice({ tone: "success", text: t("adminTabs.diocese.successPhotoUpdated") }); }}
                                       onDeleted={() => setEditPhoto("")}
                                       onError={(msg) => setNotice({ tone: "error", text: msg })}
                                       token={token || ""}

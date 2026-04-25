@@ -43,7 +43,7 @@ export default function ScheduledReportsTab() {
     // Split into emails and phone numbers
     const emailList = list.filter((e) => e.includes("@"));
     const phoneList = list.filter((e) => !e.includes("@") && /^\+?\d[\d\s-]{6,14}$/.test(e.replace(/[\s-]/g, "")));
-    if (!emailList.length && !phoneList.length) { setNotice({ tone: "error", text: "Enter valid emails or phone numbers separated by commas." }); return; }
+    if (!emailList.length && !phoneList.length) { setNotice({ tone: "error", text: t("adminTabs.scheduledReports.errorValidRecipients") }); return; }
     await withAuthRequest("create-report", async () => {
       await apiRequest("/api/admin/scheduled-reports", {
         method: "POST", token,
@@ -75,7 +75,7 @@ export default function ScheduledReportsTab() {
       <div className="field-stack">
         {isSuperAdmin ? (
           <label>
-            Church
+            {t("admin.church")}
             <select value={churchId} onChange={(e) => setChurchId(e.target.value)}>
               <option value="">{t("admin.selectChurch")}</option>
               {churches.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.church_code || c.id.slice(0, 8)})</option>)}
@@ -99,7 +99,7 @@ export default function ScheduledReportsTab() {
           </select>
         </label>
         <label>
-          Recipients (emails or phones, comma-separated)
+          {t("adminTabs.scheduledReports.recipientsLabel")}
           <input value={emails} onChange={(e) => setEmails(e.target.value)} placeholder="email@example.com, +919876543210" />
         </label>
         <button className="btn btn-primary" onClick={() => void createReport()} disabled={busyKey === "create-report"}>

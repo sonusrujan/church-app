@@ -29,9 +29,14 @@ Parameters:
     Type: String
     Default: ''
     Description: ACM certificate ARN in the same region for ALB HTTPS (optional)
+  AlertEmail:
+    Type: String
+    Default: ''
+    Description: Email address for CloudWatch alarm notifications (optional)
 
 Conditions:
   HasALBCertificate: !Not [!Equals [!Ref ALBCertificateArn, '']]
+  HasAlertEmail: !Not [!Equals [!Ref AlertEmail, '']]
 
 Resources:
   # ── VPC ──
@@ -162,7 +167,7 @@ Resources:
       DBInstanceIdentifier: !Sub ${AppName}-db
       Engine: postgres
       EngineVersion: '17.4'
-      DBInstanceClass: db.t3.micro
+      DBInstanceClass: db.t3.medium
       AllocatedStorage: 20
       MaxAllocatedStorage: 100
       StorageType: gp3
@@ -173,7 +178,7 @@ Resources:
         - !Ref DBSecurityGroup
       DBSubnetGroupName: !Ref DBSubnetGroup
       PubliclyAccessible: false
-      BackupRetentionPeriod: 7
+      BackupRetentionPeriod: 30
       MultiAZ: true
       StorageEncrypted: true
       DeletionProtection: true
@@ -303,14 +308,6 @@ Resources:
               Service: ecs-tasks.amazonaws.com
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: SNSAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - sns:Publish
-                Resource: '*'
         - PolicyName: SESAccess
           PolicyDocument:
             Version: '2012-10-17'
@@ -319,14 +316,28 @@ Resources:
                 Action:
                   - ses:SendEmail
                   - ses:SendRawEmail
-                Resource: '*'
+                Resource:
+                  - !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/*
+        - PolicyName: S3UploadAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub arn:aws:s3:::${AppName}-uploads-${AWS::AccountId}
+                  - !Sub arn:aws:s3:::${AppName}-uploads-${AWS::AccountId}/*
 
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
       Family: !Sub ${AppName}-backend
-      Cpu: '256'
-      Memory: '512'
+      Cpu: '512'
+      Memory: '1024'
       NetworkMode: awsvpc
       RequiresCompatibilities: [FARGATE]
       ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
@@ -357,19 +368,17 @@ Resources:
               Value: !Ref AWS::Region
             - Name: FRONTEND_URL
               Value: https://shalomapp.in
-            - Name: GOOGLE_REDIRECT_URI
-              Value: https://shalomapp.in/api/auth/google/callback
             - Name: PAYMENTS_ENABLED
               Value: 'true'
+            - Name: MIN_PAYMENT_DATE
+              Value: '2025-01-01'
+            - Name: RDS_CA_PATH
+              Value: '/etc/ssl/certs/rds-ca-bundle.pem'
           Secrets:
             - Name: DATABASE_URL
               ValueFrom: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AppName}/DATABASE_URL
             - Name: JWT_SECRET
               ValueFrom: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AppName}/JWT_SECRET
-            - Name: GOOGLE_CLIENT_ID
-              ValueFrom: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AppName}/GOOGLE_CLIENT_ID
-            - Name: GOOGLE_CLIENT_SECRET
-              ValueFrom: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AppName}/GOOGLE_CLIENT_SECRET
             - Name: TWILIO_ACCOUNT_SID
               ValueFrom: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AppName}/TWILIO_ACCOUNT_SID
             - Name: TWILIO_AUTH_TOKEN
@@ -378,6 +387,18 @@ Resources:
               ValueFrom: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AppName}/TWILIO_VERIFY_SERVICE_SID
             - Name: TWILIO_MESSAGING_SERVICE_SID
               ValueFrom: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AppName}/TWILIO_MESSAGING_SERVICE_SID
+            - Name: RAZORPAY_KEY_ID
+              ValueFrom: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AppName}/RAZORPAY_KEY_ID
+            - Name: RAZORPAY_KEY_SECRET
+              ValueFrom: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AppName}/RAZORPAY_KEY_SECRET
+            - Name: RAZORPAY_WEBHOOK_SECRET
+              ValueFrom: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AppName}/RAZORPAY_WEBHOOK_SECRET
+            - Name: VAPID_PUBLIC_KEY
+              ValueFrom: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AppName}/VAPID_PUBLIC_KEY
+            - Name: VAPID_PRIVATE_KEY
+              ValueFrom: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AppName}/VAPID_PRIVATE_KEY
+            - Name: SENTRY_DSN
+              ValueFrom: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AppName}/SENTRY_DSN
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -389,7 +410,7 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub /ecs/${AppName}
-      RetentionInDays: 2557
+      RetentionInDays: 90
 
   # ── Application Load Balancer ──
   ApplicationLoadBalancer:
@@ -458,7 +479,7 @@ Resources:
       LaunchType: FARGATE
       NetworkConfiguration:
         AwsvpcConfiguration:
-          AssignPublicIp: DISABLED
+          AssignPublicIp: ENABLED
           SecurityGroups:
             - !Ref AppSecurityGroup
           Subnets:
@@ -475,11 +496,30 @@ Resources:
     DependsOn: ECSService
     Properties:
       MaxCapacity: 10
-      MinCapacity: 2
+      MinCapacity: 1
       ResourceId: !Sub service/${ECSCluster}/${AppName}-service
       ScalableDimension: ecs:service:DesiredCount
       ServiceNamespace: ecs
       RoleARN: !Sub arn:aws:iam::${AWS::AccountId}:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService
+      ScheduledActions:
+        # Scale up to 2 during peak hours (IST 7 AM – 10 PM = UTC 1:30 – 16:30)
+        - ScheduledActionName: scale-up-peak
+          Schedule: "cron(30 1 * * ? *)"
+          ScalableTargetAction:
+            MinCapacity: 2
+            MaxCapacity: 10
+        # Scale down to 1 during off-peak (IST 10 PM – 7 AM = UTC 16:30 – 1:30)
+        - ScheduledActionName: scale-down-offpeak
+          Schedule: "cron(30 16 * * ? *)"
+          ScalableTargetAction:
+            MinCapacity: 1
+            MaxCapacity: 4
+        # Sunday peak: church services (IST 6 AM – 2 PM = UTC 0:30 – 8:30)
+        - ScheduledActionName: scale-up-sunday
+          Schedule: "cron(30 0 ? * SUN *)"
+          ScalableTargetAction:
+            MinCapacity: 3
+            MaxCapacity: 10
 
   ScalingPolicy:
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
@@ -493,6 +533,16 @@ Resources:
         TargetValue: 70
         ScaleInCooldown: 300
         ScaleOutCooldown: 60
+
+  # ── SNS Alert Topic ──
+  AlertSNSTopic:
+    Type: AWS::SNS::Topic
+    Condition: HasAlertEmail
+    Properties:
+      TopicName: !Sub ${AppName}-alerts
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref AlertEmail
 
   # ── CloudWatch Alarms (LOG-8) ──
   HighCPUAlarm:
@@ -512,6 +562,8 @@ Resources:
       EvaluationPeriods: 2
       Threshold: 80
       ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !If [HasAlertEmail, !Ref AlertSNSTopic, !Ref 'AWS::NoValue']
 
   HighMemoryAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -530,6 +582,8 @@ Resources:
       EvaluationPeriods: 2
       Threshold: 80
       ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !If [HasAlertEmail, !Ref AlertSNSTopic, !Ref 'AWS::NoValue']
 
   RDSHighCPUAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -546,6 +600,8 @@ Resources:
       EvaluationPeriods: 2
       Threshold: 80
       ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !If [HasAlertEmail, !Ref AlertSNSTopic, !Ref 'AWS::NoValue']
 
   RDSLowStorageAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -562,6 +618,8 @@ Resources:
       EvaluationPeriods: 1
       Threshold: 2147483648
       ComparisonOperator: LessThanThreshold
+      AlarmActions:
+        - !If [HasAlertEmail, !Ref AlertSNSTopic, !Ref 'AWS::NoValue']
 
   ALB5xxAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -579,6 +637,45 @@ Resources:
       Threshold: 10
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
+      AlarmActions:
+        - !If [HasAlertEmail, !Ref AlertSNSTopic, !Ref 'AWS::NoValue']
+
+  DatabaseConnectionsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${AppName}-rds-connections
+      AlarmDescription: RDS connection count exceeds 180 (approaching db.t3.medium limit of ~255)
+      Namespace: AWS/RDS
+      MetricName: DatabaseConnections
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref Database
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 180
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !If [HasAlertEmail, !Ref AlertSNSTopic, !Ref 'AWS::NoValue']
+
+  WebhookProcessingErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${AppName}-webhook-processing-errors
+      AlarmDescription: Razorpay webhook processing failures in the last 5 minutes
+      Namespace: AWS/Logs
+      MetricName: WebhookProcessingErrors
+      Dimensions:
+        - Name: LogGroupName
+          Value: !Ref LogGroup
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 3
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !If [HasAlertEmail, !Ref AlertSNSTopic, !Ref 'AWS::NoValue']
 
 Outputs:
   ALBURL:

@@ -1,22 +1,78 @@
 import { useEffect, useState, useCallback } from "react";
-import { Crown, Church, User, Phone, ExternalLink } from "lucide-react";
+import { Crown, Church, User, Phone, ExternalLink, Filter, AlertCircle, UserCheck } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import { apiRequest } from "../lib/api";
 import LoadingSkeleton from "../components/LoadingSkeleton";
 import { useI18n } from "../i18n";
+import { useNavigate } from "react-router-dom";
 import type {
   DioceseRow,
+  DioceseChurchRow,
   DioceseLeaderRow,
   ChurchLeadershipRow,
   AdBannerRow,
+  ChurchRow,
 } from "../types";
 
 export default function UserHomePage() {
-  const { token, memberDashboard } = useApp();
+  const { token, memberDashboard, isSuperAdmin, churches: globalChurches, loadChurches } = useApp();
   const { t } = useI18n();
+  const navigate = useNavigate();
 
-  const churchId = memberDashboard?.church?.id;
-  const church = memberDashboard?.church;
+  // ── Superadmin filter state ──
+  const [allDioceses, setAllDioceses] = useState<DioceseRow[]>([]);
+  const [selectedDioceseId, setSelectedDioceseId] = useState("");
+  const [dioceseChurches, setDioceseChurches] = useState<DioceseChurchRow[]>([]);
+  const [selectedChurchId, setSelectedChurchId] = useState("");
+  const [previewChurch, setPreviewChurch] = useState<ChurchRow | null>(null);
+
+  // Resolve the active church — superadmin's selected or the user's own
+  const activeChurchId = isSuperAdmin ? selectedChurchId : memberDashboard?.church?.id;
+  const church = isSuperAdmin
+    ? (previewChurch ? { ...previewChurch, church_code: previewChurch.church_code || null, contact_phone: previewChurch.contact_phone || null } : null)
+    : memberDashboard?.church;
+
+  // ── Superadmin: load dioceses + churches on mount ──
+  useEffect(() => {
+    if (!isSuperAdmin || !token) return;
+    // Load dioceses
+    apiRequest<DioceseRow[]>("/api/diocese", { token })
+      .then((data) => setAllDioceses(Array.isArray(data) ? data : []))
+      .catch((e) => console.warn("Failed to load dioceses", e));
+    // Ensure churches are loaded
+    if (!globalChurches.length) void loadChurches();
+  }, [isSuperAdmin, token]);
+
+  // When diocese selected, load churches in that diocese
+  useEffect(() => {
+    if (!isSuperAdmin || !token || !selectedDioceseId) {
+      setDioceseChurches([]);
+      return;
+    }
+    apiRequest<DioceseChurchRow[]>(`/api/diocese/${encodeURIComponent(selectedDioceseId)}/churches`, { token })
+      .then((data) => setDioceseChurches(Array.isArray(data) ? data : []))
+      .catch(() => setDioceseChurches([]));
+  }, [isSuperAdmin, token, selectedDioceseId]);
+
+  // When church selected, set preview church object
+  useEffect(() => {
+    if (!selectedChurchId) { setPreviewChurch(null); return; }
+    const found = globalChurches.find((c) => c.id === selectedChurchId);
+    if (found) {
+      setPreviewChurch(found);
+    } else {
+      // Also check diocese churches list
+      const dc = dioceseChurches.find((c) => c.church_id === selectedChurchId);
+      if (dc) {
+        setPreviewChurch({ id: dc.church_id, name: dc.church_name || "", location: dc.church_location || null, church_code: dc.church_code || null } as ChurchRow);
+      }
+    }
+  }, [selectedChurchId, globalChurches, dioceseChurches]);
+
+  // Compute the filtered church list for the dropdown
+  const filteredChurches = selectedDioceseId
+    ? globalChurches.filter((c) => dioceseChurches.some((dc) => dc.church_id === c.id))
+    : globalChurches;
 
   // ── State ──
   const [diocese, setDiocese] = useState<DioceseRow | null>(null);
@@ -24,21 +80,25 @@ export default function UserHomePage() {
   const [churchLeaders, setChurchLeaders] = useState<ChurchLeadershipRow[]>([]);
   const [adBanners, setAdBanners] = useState<AdBannerRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showAllCommittee, setShowAllCommittee] = useState(false);
+  const [showAllSextons, setShowAllSextons] = useState(false);
+  const COLLAPSE_LIMIT = 4;
 
   // ── Data fetching ──
   const loadData = useCallback(async () => {
-    if (!token || !churchId) { setLoading(false); return; }
+    if (!token || !activeChurchId) { setLoading(false); return; }
     setLoading(true);
     try {
       // Fetch diocese info for this church
       const dioceseData = await apiRequest<DioceseRow | null>(
-        `/api/diocese/by-church/${encodeURIComponent(churchId)}`,
+        `/api/diocese/by-church/${encodeURIComponent(activeChurchId)}`,
         { token },
       ).catch(() => null);
       setDiocese(dioceseData);
 
       // Parallel fetches
       const promises: Promise<void>[] = [];
+      const collectedBanners: AdBannerRow[] = [];
 
       // Diocese leaders
       if (dioceseData?.id) {
@@ -46,38 +106,41 @@ export default function UserHomePage() {
           apiRequest<DioceseLeaderRow[]>(
             `/api/diocese/${encodeURIComponent(dioceseData.id)}/leaders`,
             { token },
-          ).then((data) => setDioceseLeaders(Array.isArray(data) ? data : [])).catch(() => {}),
+          ).then((data) => setDioceseLeaders(Array.isArray(data) ? data : [])).catch((e) => console.warn("Failed to load diocese leaders", e)),
         );
         // Ad banners (diocese scope)
         promises.push(
           apiRequest<AdBannerRow[]>(
             `/api/ad-banners?scope=diocese&scope_id=${encodeURIComponent(dioceseData.id)}`,
             { token },
-          ).then((data) => setAdBanners((prev) => [...prev, ...data])).catch(() => {}),
+          ).then((data) => { if (Array.isArray(data)) collectedBanners.push(...data); }).catch((e) => console.warn("Failed to load diocese banners", e)),
         );
       }
 
       // Church leaders
       promises.push(
         apiRequest<ChurchLeadershipRow[]>(
-          `/api/leadership/church/${encodeURIComponent(churchId)}`,
+          `/api/leadership/church/${encodeURIComponent(activeChurchId)}`,
           { token },
-        ).then((data) => setChurchLeaders(Array.isArray(data) ? data : [])).catch(() => {}),
+        ).then((data) => setChurchLeaders(Array.isArray(data) ? data : [])).catch((e) => console.warn("Failed to load church leaders", e)),
       );
 
       // Ad banners (church scope)
       promises.push(
         apiRequest<AdBannerRow[]>(
-          `/api/ad-banners?scope=church&scope_id=${encodeURIComponent(churchId)}`,
+          `/api/ad-banners?scope=church&scope_id=${encodeURIComponent(activeChurchId)}`,
           { token },
-        ).then((data) => setAdBanners((prev) => [...prev, ...data])).catch(() => {}),
+        ).then((data) => { if (Array.isArray(data)) collectedBanners.push(...data); }).catch(() => {}),
       );
 
       await Promise.all(promises);
+      // Deduplicate and set banners once (prevents accumulation on re-render)
+      const unique = Array.from(new Map(collectedBanners.map(b => [b.id, b])).values());
+      setAdBanners(unique);
     } finally {
       setLoading(false);
     }
-  }, [token, churchId]);
+  }, [token, activeChurchId]);
 
   useEffect(() => {
     void loadData();
@@ -118,7 +181,7 @@ export default function UserHomePage() {
   const logoUrls = diocese?.logo_urls ?? [];
   const logoCount = logoUrls.length || (diocese?.logo_url ? 1 : 0);
 
-  if (loading) {
+  if (loading && !isSuperAdmin) {
     return (
       <div className="home-page">
         <LoadingSkeleton lines={8} />
@@ -128,6 +191,69 @@ export default function UserHomePage() {
 
   return (
     <div className="home-page">
+      {/* ── Superadmin: Diocese & Church filter ── */}
+      {isSuperAdmin ? (
+        <section className="sa-church-filter">
+          <div className="sa-filter-header">
+            <Filter size={18} strokeWidth={1.5} />
+            <h3>{t("home.previewChurchHome")}</h3>
+          </div>
+          <p className="sa-filter-desc">{t("home.previewChurchHomeDesc")}</p>
+          <div className="sa-filter-row">
+            <label className="sa-filter-field">
+              <span>{t("home.filterDiocese")}</span>
+              <select
+                value={selectedDioceseId}
+                onChange={(e) => { setSelectedDioceseId(e.target.value); setSelectedChurchId(""); }}
+              >
+                <option value="">{t("home.allDioceses")}</option>
+                {allDioceses.map((d) => (
+                  <option key={d.id} value={d.id}>{d.name} ({d.church_count ?? 0})</option>
+                ))}
+              </select>
+            </label>
+            <label className="sa-filter-field">
+              <span>{t("home.filterChurch")}</span>
+              <select
+                value={selectedChurchId}
+                onChange={(e) => setSelectedChurchId(e.target.value)}
+              >
+                <option value="">{t("home.selectChurch")}</option>
+                {filteredChurches.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}{c.location ? ` — ${c.location}` : ""}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          {!selectedChurchId ? (
+            <p className="sa-filter-hint">{t("home.selectChurchToPreview")}</p>
+          ) : null}
+        </section>
+      ) : null}
+
+      {/* If superadmin hasn't selected a church yet, show prompt */}
+      {isSuperAdmin && !activeChurchId ? null : (
+      <>
+      {loading ? <LoadingSkeleton lines={8} /> : (
+      <>
+      {/* ── Contextual Action Cards (members only) ── */}
+      {!isSuperAdmin && memberDashboard && (
+        <div className="home-action-cards">
+          {(memberDashboard.due_subscriptions?.length ?? 0) > 0 && (
+            <button className="home-action-card home-action-dues" onClick={() => navigate("/dashboard")}>
+              <AlertCircle size={18} strokeWidth={1.5} />
+              <span>{t("home.duesOutstanding", { count: memberDashboard.due_subscriptions.length })}</span>
+            </button>
+          )}
+          {memberDashboard.member && (!memberDashboard.member.full_name || !memberDashboard.member.phone_number || !memberDashboard.member.address) && (
+            <button className="home-action-card home-action-profile" onClick={() => navigate("/profile")}>
+              <UserCheck size={18} strokeWidth={1.5} />
+              <span>{t("home.completeProfile")}</span>
+            </button>
+          )}
+        </div>
+      )}
+
       {/* ── Top Ad Banners (above diocese) ── */}
       {topBanners.length > 0 ? (
         <section className="home-ad-banners">
@@ -136,7 +262,7 @@ export default function UserHomePage() {
               const inner = banner.media_type === "video" ? (
                 <video src={banner.image_url} autoPlay muted loop playsInline className="home-ad-media" />
               ) : (
-                <img src={banner.image_url} alt="Ad" />
+                <img src={banner.image_url} alt="" />
               );
               return banner.link_url ? (
                 <a key={banner.id} href={banner.link_url} target="_blank" rel="noopener noreferrer" className="home-ad-item">
@@ -302,7 +428,7 @@ export default function UserHomePage() {
             <h3>{t("home.committeeMembers")}</h3>
           </div>
           <div className="home-committee-list">
-            {committeeMembers.map((m) => (
+            {(showAllCommittee ? committeeMembers : committeeMembers.slice(0, COLLAPSE_LIMIT)).map((m) => (
               <div key={m.id} className="home-committee-row">
                 <div className="home-committee-photo">
                   {m.photo_url ? (
@@ -318,6 +444,11 @@ export default function UserHomePage() {
               </div>
             ))}
           </div>
+          {committeeMembers.length > COLLAPSE_LIMIT && (
+            <button className="btn btn-ghost show-all-toggle" onClick={() => setShowAllCommittee((v) => !v)}>
+              {showAllCommittee ? t("home.showLess") : t("home.showAll", { count: committeeMembers.length })}
+            </button>
+          )}
         </section>
       ) : null}
 
@@ -329,7 +460,7 @@ export default function UserHomePage() {
             <h3>{t("home.sextons")}</h3>
           </div>
           <div className="home-committee-list">
-            {sextons.map((m) => (
+            {(showAllSextons ? sextons : sextons.slice(0, COLLAPSE_LIMIT)).map((m) => (
               <div key={m.id} className="home-committee-row">
                 <div className="home-committee-photo">
                   {m.photo_url ? (
@@ -345,6 +476,11 @@ export default function UserHomePage() {
               </div>
             ))}
           </div>
+          {sextons.length > COLLAPSE_LIMIT && (
+            <button className="btn btn-ghost show-all-toggle" onClick={() => setShowAllSextons((v) => !v)}>
+              {showAllSextons ? t("home.showLess") : t("home.showAll", { count: sextons.length })}
+            </button>
+          )}
         </section>
       ) : null}
 
@@ -370,6 +506,10 @@ export default function UserHomePage() {
           </div>
         </section>
       ) : null}
+      </>
+      )}
+      </>
+      )}
     </div>
   );
 }

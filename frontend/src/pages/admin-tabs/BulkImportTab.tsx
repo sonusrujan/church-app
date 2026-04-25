@@ -11,6 +11,7 @@ export default function BulkImportTab() {
 
   const [churchId, setChurchId] = useState(churches[0]?.id || "");
   const [text, setText] = useState("");
+  const [showPreview, setShowPreview] = useState(false);
   const [results, setResults] = useState<Array<{ row: number; status: string; error?: string; id?: string }> | null>(null);
 
   function handleCsvData(rows: CsvRow[]) {
@@ -19,18 +20,23 @@ export default function BulkImportTab() {
       return [r.full_name, r.email, phone, r.address || ""].join(", ");
     });
     setText(lines.join("\n"));
+    setShowPreview(true);
+    setResults(null);
+  }
+
+  function getParsedMembers() {
+    return text.trim().split("\n").filter(Boolean).map((line) => {
+      const parts = line.split(",").map((s) => s.trim());
+      const rawPhone = parts[2] || "";
+      return { full_name: parts[0] || "", email: parts[1] || "", phone_number: rawPhone ? normalizeIndianPhone(rawPhone) : undefined, address: parts[3] || undefined };
+    });
   }
 
   async function handleImport() {
     const cid = isSuperAdmin ? churchId : (authContext?.auth.church_id || "");
     if (!cid) { setNotice({ tone: "error", text: t("adminTabs.bulkImport.errorSelectChurch") }); return; }
-    const lines = text.trim().split("\n").filter(Boolean);
-    if (!lines.length) { setNotice({ tone: "error", text: t("adminTabs.bulkImport.errorPasteData") }); return; }
-    const members = lines.map((line) => {
-      const parts = line.split(",").map((s) => s.trim());
-      const rawPhone = parts[2] || "";
-      return { full_name: parts[0] || "", email: parts[1] || "", phone_number: rawPhone ? normalizeIndianPhone(rawPhone) : undefined, address: parts[3] || undefined };
-    });
+    const members = getParsedMembers();
+    if (!members.length) { setNotice({ tone: "error", text: t("adminTabs.bulkImport.errorPasteData") }); return; }
     const result = await withAuthRequest("bulk-import", () =>
       apiRequest<{ total: number; created: number; skipped: number; failed: number; results: Array<{ row: number; status: string; error?: string; id?: string }> }>(
         "/api/ops/members/bulk-import",
@@ -62,6 +68,37 @@ export default function BulkImportTab() {
           <p className="muted" style={{ fontSize: "0.85rem" }}>
             {t("adminTabs.bulkImport.membersReady", { count: text.split("\n").filter(Boolean).length })}
           </p>
+        ) : null}
+        {showPreview && text ? (
+          <div style={{ maxHeight: 300, overflow: "auto", border: "1px solid var(--border-color, #ddd)", borderRadius: 8, marginBottom: "0.5rem" }}>
+            <table className="csv-preview-table" style={{ fontSize: "0.82rem" }}>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>{t("common.name")}</th>
+                  <th>{t("common.email")}</th>
+                  <th>{t("common.phone")}</th>
+                  <th>{t("common.address")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {getParsedMembers().slice(0, 50).map((m, i) => (
+                  <tr key={i}>
+                    <td>{i + 1}</td>
+                    <td>{m.full_name || "-"}</td>
+                    <td>{m.email || "-"}</td>
+                    <td>{m.phone_number || "-"}</td>
+                    <td>{m.address || "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {getParsedMembers().length > 50 && (
+              <p className="muted" style={{ padding: "0.5rem", fontSize: "0.8rem" }}>
+                {t("adminTabs.bulkImport.previewTruncated", { total: getParsedMembers().length })}
+              </p>
+            )}
+          </div>
         ) : null}
         <button className="btn btn-primary" onClick={() => void handleImport()} disabled={busyKey === "bulk-import" || !text.trim()}>
           {busyKey === "bulk-import" ? t("adminTabs.bulkImport.importing") : t("adminTabs.bulkImport.importMembers")}

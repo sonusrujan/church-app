@@ -4,6 +4,8 @@ WORKDIR /app/frontend
 COPY frontend/package*.json ./
 RUN npm ci
 COPY frontend/ ./
+ARG VITE_API_URL=https://shalomapp.in
+ENV VITE_API_URL=$VITE_API_URL
 RUN npm run build
 
 # ── Stage 2: Build backend ──
@@ -19,12 +21,9 @@ RUN npx tsc --outDir dist
 FROM node:20-alpine
 WORKDIR /app
 
-# Install postgresql-client for running migrations
-RUN apk add --no-cache postgresql-client
-
 # Install only production deps
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev --ignore-scripts
 
 # Copy compiled backend
 COPY --from=backend-build /app/dist ./dist
@@ -36,6 +35,15 @@ COPY --from=frontend-build /app/frontend/dist ./public
 COPY db/aws_rds_full_schema.sql ./db/
 COPY db/migrations/ ./db/migrations/
 COPY docker-entrypoint.sh ./
+
+# Install wget (health check + CA bundle download).
+# The || true means a build-time network failure won't break the image —
+# dbClient.ts detects the missing file at startup and warns instead of crashing.
+RUN apk add --no-cache wget && \
+    wget -q --timeout=30 \
+      -O /etc/ssl/certs/rds-ca-bundle.pem \
+      https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem \
+    || echo "WARNING: RDS CA bundle download failed — SSL cert verification will be skipped"
 
 # CRIT-06: Run as non-root user
 RUN chmod +x docker-entrypoint.sh && \

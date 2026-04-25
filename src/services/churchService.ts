@@ -1,7 +1,7 @@
 import { randomInt } from "crypto";
 import { db, rawQuery } from "./dbClient";
 import { logger } from "../utils/logger";
-import { SUPER_ADMIN_EMAILS } from "../config";
+import { SUPER_ADMIN_PHONES } from "../config";
 
 type ChurchRow = {
   id: string;
@@ -17,6 +17,7 @@ type ChurchRow = {
 type UserRow = {
   id: string;
   email: string;
+  phone_number: string | null;
   full_name: string | null;
   role: string;
   church_id: string | null;
@@ -69,7 +70,7 @@ export interface CreateChurchInput {
   address?: string;
   location?: string;
   contact_phone?: string;
-  admin_emails?: string[];
+  admin_phones?: string[];
   logo_url?: string;
   member_subscription_enabled?: boolean;
   church_subscription_enabled?: boolean;
@@ -98,11 +99,7 @@ export type ChurchDeleteImpact = {
   payments: number;
 };
 
-const superAdminEmailSet = new Set(SUPER_ADMIN_EMAILS.map((email) => email.toLowerCase()));
-
-function normalizeEmail(email: string) {
-  return email.trim().toLowerCase();
-}
+const superAdminPhoneSet = new Set(SUPER_ADMIN_PHONES.map((p) => p.trim()));
 
 async function generateUniqueChurchCode() {
   for (let attempt = 0; attempt < 24; attempt += 1) {
@@ -126,45 +123,45 @@ async function generateUniqueChurchCode() {
   throw new Error("Unable to generate unique church code. Retry request.");
 }
 
-async function assignAdminsToChurch(churchId: string, adminEmails: string[]) {
-  const normalizedEmails = Array.from(
+async function assignAdminsToChurch(churchId: string, adminPhones: string[]) {
+  const normalizedPhones = Array.from(
     new Set(
-      adminEmails
-        .map((email) => normalizeEmail(String(email || "")))
+      adminPhones
+        .map((phone) => String(phone || "").trim())
         .filter(Boolean)
     )
   );
 
-  if (!normalizedEmails.length) {
+  if (!normalizedPhones.length) {
     return [] as UserRow[];
   }
 
-  // Validate email format on backend side
-  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  const badFormat = normalizedEmails.filter((e) => !EMAIL_RE.test(e));
+  // Validate phone format on backend side
+  const PHONE_RE = /^\+?\d{7,15}$/;
+  const badFormat = normalizedPhones.filter((p) => !PHONE_RE.test(p.replace(/\s/g, "")));
   if (badFormat.length) {
-    throw new Error(`Invalid email format: ${badFormat.join(", ")}`);
+    throw new Error(`Invalid phone format: ${badFormat.join(", ")}`);
   }
 
-  const hasSuperAdminEmail = normalizedEmails.some((email) => superAdminEmailSet.has(email));
-  if (hasSuperAdminEmail) {
-    throw new Error("Super admin emails cannot be assigned as church admins");
+  const hasSuperAdminPhone = normalizedPhones.some((phone) => superAdminPhoneSet.has(phone));
+  if (hasSuperAdminPhone) {
+    throw new Error("Super admin phones cannot be assigned as church admins");
   }
 
   const { data: users, error: usersError } = await db
     .from("users")
-    .select("id, email, full_name, role, church_id")
-    .in("email", normalizedEmails);
+    .select("id, phone_number, full_name, role, church_id")
+    .in("phone_number", normalizedPhones);
 
   if (usersError) {
     logger.error({ err: usersError }, "assignAdminsToChurch users lookup failed");
     throw usersError;
   }
 
-  const foundEmails = new Set((users || []).map((row: any) => normalizeEmail(row.email || "")));
-  const missing = normalizedEmails.filter((email) => !foundEmails.has(email));
+  const foundPhones = new Set((users || []).map((row: any) => row.phone_number?.trim()));
+  const missing = normalizedPhones.filter((phone) => !foundPhones.has(phone));
   if (missing.length) {
-    throw new Error(`Admin user not found for emails: ${missing.join(", ")}`);
+    throw new Error(`Admin user not found for phones: ${missing.join(", ")}`);
   }
 
   // Check if any user already belongs to a DIFFERENT church
@@ -172,8 +169,8 @@ async function assignAdminsToChurch(churchId: string, adminEmails: string[]) {
     (u: any) => u.church_id && u.church_id !== churchId
   );
   if (alreadyAssigned.length) {
-    const names = alreadyAssigned.map((u: any) => u.email).join(", ");
-    throw new Error(`These users already belong to another church: ${names}. Remove them from their current church first.`);
+    const phones = alreadyAssigned.map((u: any) => u.phone_number).join(", ");
+    throw new Error(`These users already belong to another church: ${phones}. Remove them from their current church first.`);
   }
 
   const userIds = (users || []).map((u: any) => u.id);
@@ -181,7 +178,7 @@ async function assignAdminsToChurch(churchId: string, adminEmails: string[]) {
     .from("users")
     .update({ role: "admin", church_id: churchId })
     .in("id", userIds)
-    .select("id, email, full_name, role, church_id");
+    .select("id, phone_number, full_name, role, church_id");
 
   if (updateError) {
     logger.error({ err: updateError, userIds }, "assignAdminsToChurch batch update failed");
@@ -302,7 +299,7 @@ export async function createChurch(input: CreateChurchInput) {
     throw churchError;
   }
 
-  const assignedAdmins = await assignAdminsToChurch(church.id, input.admin_emails || []);
+  const assignedAdmins = await assignAdminsToChurch(church.id, input.admin_phones || []);
   return {
     church,
     assigned_admins: assignedAdmins,
@@ -449,9 +446,9 @@ export async function deleteChurch(churchId: string) {
 
   const { data: superAdminRows, error: superAdminRowsError } = await db
     .from("users")
-    .select("id, email")
+    .select("id, phone_number")
     .eq("church_id", churchId)
-    .in("email", Array.from(superAdminEmailSet));
+    .in("phone_number", Array.from(superAdminPhoneSet));
 
   if (superAdminRowsError) {
     logger.error({ err: superAdminRowsError, churchId }, "deleteChurch super-admin guard lookup failed");
@@ -484,7 +481,7 @@ export async function listChurchesWithStats(churchId?: string) {
   const [{ data: admins, error: adminsError }, memberCountResult, { data: pastors, error: pastorsError }] = await Promise.all([
     db
       .from("users")
-      .select("id, email, full_name, role, church_id")
+      .select("id, email, phone_number, full_name, role, church_id")
       .eq("role", "admin")
       .in("church_id", churchIds),
     rawQuery<{ church_id: string; cnt: string }>(
@@ -513,7 +510,7 @@ export async function listChurchesWithStats(churchId?: string) {
       continue;
     }
 
-    if (superAdminEmailSet.has(normalizeEmail(admin.email || ""))) {
+    if (superAdminPhoneSet.has(admin.phone_number?.trim() || "")) {
       continue;
     }
 

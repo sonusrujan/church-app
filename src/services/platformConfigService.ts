@@ -8,6 +8,7 @@ type PlatformConfigRow = {
   id: string;
   razorpay_key_id: string | null;
   razorpay_key_secret: string | null;
+  public_donation_fee_percent: number;
   updated_at: string;
 };
 
@@ -42,21 +43,29 @@ async function ensureRow(): Promise<PlatformConfigRow> {
 export async function getPlatformConfig(): Promise<{
   key_id: string;
   has_key_secret: boolean;
+  public_donation_fee_percent: number;
 }> {
   const row = await ensureRow();
   return {
     key_id: row.razorpay_key_id || "",
     has_key_secret: Boolean(row.razorpay_key_secret),
+    public_donation_fee_percent: Number(row.public_donation_fee_percent ?? 5),
   };
 }
 
 export async function updatePlatformConfig(input: {
   key_id?: string;
   key_secret?: string;
-}): Promise<{ key_id: string; has_key_secret: boolean }> {
+  public_donation_fee_percent?: number;
+}): Promise<{ key_id: string; has_key_secret: boolean; public_donation_fee_percent: number }> {
   const row = await ensureRow();
 
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+
+  if (typeof input.public_donation_fee_percent === "number") {
+    const pct = Math.min(50, Math.max(0, input.public_donation_fee_percent));
+    patch.public_donation_fee_percent = pct;
+  }
 
   if (typeof input.key_id === "string") {
     patch.razorpay_key_id = input.key_id.trim() || null;
@@ -82,7 +91,13 @@ export async function updatePlatformConfig(input: {
   return {
     key_id: data.razorpay_key_id || "",
     has_key_secret: Boolean(data.razorpay_key_secret),
+    public_donation_fee_percent: Number(data.public_donation_fee_percent ?? 5),
   };
+}
+
+export async function getPublicDonationFeePercent(): Promise<number> {
+  const row = await ensureRow();
+  return Number(row.public_donation_fee_percent ?? 5);
 }
 
 export async function getPlatformPaymentCredentials(): Promise<PlatformPaymentCredentials> {

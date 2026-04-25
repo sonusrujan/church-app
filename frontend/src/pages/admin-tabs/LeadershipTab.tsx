@@ -154,7 +154,7 @@ export default function LeadershipTab() {
       {isSuperAdmin ? (
         <div className="field-stack" style={{ marginBottom: "1.5rem" }}>
           <label>
-            Church
+            {t("admin.church")}
             <select value={leadershipChurchId} onChange={(e) => setLeadershipChurchId(e.target.value)}>
               <option value="">{t("adminTabs.leadership.selectChurchOption")}</option>
               {churches.map((c: ChurchRow) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -185,7 +185,7 @@ export default function LeadershipTab() {
             <div><span className="field-label">{t("adminTabs.leadership.photoLabel")}</span>
               <PhotoUpload
                 currentUrl={newLeaderPhotoUrl}
-                onUploaded={(url) => { setNewLeaderPhotoUrl(url); setNotice({ tone: "success", text: "Photo uploaded successfully" }); }}
+                onUploaded={(url) => { setNewLeaderPhotoUrl(url); setNotice({ tone: "success", text: t("adminTabs.leadership.successPhotoUploaded") }); }}
                 onDeleted={() => setNewLeaderPhotoUrl("")}
                 onError={(msg) => setNotice({ tone: "error", text: msg })}
                 token={token || ""}
@@ -217,13 +217,13 @@ export default function LeadershipTab() {
                 <div key={leader.id} className="list-item" style={{ position: "relative" }}>
                   {editingLeaderId === leader.id ? (
                     <div className="field-stack" style={{ width: "100%" }}>
-                      <label>Name <input type="text" value={editLeaderName} onChange={(e) => setEditLeaderName(e.target.value)} /></label>
+                      <label>{t("adminTabs.leadership.nameLabel")} <input type="text" value={editLeaderName} onChange={(e) => setEditLeaderName(e.target.value)} /></label>
                       <ValidatedInput type="phone" value={editLeaderPhone} onChange={setEditLeaderPhone} label={t("adminTabs.leadership.phoneLabel")} />
                       <ValidatedInput type="email" value={editLeaderEmail} onChange={setEditLeaderEmail} label={t("adminTabs.leadership.emailLabel")} />
                       <div><span className="field-label">{t("adminTabs.leadership.photoLabel")}</span>
                         <PhotoUpload
                           currentUrl={editLeaderPhotoUrl}
-                          onUploaded={(url) => { setEditLeaderPhotoUrl(url); setNotice({ tone: "success", text: "Photo updated successfully" }); }}
+                          onUploaded={(url) => { setEditLeaderPhotoUrl(url); setNotice({ tone: "success", text: t("adminTabs.leadership.successPhotoUpdated") }); }}
                           onDeleted={() => setEditLeaderPhotoUrl("")}
                           onError={(msg) => setNotice({ tone: "error", text: msg })}
                           token={token || ""}

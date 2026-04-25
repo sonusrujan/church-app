@@ -20,13 +20,14 @@ import donationIcon from "../assets/donation-icon.png";
 import prayerIcon from "../assets/prayer-icon.png";
 import { useApp } from "../context/AppContext";
 import { apiRequest } from "../lib/api";
+import { openRazorpayCheckout } from "../lib/razorpayCheckout";
 import LoadingSkeleton from "../components/LoadingSkeleton";
+import CheckoutSummary from "../components/CheckoutSummary";
 
 import { useI18n } from "../i18n";
 import {
   formatAmount,
   formatDate,
-  loadRazorpayCheckoutScript,
   type DueSubscriptionRow,
 } from "../types";
 
@@ -60,6 +61,7 @@ export default function DashboardPage() {
   // ── Local state ──
 
   const [selectedDueSubscriptionIds, setSelectedDueSubscriptionIds] = useState<string[]>([]);
+  const [selectedDueMonthsBySubscription, setSelectedDueMonthsBySubscription] = useState<Record<string, number>>({});
   const [cancellingSubId, setCancellingSubId] = useState("");
   const [showPaymentSummary, setShowPaymentSummary] = useState(false);
   const [cancelModalSubId, setCancelModalSubId] = useState("");
@@ -67,6 +69,7 @@ export default function DashboardPage() {
   const [saasPayBusy, setSaasPayBusy] = useState(false);
   const [saasPayments, setSaasPayments] = useState<{ id: string; amount: number; payment_method: string | null; payment_date: string; transaction_id: string | null }[]>([]);
   const [saasPaymentsLoaded, setSaasPaymentsLoaded] = useState(false);
+  const [paymentSuccessInfo, setPaymentSuccessInfo] = useState<{ amount: number; transactionId: string; date: string } | null>(null);
 
   // ── Derived values ──
   const dueSubscriptions = useMemo(
@@ -85,7 +88,11 @@ export default function DashboardPage() {
     (s) => s.status === "active" || s.status === "overdue" || s.status === "pending_first_payment",
   );
   const selectedDueAmount = selectedDueSubscriptions.reduce(
-    (sum, s) => sum + Number(s.amount || 0),
+    (sum, s) => {
+      const monthly = Number(s.monthly_amount || s.amount || 0);
+      const months = selectedDueMonthsBySubscription[s.subscription_id] || 1;
+      return sum + monthly * months;
+    },
     0,
   );
 
@@ -98,6 +105,15 @@ export default function DashboardPage() {
       if (filtered.length === 0 && dueIds.length > 0) return dueIds;
       return filtered;
     });
+    setSelectedDueMonthsBySubscription((current) => {
+      const next: Record<string, number> = {};
+      for (const due of dueSubscriptions) {
+        const maxPending = Number(due.pending_month_count || due.pending_months?.length || 1);
+        const currentValue = current[due.subscription_id] || 1;
+        next[due.subscription_id] = Math.min(Math.max(currentValue, 1), Math.max(maxPending, 1));
+      }
+      return next;
+    });
   }, [dueSubscriptions]);
 
   // ── Growth metrics ──
@@ -109,15 +125,17 @@ export default function DashboardPage() {
   };
   const [growthMetrics, setGrowthMetrics] = useState<GrowthMetrics | null>(null);
   const [growthLoading, setGrowthLoading] = useState(false);
+  const [growthError, setGrowthError] = useState(false);
 
   const loadGrowthMetrics = useCallback(async () => {
-    if (!token || !isChurchAdmin) return;
+    if (!token || (!isChurchAdmin && !isSuperAdmin)) return;
     setGrowthLoading(true);
+    setGrowthError(false);
     try {
       const data = await apiRequest<GrowthMetrics>("/api/admin/growth", { token });
       setGrowthMetrics(data);
     } catch {
-      // silently fail — not critical
+      setGrowthError(true);
     } finally {
       setGrowthLoading(false);
     }
@@ -134,6 +152,10 @@ export default function DashboardPage() {
         ? current.filter((id) => id !== subscriptionId)
         : [...current, subscriptionId],
     );
+  }
+
+  function setDueMonths(subscriptionId: string, months: number) {
+    setSelectedDueMonthsBySubscription((current) => ({ ...current, [subscriptionId]: months }));
   }
 
 
@@ -173,74 +195,53 @@ export default function DashboardPage() {
         billing_cycle: string;
       }>("/api/saas/pay/order", { method: "POST", token });
 
-      const checkoutLoaded = await loadRazorpayCheckoutScript();
-      if (!checkoutLoaded) throw new Error("Unable to load Razorpay checkout. Please retry.");
-
-      const RazorpayConstructor = (window as any).Razorpay;
-      if (typeof RazorpayConstructor !== "function")
-        throw new Error("Razorpay checkout is unavailable in this browser.");
-
-      await new Promise<void>((resolve, reject) => {
-        const razorpay = new RazorpayConstructor({
-          key: orderPayload.key_id,
-          amount: orderPayload.order.amount,
-          currency: orderPayload.order.currency || "INR",
-          name: "Shalom Platform",
-          description: `Platform Fee — ${memberDashboard?.church?.name || "Church"}`,
-          order_id: orderPayload.order.id,
-          prefill: {
-            name: authContext?.profile.full_name || "",
-            email: userEmail,
-          },
-          notes: {
-            type: "saas_fee",
-            church_id: orderPayload.church_id,
-            subscription_id: orderPayload.subscription_id,
-          },
-          handler: async (response: {
-            razorpay_order_id: string;
-            razorpay_payment_id: string;
-            razorpay_signature: string;
-          }) => {
-            try {
-              await apiRequest<{ success: true }>("/api/saas/pay/verify", {
-                method: "POST",
-                token,
-                body: {
-                  razorpay_order_id: response.razorpay_order_id,
-                  razorpay_payment_id: response.razorpay_payment_id,
-                  razorpay_signature: response.razorpay_signature,
-                },
-              });
-              await refreshMemberDashboard();
-              setSaasPaymentsLoaded(false);
-              setNotice({ tone: "success", text: t("dashboard.successPlatformFeePaid") });
-              resolve();
-            } catch (verifyError: unknown) {
-              const status =
-                verifyError && typeof verifyError === "object" && "status" in verifyError
-                  ? (verifyError as { status: number }).status
-                  : 0;
-              if (status === 503 || status === 0) {
-                await refreshMemberDashboard();
-                setNotice({
-                  tone: "error",
-                  text: t("dashboard.verificationPending"),
-                });
-                resolve();
-              } else {
-                reject(verifyError);
-              }
-            }
-          },
-          modal: { ondismiss: () => reject(new Error("Payment checkout was cancelled.")) },
-          theme: { color: "#2a6f7c" },
-        });
-        razorpay.open();
+      const response = await openRazorpayCheckout({
+        keyId: orderPayload.key_id,
+        orderId: orderPayload.order.id,
+        amountPaise: orderPayload.order.amount,
+        currency: orderPayload.order.currency || "INR",
+        name: t("dashboard.shalomPlatform"),
+        description: `Platform Fee — ${memberDashboard?.church?.name || "Church"}`,
+        prefill: { name: authContext?.profile.full_name || "", email: userEmail },
+        notes: {
+          type: "saas_fee",
+          church_id: orderPayload.church_id,
+          subscription_id: orderPayload.subscription_id,
+        },
       });
+
+      try {
+        await apiRequest<{ success: true }>("/api/saas/pay/verify", {
+          method: "POST",
+          token,
+          body: {
+            razorpay_order_id: response.razorpay_order_id,
+            razorpay_payment_id: response.razorpay_payment_id,
+            razorpay_signature: response.razorpay_signature,
+          },
+        });
+        await refreshMemberDashboard();
+        setSaasPaymentsLoaded(false);
+        setNotice({ tone: "success", text: t("dashboard.successPlatformFeePaid") });
+      } catch (verifyError: unknown) {
+        const status =
+          verifyError && typeof verifyError === "object" && "status" in verifyError
+            ? (verifyError as { status: number }).status
+            : 0;
+        if (status === 503 || status === 0) {
+          await refreshMemberDashboard();
+          setNotice({ tone: "warning", text: t("dashboard.verificationPending") });
+        } else {
+          throw verifyError;
+        }
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : t("dashboard.errorPlatformFeeFailed");
-      setNotice({ tone: "error", text: message });
+      if ((error as any)?.cancelled || message.includes("cancelled")) {
+        setNotice({ tone: "info", text: t("dashboard.paymentCancelled") });
+      } else {
+        setNotice({ tone: "error", text: message });
+      }
     } finally {
       setSaasPayBusy(false);
     }
@@ -269,7 +270,7 @@ export default function DashboardPage() {
       return;
     }
     if (!hasDueSubscription) {
-      setNotice({ tone: "neutral", text: "No dues pending right now." });
+      setNotice({ tone: "neutral", text: t("dashboard.noPendingDues") });
       return;
     }
     if (!selectedDueSubscriptionIds.length) {
@@ -291,78 +292,74 @@ export default function DashboardPage() {
       }>("/api/payments/subscription/order", {
         method: "POST",
         token,
-        body: { subscription_ids: selectedDueSubscriptionIds },
+        body: {
+          subscription_ids: selectedDueSubscriptionIds,
+          subscription_month_counts: selectedDueSubscriptionIds.reduce((acc, id) => {
+            acc[id] = selectedDueMonthsBySubscription[id] || 1;
+            return acc;
+          }, {} as Record<string, number>),
+        },
       });
 
-      const checkoutLoaded = await loadRazorpayCheckoutScript();
-      if (!checkoutLoaded) throw new Error(t("dashboard.errorCheckoutLoadFailed"));
+      const response = await openRazorpayCheckout({
+        keyId: orderPayload.key_id,
+        orderId: orderPayload.order.id,
+        amountPaise: orderPayload.order.amount,
+        currency: orderPayload.order.currency,
+        name: memberDashboard?.church?.name || t("dashboard.shalomSubscription"),
+        description: t("dashboard.subscriptionDuePayment"),
+        prefill: { name: authContext?.profile.full_name || "", email: userEmail },
+        notes: {
+          type: "subscription_due",
+          member_id: orderPayload.member_id,
+          subscription_ids: orderPayload.subscription_ids.join(","),
+        },
+      });
 
-      const RazorpayConstructor = (window as any).Razorpay;
-      if (typeof RazorpayConstructor !== "function")
-        throw new Error(t("dashboard.errorCheckoutUnavailable"));
-
-      await new Promise<void>((resolve, reject) => {
-        const razorpay = new RazorpayConstructor({
-          key: orderPayload.key_id,
-          amount: orderPayload.order.amount,
-          currency: orderPayload.order.currency,
-          name: memberDashboard?.church?.name || "SHALOM Subscription",
-          description: "Subscription Due Payment",
-          order_id: orderPayload.order.id,
-          prefill: { name: authContext?.profile.full_name || "", email: userEmail },
-          notes: {
-            type: "subscription_due",
-            member_id: orderPayload.member_id,
-            subscription_ids: orderPayload.subscription_ids.join(","),
+      try {
+        await apiRequest<{ success: true }>("/api/payments/subscription/verify", {
+          method: "POST",
+          token,
+          body: {
+            subscription_ids: orderPayload.subscription_ids,
+            subscription_month_counts: selectedDueSubscriptionIds.reduce((acc, id) => {
+              acc[id] = selectedDueMonthsBySubscription[id] || 1;
+              return acc;
+            }, {} as Record<string, number>),
+            razorpay_order_id: response.razorpay_order_id,
+            razorpay_payment_id: response.razorpay_payment_id,
+            razorpay_signature: response.razorpay_signature,
           },
-          handler: async (response: {
-            razorpay_order_id: string;
-            razorpay_payment_id: string;
-            razorpay_signature: string;
-          }) => {
-            try {
-              await apiRequest<{ success: true }>("/api/payments/subscription/verify", {
-                method: "POST",
-                token,
-                body: {
-                  subscription_ids: orderPayload.subscription_ids,
-                  razorpay_order_id: response.razorpay_order_id,
-                  razorpay_payment_id: response.razorpay_payment_id,
-                  razorpay_signature: response.razorpay_signature,
-                },
-              });
-              setSelectedDueSubscriptionIds([]);
-              await refreshMemberDashboard();
-              void loadIncomeSummary();
-              setNotice({ tone: "success", text: t("dashboard.successSubscriptionPaid") });
-              resolve();
-            } catch (verifyError: unknown) {
-              const status =
-                verifyError && typeof verifyError === "object" && "status" in verifyError
-                  ? (verifyError as { status: number }).status
-                  : 0;
-              if (status === 503 || status === 0) {
-                // Do NOT clear selected dues — payment is unverified
-                await refreshMemberDashboard();
-                void loadIncomeSummary();
-                setNotice({
-                  tone: "error",
-                  text: t("dashboard.verificationPending"),
-                });
-                resolve();
-              } else {
-                reject(verifyError);
-              }
-            }
-          },
-          modal: { ondismiss: () => reject(new Error("Payment checkout was cancelled.")) },
-          theme: { color: "#2a6f7c" },
         });
-        razorpay.open();
-      });
+        setSelectedDueSubscriptionIds([]);
+        setSelectedDueMonthsBySubscription({});
+        await refreshMemberDashboard();
+        void loadIncomeSummary();
+        setPaymentSuccessInfo({
+          amount: selectedDueAmount,
+          transactionId: response.razorpay_payment_id,
+          date: new Date().toLocaleString(),
+        });
+      } catch (verifyError: unknown) {
+        const status =
+          verifyError && typeof verifyError === "object" && "status" in verifyError
+            ? (verifyError as { status: number }).status
+            : 0;
+        if (status === 503 || status === 0) {
+          await refreshMemberDashboard();
+          void loadIncomeSummary();
+          setNotice({ tone: "warning", text: t("dashboard.verificationPending") });
+        } else {
+          throw verifyError;
+        }
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : t("dashboard.errorSubscriptionPaymentFailed");
-      setNotice({ tone: "error", text: message });
+      if ((error as any)?.cancelled || message.includes("cancelled")) {
+        setNotice({ tone: "info", text: t("dashboard.paymentCancelled") });
+      } else {
+        setNotice({ tone: "error", text: message });
+      }
     } finally {
       paymentInProgressRef.current = false;
       setBusyKey("");
@@ -399,6 +396,11 @@ export default function DashboardPage() {
           <h3>{t("dashboard.growthMetrics")}</h3>
           {growthLoading && !growthMetrics ? (
             <LoadingSkeleton lines={5} />
+          ) : growthError && !growthMetrics ? (
+            <div style={{ textAlign: "center", padding: "1rem 0" }}>
+              <p className="muted">{t("dashboard.growthMetricsError")}</p>
+              <button className="btn" onClick={() => void loadGrowthMetrics()} style={{ marginTop: "0.5rem" }}>{t("common.retry")}</button>
+            </div>
           ) : growthMetrics ? (
             <>
               <div className="stats-grid">
@@ -449,8 +451,8 @@ export default function DashboardPage() {
                   </span>
                   <span>{church.address || church.location || t("dashboard.addressNotSet")}</span>
                   <span>
-                    Members: {church.member_count || 0} | Admins: {church.admin_count || 0} |
-                    Pastors: {church.pastor_count || 0}
+                    {t("dashboard.members")}: {church.member_count || 0} | {t("dashboard.admins")}: {church.admin_count || 0} |
+                    {t("dashboard.pastors")}: {church.pastor_count || 0}
                   </span>
                 </div>
               ))
@@ -509,6 +511,11 @@ export default function DashboardPage() {
   return (
     <>
       <div className="dash-page">
+        {/* ── Loading skeleton while dashboard data is unavailable ── */}
+        {!memberDashboard && !isChurchAdmin ? (
+          <LoadingSkeleton lines={8} />
+        ) : (
+        <>
         {/* ── Onboarding card for new members ── */}
         {!isChurchAdmin && !hasActiveSubscription && !dueSubscriptions.length && !memberDashboard?.history?.length ? (
           <section className="dash-section-card" style={{ background: "var(--primary-container)", marginBottom: "1.5rem" }}>
@@ -532,7 +539,11 @@ export default function DashboardPage() {
                 <span className="dash-card-dues-label">{t("dashboard.duesContributions")}</span>
               </div>
               <span className="dash-card-dues-tag">{t("dashboard.outstandingBalance")}</span>
-              <div className="dash-card-dues-amount">{formatAmount(totalOutstanding)}</div>
+              {totalOutstanding > 0 || hasActiveSubscription ? (
+                <div className="dash-card-dues-amount">{formatAmount(totalOutstanding)}</div>
+              ) : (
+                <div className="dash-card-dues-amount" style={{ fontSize: "1rem", opacity: 0.7 }}>{t("dashboard.noDueSubscriptions")}</div>
+              )}
 
               {/* Inline subscription summary */}
               {hasActiveSubscription ? (() => {
@@ -554,7 +565,7 @@ export default function DashboardPage() {
                       </div>
                       <div className="dash-sub-stat">
                         <span className="dash-sub-stat-label">{t("dashboard.nextDue")}</span>
-                        <strong className="dash-sub-stat-value">{formatDate(memberDashboard?.tracking?.next_due_date)}</strong>
+                        <strong className="dash-sub-stat-value">{formatDate(memberDashboard?.tracking?.next_due_date, false)}</strong>
                       </div>
                     </div>
                     <div className="dash-sub-list">
@@ -563,16 +574,16 @@ export default function DashboardPage() {
                           <div>
                             <strong>{sub.person_name || sub.plan_name}</strong>
                             <span className="dash-sub-detail">
-                              {formatAmount(sub.amount)} / {sub.billing_cycle} — <em>{sub.status}</em>
+                              {formatAmount(sub.amount)} / {sub.billing_cycle} — <span className={`event-badge ${sub.status === "active" ? "badge-created" : sub.status === "overdue" ? "badge-overdue" : "badge-system"}`}>{sub.status === "active" ? t("dashboard.statusActive") : sub.status === "overdue" ? t("dashboard.statusOverdue") : sub.status === "pending_first_payment" ? t("dashboard.statusPending") : sub.status}</span>
                             </span>
                           </div>
                           <button
                             className="dash-btn-cancel"
                             onClick={() => openCancelModal(sub.id)}
                             disabled={cancellingSubId === sub.id || busyKey === "cancel-sub-request"}
-                            title="Request cancellation (admin approval required)"
+                            title={t("dashboard.cancelSubscriptionTooltip")}
                           >
-                            {cancellingSubId === sub.id ? t("common.requesting") : t("common.cancel")}
+                            {cancellingSubId === sub.id ? t("common.requesting") : t("dashboard.requestCancellation")}
                           </button>
                         </div>
                       ))}
@@ -587,23 +598,53 @@ export default function DashboardPage() {
 
               {/* Due items selection */}
               {dueSubscriptions.length > 0 ? (
-                <div style={{ marginTop: "0.75rem", borderTop: "1px solid rgba(220,208,255,0.30)", paddingTop: "0.75rem" }}>
+                <div style={{ marginTop: "1rem", borderTop: "1px solid rgba(220,208,255,0.30)", paddingTop: "0.75rem" }}>
                   <div className="dash-due-list">
-                    {dueSubscriptions.map((dueItem) => (
-                      <label key={dueItem.subscription_id} className="checkbox-line">
-                        <input
-                          type="checkbox"
-                          checked={selectedDueSubscriptionIds.includes(dueItem.subscription_id)}
-                          onChange={() => toggleDueSubscription(dueItem.subscription_id)}
-                        />
-                        <span>
-                          {dueItem.person_name}
-                          {dueItem.family_member_id ? <span className="dash-due-family-tag">{t("dashboard.family")}</span> : null}
-                        </span>
-                        {" | "}{formatAmount(dueItem.amount)} | {t("dashboard.due")}{" "}
-                        {formatDate(dueItem.next_payment_date)}
-                      </label>
-                    ))}
+                    {dueSubscriptions.map((dueItem) => {
+                      const pendingCount = Number(dueItem.pending_month_count || dueItem.pending_months?.length || 1);
+                      const selectedMonths = selectedDueMonthsBySubscription[dueItem.subscription_id] || 1;
+                      const monthlyAmount = Number(dueItem.monthly_amount || dueItem.amount || 0);
+                      const lineTotal = monthlyAmount * selectedMonths;
+                      const pendingMonthLabels = dueItem.pending_month_labels || [];
+                      return (
+                      <div key={dueItem.subscription_id} className="dash-due-card">
+                        <div className="dash-due-card-header">
+                          <label className="dash-due-card-name">
+                            <input
+                              type="checkbox"
+                              checked={selectedDueSubscriptionIds.includes(dueItem.subscription_id)}
+                              onChange={() => toggleDueSubscription(dueItem.subscription_id)}
+                            />
+                            <span>
+                              {dueItem.person_name}
+                              {dueItem.family_member_id ? <span className="dash-due-family-tag">{t("dashboard.family")}</span> : null}
+                            </span>
+                          </label>
+                          <strong className="dash-due-card-total">{formatAmount(lineTotal)}</strong>
+                        </div>
+                        <div className="dash-due-card-details">
+                          <span>{formatAmount(monthlyAmount)} / {t("dashboard.month")}</span>
+                          <span>{t("dashboard.due")} {formatDate(dueItem.next_payment_date, false)}</span>
+                        </div>
+                        <div className="dash-due-card-months">
+                          <span>{t("dashboard.months")}</span>
+                          <select
+                            value={selectedMonths}
+                            disabled={!selectedDueSubscriptionIds.includes(dueItem.subscription_id)}
+                            onChange={(e) => setDueMonths(dueItem.subscription_id, Number(e.target.value))}
+                          >
+                            {Array.from({ length: Math.max(pendingCount, 1) }, (_, i) => i + 1).map((n) => (
+                              <option key={n} value={n}>{n}</option>
+                            ))}
+                          </select>
+                        </div>
+                        {pendingMonthLabels.length > 0 && (
+                          <div className="dash-due-card-pending">
+                            {t("dashboard.pendingMonths")}: {pendingMonthLabels.join(", ")}
+                          </div>
+                        )}
+                      </div>
+                    );})}
                   </div>
                 </div>
               ) : null}
@@ -622,8 +663,16 @@ export default function DashboardPage() {
               <Link to="/history" className="dash-btn-secondary">{t("dashboard.viewHistory")}</Link>
             </div>
             {!paymentsEnabled && hasDueSubscription ? (
-              <p className="dash-muted" style={{ fontSize: "0.8rem", marginTop: "0.5rem" }}>
+              <p className="dash-muted" style={{ marginTop: "0.75rem", fontSize: "0.8rem" }}>
                 {t("dashboard.paymentsUnavailable")}{paymentConfigError ? `: ${paymentConfigError}` : "."}
+              </p>
+            ) : paymentsEnabled && hasDueSubscription && !selectedDueSubscriptionIds.length ? (
+              <p className="dash-muted" style={{ marginTop: "0.75rem", fontSize: "0.8rem" }}>
+                {t("dashboard.selectSubscriptionsToPay")}
+              </p>
+            ) : !hasDueSubscription ? (
+              <p className="dash-muted" style={{ marginTop: "0.75rem", fontSize: "0.8rem" }}>
+                {t("dashboard.noDueSubscriptions")}
               </p>
             ) : null}
           </div>
@@ -742,7 +791,7 @@ export default function DashboardPage() {
                         <strong className="dash-sub-stat-value" style={{ textTransform: "capitalize" }}>{billingCycle}</strong>
                       </div>
                       <div className="dash-sub-stat">
-                        <span className="dash-sub-stat-label">Status</span>
+                        <span className="dash-sub-stat-label">{t("dashboard.status")}</span>
                         <strong className="dash-sub-stat-value" style={{ textTransform: "capitalize" }}>{status}</strong>
                       </div>
                       {nextDue ? (
@@ -778,30 +827,30 @@ export default function DashboardPage() {
                         {saasPaymentsLoaded ? t("dashboard.hidePaymentHistory") : t("dashboard.viewPaymentHistory")}
                       </button>
                       {saasPaymentsLoaded && saasPayments.length > 0 ? (
-                        <div style={{ marginTop: "0.75rem" }}>
-                          <table style={{ width: "100%", fontSize: "0.85rem", borderCollapse: "collapse" }}>
+                        <div style={{ marginTop: "1rem" }}>
+                          <table className="data-table">
                             <thead>
-                              <tr style={{ borderBottom: "1px solid var(--border-color, #ddd)", textAlign: "left" }}>
-                                <th style={{ padding: "4px 8px" }}>{t("common.date")}</th>
-                                <th style={{ padding: "4px 8px" }}>{t("common.amount")}</th>
-                                <th style={{ padding: "4px 8px" }}>{t("common.method")}</th>
-                                <th style={{ padding: "4px 8px" }}>{t("common.txnId")}</th>
+                              <tr>
+                                <th>{t("common.date")}</th>
+                                <th>{t("common.amount")}</th>
+                                <th>{t("common.method")}</th>
+                                <th>{t("common.txnId")}</th>
                               </tr>
                             </thead>
                             <tbody>
                               {saasPayments.map((p) => (
-                                <tr key={p.id} style={{ borderBottom: "1px solid var(--border-color, #eee)" }}>
-                                  <td style={{ padding: "4px 8px" }}>{formatDate(p.payment_date)}</td>
-                                  <td style={{ padding: "4px 8px" }}>{formatAmount(p.amount)}</td>
-                                  <td style={{ padding: "4px 8px", textTransform: "capitalize" }}>{p.payment_method || "-"}</td>
-                                  <td style={{ padding: "4px 8px", fontFamily: "monospace", fontSize: "0.8rem" }}>{p.transaction_id ? p.transaction_id.slice(0, 16) : "-"}</td>
+                                <tr key={p.id}>
+                                  <td>{formatDate(p.payment_date)}</td>
+                                  <td>{formatAmount(p.amount)}</td>
+                                  <td style={{ textTransform: "capitalize" }}>{p.payment_method || "-"}</td>
+                                  <td style={{ fontFamily: "monospace", fontSize: "0.8rem" }} title={p.transaction_id || ""}>{p.transaction_id ? (<><span>{p.transaction_id.slice(0, 16)}</span> <button className="btn-copy-txn" onClick={() => { void navigator.clipboard.writeText(p.transaction_id || ""); setNotice({ tone: "success", text: t("common.copied") }); }} title={t("common.copy")}>📋</button></>) : "-"}</td>
                                 </tr>
                               ))}
                             </tbody>
                           </table>
                         </div>
                       ) : saasPaymentsLoaded && saasPayments.length === 0 ? (
-                        <p className="dash-muted" style={{ marginTop: "0.5rem", fontSize: "0.85rem" }}>{t("dashboard.noPaymentsRecorded")}</p>
+                        <p className="dash-muted" style={{ marginTop: "0.75rem", fontSize: "0.85rem" }}>{t("dashboard.noPaymentsRecorded")}</p>
                       ) : null}
                     </div>
                   </>
@@ -816,37 +865,42 @@ export default function DashboardPage() {
 
 
         </div>
+        </>
+        )}
       </div>
 
       {/* ── Payment Summary Modal ── */}
       {showPaymentSummary ? (
-        <section className="modal-overlay" role="dialog" aria-modal="true" aria-label="Payment summary"
+        <section className="modal-overlay" role="dialog" aria-modal="true" aria-label={t("checkout.title")}
           onClick={(e) => { if (e.target === e.currentTarget) setShowPaymentSummary(false); }}>
           <article className="modal-card">
-            <div className="modal-header">
-              <h3>{t("dashboard.paymentSummary")}</h3>
-              <button className="btn" onClick={() => setShowPaymentSummary(false)}>{t("common.close")}</button>
-            </div>
-            <p className="muted">{t("dashboard.paymentSummaryDesc")}</p>
-            <div className="list-stack" style={{ margin: "12px 0" }}>
-              {selectedDueSubscriptions.map((item) => (
-                <div key={item.subscription_id} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid var(--border-color, #eee)" }}>
-                  <span>{item.person_name}</span>
-                  <strong>{formatAmount(item.amount)}</strong>
-                </div>
-              ))}
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: "1.1rem", padding: "8px 0", borderTop: "2px solid var(--border-color, #ccc)" }}>
-              <span>{t("dashboard.total")}</span>
-              <span>{formatAmount(selectedDueAmount)}</span>
-            </div>
-            <div className="actions-row" style={{ marginTop: 16 }}>
-              <button className="btn btn-primary" onClick={() => { setShowPaymentSummary(false); paySubscriptionDue(); }}
-                disabled={busyKey === "pay-now"}>
-                {busyKey === "pay-now" ? t("common.processing") : t("dashboard.confirmPay")}
-              </button>
-              <button className="btn" onClick={() => setShowPaymentSummary(false)}>{t("common.cancel")}</button>
-            </div>
+            <CheckoutSummary
+              items={selectedDueSubscriptions.map((item) => {
+                const months = selectedDueMonthsBySubscription[item.subscription_id] || 1;
+                const perMonth = Number(item.monthly_amount || item.amount || 0);
+                const label = months > 1
+                  ? `${item.person_name} — ${formatAmount(perMonth)}/mo × ${months}`
+                  : `${item.person_name} (1 month)`;
+                return { label, amount: perMonth * months };
+              })}
+              platformFeePercent={Number(memberDashboard?.church?.platform_fee_percentage || 0)}
+              platformFeeEnabled={!!memberDashboard?.church?.platform_fee_enabled}
+              baseAmount={selectedDueAmount}
+              feeAmount={
+                memberDashboard?.church?.platform_fee_enabled
+                  ? Math.round(selectedDueAmount * Number(memberDashboard?.church?.platform_fee_percentage || 0)) / 100
+                  : 0
+              }
+              totalAmount={
+                memberDashboard?.church?.platform_fee_enabled
+                  ? selectedDueAmount + Math.round(selectedDueAmount * Number(memberDashboard?.church?.platform_fee_percentage || 0)) / 100
+                  : selectedDueAmount
+              }
+              payLabel={t("checkout.paySubscription")}
+              busy={busyKey === "pay-now"}
+              onPay={() => { setShowPaymentSummary(false); paySubscriptionDue(); }}
+              onCancel={() => setShowPaymentSummary(false)}
+            />
           </article>
         </section>
       ) : null}
@@ -854,8 +908,11 @@ export default function DashboardPage() {
       {cancelModalSubId ? (
         <section className="modal-overlay" onClick={() => setCancelModalSubId("")}>
           <article className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 420 }}>
-            <h3 style={{ marginBottom: 12 }}>{t("dashboard.cancelSubscription")}</h3>
-            <label htmlFor="cancel-reason" style={{ display: "block", marginBottom: 4, fontSize: "0.95rem" }}>
+            <h3 style={{ marginBottom: "0.75rem" }}>{t("dashboard.cancelSubscription")}</h3>
+            <div className="notice notice-warning" style={{ marginBottom: "0.75rem", fontSize: "0.85rem" }}>
+              {t("dashboard.cancelWarning")}
+            </div>
+            <label htmlFor="cancel-reason" style={{ display: "block", marginBottom: "0.25rem", fontSize: "0.95rem" }}>
               {t("dashboard.cancelReasonLabel")}
             </label>
             <textarea
@@ -864,7 +921,7 @@ export default function DashboardPage() {
               onChange={(e) => setCancelReason(e.target.value)}
               rows={3}
               placeholder={t("dashboard.cancelReasonPlaceholder")}
-              style={{ width: "100%", resize: "vertical", marginBottom: 16, padding: 8, borderRadius: 6, border: "1px solid var(--border-color, #ccc)" }}
+              style={{ width: "100%", resize: "vertical", marginBottom: "1rem" }}
             />
             <div className="actions-row">
               <button className="btn btn-primary" onClick={confirmSubscriptionCancellation}>
@@ -872,6 +929,42 @@ export default function DashboardPage() {
               </button>
               <button className="btn" onClick={() => setCancelModalSubId("")}>{t("common.goBack")}</button>
             </div>
+          </article>
+        </section>
+      ) : null}
+
+      {/* Razorpay loading overlay */}
+      {(busyKey === "pay-now" || saasPayBusy) && (
+        <div className="payment-loading-overlay" aria-live="assertive">
+          <div className="payment-loading-spinner" />
+          <p>{t("dashboard.openingPaymentGateway")}</p>
+        </div>
+      )}
+
+      {/* Payment success confirmation modal */}
+      {paymentSuccessInfo ? (
+        <section className="modal-overlay" onClick={() => setPaymentSuccessInfo(null)}>
+          <article className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 420, textAlign: "center" }}>
+            <div style={{ fontSize: "3rem", marginBottom: "0.5rem" }}>✅</div>
+            <h3 style={{ marginBottom: "0.75rem", color: "var(--success, #2e7d32)" }}>{t("dashboard.paymentSuccessTitle")}</h3>
+            <div style={{ textAlign: "left", background: "var(--surface-container)", borderRadius: 8, padding: "1rem", marginBottom: "1rem" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.5rem" }}>
+                <span className="muted">{t("dashboard.amountPaid")}</span>
+                <strong>{formatAmount(paymentSuccessInfo.amount)}</strong>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.5rem" }}>
+                <span className="muted">{t("dashboard.transactionId")}</span>
+                <code style={{ fontSize: "0.8rem" }}>{paymentSuccessInfo.transactionId}</code>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span className="muted">{t("dashboard.paidOn")}</span>
+                <span>{paymentSuccessInfo.date}</span>
+              </div>
+            </div>
+            <p className="muted" style={{ fontSize: "0.85rem", marginBottom: "1rem" }}>{t("dashboard.paymentSuccessHint")}</p>
+            <button className="btn btn-primary" onClick={() => setPaymentSuccessInfo(null)}>
+              {t("common.done")}
+            </button>
           </article>
         </section>
       ) : null}

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Plus, Trash2, ExternalLink, GripVertical, X } from "lucide-react";
-import { apiRequest, API_BASE_URL, tryRefreshToken } from "../../lib/api";
+import { apiRequest, apiUploadRequest } from "../../lib/api";
 import { useApp } from "../../context/AppContext";
 import LoadingSkeleton from "../../components/LoadingSkeleton";
 import EmptyState from "../../components/EmptyState";
@@ -33,7 +33,7 @@ export default function AdBannerTab() {
     if (!token) return;
     apiRequest<DioceseRow[]>("/api/diocese", { token })
       .then(setDioceses)
-      .catch(() => {});
+      .catch((e) => console.warn("Failed to load dioceses", e));
   }, [token]);
 
   // ── Auto-select first scope ID ──
@@ -83,32 +83,11 @@ export default function AdBannerTab() {
       form.append("folder", "banners");
       form.append("target_church_id", selectedScopeId);
 
-      const endpoint = detectedType === "video"
-        ? `${API_BASE_URL}/api/uploads/media`
-        : `${API_BASE_URL}/api/uploads/image`;
+      const uploadPath = detectedType === "video"
+        ? "/api/uploads/media"
+        : "/api/uploads/image";
 
-      const resp = await fetch(endpoint, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: form,
-      });
-
-      if (resp.status === 401) {
-        const newToken = await tryRefreshToken();
-        if (!newToken) { setNotice({ text: "Session expired", tone: "error" }); return; }
-        const retry = await fetch(endpoint, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${newToken}` },
-          body: form,
-        });
-        if (!retry.ok) throw new Error("Upload failed");
-        const data = await retry.json();
-        await createBanner(data.url, detectedType);
-        return;
-      }
-
-      if (!resp.ok) throw new Error("Upload failed");
-      const data = await resp.json();
+      const data = await apiUploadRequest<{ url: string }>(uploadPath, form, { token });
       await createBanner(data.url, detectedType);
     } catch {
       setNotice({ text: t("adminTabs.adBanner.errorUploadMedia"), tone: "error" });

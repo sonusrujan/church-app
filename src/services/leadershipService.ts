@@ -213,7 +213,7 @@ export async function deleteLeadershipAssignment(
   churchId: string,
   leadershipId: string
 ): Promise<{ success: boolean }> {
-  const { error } = await db
+  const { error, count } = await db
     .from("church_leadership")
     .update({ is_active: false, updated_at: new Date().toISOString() })
     .eq("id", leadershipId)
@@ -222,6 +222,10 @@ export async function deleteLeadershipAssignment(
   if (error) {
     logger.error({ err: error, leadershipId }, "deleteLeadershipAssignment failed");
     throw error;
+  }
+
+  if (count === 0) {
+    throw new Error("Leadership assignment not found or already removed");
   }
 
   return { success: true };
@@ -245,14 +249,15 @@ async function syncLeaderToPastors(
   details?: string | null
 ) {
   try {
-    // Check if pastor already exists with this phone
+    // SH-006: Check if pastor already exists with this phone in THIS church
     const { data: existing } = await db
       .from("pastors")
       .select("id")
       .eq("phone_number", phoneNumber)
+      .eq("church_id", churchId)
       .maybeSingle();
 
-    if (existing) return; // Already in pastors table
+    if (existing) return; // Already in pastors table for this church
 
     await db
       .from("pastors")

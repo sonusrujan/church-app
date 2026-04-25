@@ -6,9 +6,20 @@
  * PostgreSQL instance (AWS RDS, local, etc.).
  */
 
+import { existsSync, readFileSync } from "fs";
 import { Pool, type PoolClient, type QueryResult } from "pg";
 import { logger } from "../utils/logger";
 import { getCurrentChurchId } from "../middleware/rlsContext";
+
+// Load RDS CA bundle for verified TLS. Path is configurable via RDS_CA_PATH
+// so local dev (DB_SSL=false) and CI skip it without error.
+const RDS_CA_PATH = process.env.RDS_CA_PATH || "/etc/ssl/certs/rds-ca-bundle.pem";
+const rdsCaCert: Buffer | null = (() => {
+  try {
+    if (existsSync(RDS_CA_PATH)) return readFileSync(RDS_CA_PATH);
+  } catch { /* ignore read errors */ }
+  return null;
+})();
 
 /**
  * Wraps pool.query to prepend SET LOCAL for RLS.
@@ -18,32 +29,20 @@ import { getCurrentChurchId } from "../middleware/rlsContext";
 async function rlsQuery(text: string, values?: unknown[]): Promise<QueryResult> {
   const churchId = getCurrentChurchId();
 
-  // CRIT-03: Always use RLS context. When no church context is set,
-  // still go through a transaction with an empty/sentinel church_id
-  // so SET LOCAL is always applied. Only truly system-level queries
-  // (migrations, health checks) should bypass RLS.
-  if (!churchId || churchId === "__NONE__") {
-    // Use a transaction with empty church_id so RLS policies still evaluate
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
-      await client.query("SELECT set_config('app.current_church_id', $1, true)", [""]);
-      const result = await client.query(text, values);
-      await client.query("COMMIT");
-      return result;
-    } catch (err) {
-      await client.query("ROLLBACK").catch(() => {});
-      throw err;
-    } finally {
-      client.release();
-    }
-  }
+  // CRIT-03: Always use RLS context via SET LOCAL in a transaction.
+  // Three modes:
+  //   "__NONE__" → no request context (background jobs, cron): use nil UUID
+  //                that matches nothing and is NOT NULL, so IS NULL bypass fails.
+  //   ""        → super-admin: set empty string → NULLIF → NULL → IS NULL passes.
+  //   "uuid"    → tenant: set the specific church UUID.
+  const gucValue = churchId === "__NONE__"
+    ? "00000000-0000-0000-0000-000000000000" // nil UUID: matches no church, NOT NULL
+    : churchId; // "" for super-admin, or actual UUID for tenants
 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    // SET LOCAL only lives within the current transaction
-    await client.query("SELECT set_config('app.current_church_id', $1, true)", [churchId]);
+    await client.query("SELECT set_config('app.current_church_id', $1, true)", [gucValue]);
     const result = await client.query(text, values);
     await client.query("COMMIT");
     return result;
@@ -61,13 +60,26 @@ if (!DATABASE_URL) {
   logger.warn("DATABASE_URL not set – database queries will fail.");
 }
 
+const sslConfig = (() => {
+  if (process.env.DB_SSL === "false") return false;
+  if (rdsCaCert) return { rejectUnauthorized: true, ca: rdsCaCert };
+  // CA bundle missing — warn once at startup, fall back to encrypted-but-unverified
+  logger.warn(
+    { path: RDS_CA_PATH },
+    "RDS CA bundle not found — DB connection is encrypted but server certificate is NOT verified. " +
+    "Set RDS_CA_PATH or ensure the Dockerfile downloaded the bundle.",
+  );
+  return { rejectUnauthorized: false };
+})();
+
 export const pool = new Pool({
   connectionString: DATABASE_URL,
   max: 20,
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 10_000,
   statement_timeout: 30_000,
-  ssl: process.env.DB_SSL === "false" ? false : { rejectUnauthorized: false },
+  application_name: "shalom-api",
+  ssl: sslConfig,
 });
 
 pool.on("error", (err) => logger.error({ err }, "Unexpected PG pool error"));
@@ -75,8 +87,9 @@ pool.on("error", (err) => logger.error({ err }, "Unexpected PG pool error"));
 // PERF-15: Periodic pool health monitoring
 setInterval(() => {
   const { totalCount, idleCount, waitingCount } = pool;
-  if (totalCount > 16 || waitingCount > 0) {
-    logger.warn({ totalCount, idleCount, waitingCount, max: 20 }, "PG pool pressure");
+  const max = (pool as any).options?.max ?? 10;
+  if (totalCount > max * 0.8 || waitingCount > 0) {
+    logger.warn({ totalCount, idleCount, waitingCount, max }, "PG pool pressure");
   }
 }, 30_000);
 
@@ -408,7 +421,9 @@ class QueryBuilder<T = Record<string, unknown>> {
           return `"${col}" <= $${params.length}`;
         case "is":
           if (val === "null") return `"${col}" IS NULL`;
-          return `"${col}" IS ${val}`;
+          if (val === "true") return `"${col}" IS TRUE`;
+          if (val === "false") return `"${col}" IS FALSE`;
+          return "FALSE";
         default:
           params.push(val);
           return `"${col}" = $${params.length}`;

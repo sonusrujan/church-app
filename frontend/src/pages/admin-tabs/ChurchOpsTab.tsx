@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react";
-import { Church } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Church, QrCode, Download } from "lucide-react";
+import QRCodeLib from "qrcode";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
@@ -24,11 +25,30 @@ export default function ChurchOpsTab() {
   const [editLocation, setEditLocation] = useState("");
   const [editPhone, setEditPhone] = useState("");
   const [editLogoUrl, setEditLogoUrl] = useState("");
+  const [editChurchCode, setEditChurchCode] = useState("");
   const [deleteImpact, setDeleteImpact] = useState<ChurchDeleteImpact | null>(null);
   const [income, setIncome] = useState<IncomeSummary | null>(null);
   const [page, setPage] = useState(1);
+  const [joinQrUrl, setJoinQrUrl] = useState<string | null>(null);
 
   useEffect(() => { setPage(1); }, [results]);
+
+  const generateJoinQr = useCallback(async (code: string) => {
+    if (!code || !/^\d{8}$/.test(code)) return;
+    try {
+      const joinUrl = `${window.location.origin}/join?code=${code}`;
+      const dataUrl = await QRCodeLib.toDataURL(joinUrl, { width: 400, margin: 2, errorCorrectionLevel: "H" });
+      setJoinQrUrl(dataUrl);
+    } catch { setJoinQrUrl(null); }
+  }, []);
+
+  function downloadJoinQr() {
+    if (!joinQrUrl) return;
+    const a = document.createElement("a");
+    a.href = joinQrUrl;
+    a.download = `church-join-qr-${editChurchCode}.png`;
+    a.click();
+  }
 
   async function searchChurches() {
     if (!isSuperAdmin) return;
@@ -38,7 +58,7 @@ export default function ChurchOpsTab() {
         `/api/churches/search?query=${encodeURIComponent(query.trim())}`,
         { token },
       ),
-      "Church search complete.",
+      t("adminTabs.churchOps.successSearchComplete"),
     );
     if (rows) setResults(rows);
   }
@@ -50,6 +70,7 @@ export default function ChurchOpsTab() {
     setEditLocation(church.location || "");
     setEditPhone(church.contact_phone || "");
     setEditLogoUrl(church.logo_url || "");
+    setEditChurchCode(church.church_code || "");
     setDeleteImpact(null);
     setIncome(null);
     loadChurchIncome(church.id);
@@ -60,7 +81,7 @@ export default function ChurchOpsTab() {
     const summary = await withAuthRequest(
       "super-church-income",
       () => apiRequest<IncomeSummary>(`/api/admins/income?church_id=${encodeURIComponent(churchId)}`, { token }),
-      "Church income loaded.",
+      t("adminTabs.churchOps.successIncomeLoaded"),
     );
     if (summary) setIncome(summary);
   }
@@ -76,10 +97,11 @@ export default function ChurchOpsTab() {
           address: editAddress.trim() || null,
           location: editLocation.trim() || null,
           contact_phone: editPhone.trim() || null,
+          church_code: editChurchCode.trim() || null,
           logo_url: editLogoUrl.trim() || null,
         },
       }),
-      "Church updated.",
+      t("adminTabs.churchOps.successUpdated"),
     );
     if (!updated) return;
     setResults((cur) => cur.map((r) => (r.id === updated.id ? { ...r, ...updated } : r)));
@@ -91,7 +113,7 @@ export default function ChurchOpsTab() {
     const impact = await withAuthRequest(
       "super-church-impact",
       () => apiRequest<ChurchDeleteImpact>(`/api/churches/id/${selectedId}/delete-impact`, { token }),
-      "Church delete impact loaded.",
+      t("adminTabs.churchOps.successImpactLoaded"),
     );
     if (impact) setDeleteImpact(impact);
   }
@@ -103,7 +125,7 @@ export default function ChurchOpsTab() {
       () => apiRequest<{ deleted: true; id: string }>(`/api/churches/id/${selectedId}?force=true`, {
         method: "DELETE", token, body: { force: true },
       }),
-      "Church deleted.",
+      t("adminTabs.churchOps.successDeleted"),
     );
     if (!result) return;
     setResults((cur) => cur.filter((r) => r.id !== selectedId));
@@ -144,6 +166,21 @@ export default function ChurchOpsTab() {
             <label>{t("adminTabs.churchOps.labelAddress")}<input value={editAddress} onChange={(e) => setEditAddress(e.target.value)} /></label>
             <label>{t("adminTabs.churchOps.labelLocation")}<input value={editLocation} onChange={(e) => setEditLocation(e.target.value)} /></label>
             <label>{t("adminTabs.churchOps.labelContactPhone")}<input value={editPhone} onChange={(e) => setEditPhone(e.target.value)} /></label>
+            <label>{t("adminTabs.churchOps.labelChurchCode")}<input value={editChurchCode} onChange={(e) => setEditChurchCode(e.target.value)} /></label>
+            {editChurchCode && /^\d{8}$/.test(editChurchCode) && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-start" }}>
+                <button className="btn btn-sm" onClick={() => generateJoinQr(editChurchCode)}>
+                  <QrCode size={14} /> {t("adminTabs.churchOps.generateJoinQr")}
+                </button>
+                {joinQrUrl && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "center", padding: 12, border: "1px solid var(--border)", borderRadius: 8, background: "white" }}>
+                    <img src={joinQrUrl} alt="Join QR Code" style={{ width: 200, height: 200 }} />
+                    <p style={{ fontSize: "0.8rem", color: "var(--secondary)", margin: 0 }}>{t("adminTabs.churchOps.joinQrHint")}</p>
+                    <button className="btn btn-sm" onClick={downloadJoinQr}><Download size={14} /> {t("adminTabs.churchOps.downloadQr")}</button>
+                  </div>
+                )}
+              </div>
+            )}
             <div className="field-label">{t("adminTabs.churchOps.labelChurchLogo")}</div>
             <PhotoUpload
               currentUrl={editLogoUrl}
@@ -168,7 +205,7 @@ export default function ChurchOpsTab() {
             </div>
             {deleteImpact ? (
               <div className="notice notice-error">
-                Impact: Users {deleteImpact.users}, Members {deleteImpact.members}, Pastors {deleteImpact.pastors}, Events {deleteImpact.church_events}, Notifications {deleteImpact.church_notifications}, Prayer Requests {deleteImpact.prayer_requests}, Payments {deleteImpact.payments}
+                {t("adminTabs.churchOps.impactLabel")}: {t("adminTabs.churchOps.impactUsers")} {deleteImpact.users}, {t("adminTabs.churchOps.impactMembers")} {deleteImpact.members}, {t("adminTabs.churchOps.impactPastors")} {deleteImpact.pastors}, {t("adminTabs.churchOps.impactEvents")} {deleteImpact.church_events}, {t("adminTabs.churchOps.impactNotifications")} {deleteImpact.church_notifications}, {t("adminTabs.churchOps.impactPrayerRequests")} {deleteImpact.prayer_requests}, {t("adminTabs.churchOps.impactPayments")} {deleteImpact.payments}
               </div>
             ) : null}
 

@@ -7,7 +7,7 @@ import {
   SMTP_PORT,
   SMTP_USER,
 } from "../config";
-import { AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY } from "../config";
+import { AWS_REGION } from "../config";
 import { logger } from "../utils/logger";
 
 let cachedTransporter: nodemailer.Transporter | null = null;
@@ -78,8 +78,8 @@ export async function sendEmail(input: {
       const { SESClient, SendEmailCommand } = await import("@aws-sdk/client-ses");
       const sesClient = new SESClient({
         region: AWS_REGION,
-        ...(AWS_ACCESS_KEY_ID && AWS_SECRET_ACCESS_KEY
-          ? { credentials: { accessKeyId: AWS_ACCESS_KEY_ID, secretAccessKey: AWS_SECRET_ACCESS_KEY } }
+        ...(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
+          ? { credentials: { accessKeyId: process.env.AWS_ACCESS_KEY_ID, secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY } }
           : {}),
       });
 

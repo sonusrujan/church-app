@@ -9,12 +9,12 @@ vi.mock("../config", () => ({
 }));
 
 // Mock dbClient
-const mockMaybeSingle = vi.fn();
-const mockSelect = vi.fn(() => ({ or: vi.fn(() => ({ limit: vi.fn(() => ({ maybeSingle: mockMaybeSingle })) })) }));
+const mockRawQuery = vi.fn();
 vi.mock("../services/dbClient", () => ({
   db: {
-    from: () => ({ select: mockSelect }),
+    from: () => ({ select: vi.fn(() => ({ eq: vi.fn(() => ({ maybeSingle: vi.fn() })) })) }),
   },
+  rawQuery: (...args: any[]) => mockRawQuery(...args),
 }));
 
 // Mock rlsContext
@@ -127,7 +127,7 @@ describe("requireAuth middleware", () => {
   });
 
   it("rejects when user not found in DB", async () => {
-    mockMaybeSingle.mockResolvedValue({ data: null });
+    mockRawQuery.mockResolvedValue({ rows: [], rowCount: 0 });
     const token = jwt.sign({ sub: "user-123" }, "test-jwt-secret-key", { expiresIn: "1h" });
     const req = createMockReq(`Bearer ${token}`);
     const res = createMockRes();

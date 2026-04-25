@@ -52,6 +52,15 @@ export function useI18n() {
 const STORAGE_KEY = "shalom_language";
 const CHOSEN_KEY = "shalom_language_chosen";
 
+function getCookie(name: string): string | null {
+  const match = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function setCookie(name: string, value: string) {
+  document.cookie = `${name}=${encodeURIComponent(value)}; SameSite=Lax; path=/; max-age=31536000`;
+}
+
 function getNestedValue(obj: TranslationMap, key: string): string | undefined {
   const parts = key.split(".");
   if (parts.length === 2) {
@@ -69,23 +78,23 @@ function getNestedValue(obj: TranslationMap, key: string): string | undefined {
 
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [language, setLanguageState] = useState<SupportedLanguage>(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
+    const stored = getCookie(STORAGE_KEY);
     if (stored && stored in translations) return stored as SupportedLanguage;
     return "en";
   });
 
   const [hasChosenLanguage, setHasChosenLanguage] = useState(() => {
-    return localStorage.getItem(CHOSEN_KEY) === "true";
+    return getCookie(CHOSEN_KEY) === "true";
   });
 
   const setLanguage = useCallback((lang: SupportedLanguage) => {
     setLanguageState(lang);
-    localStorage.setItem(STORAGE_KEY, lang);
+    setCookie(STORAGE_KEY, lang);
   }, []);
 
   const markLanguageChosen = useCallback(() => {
     setHasChosenLanguage(true);
-    localStorage.setItem(CHOSEN_KEY, "true");
+    setCookie(CHOSEN_KEY, "true");
   }, []);
 
   const t = useCallback(

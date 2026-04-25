@@ -54,7 +54,8 @@ export async function createPaymentOrder(
   currency = "INR",
   receipt = "church_receipt",
   credentials: RazorpayCredentials,
-  notes?: Record<string, string>
+  notes?: Record<string, string>,
+  transfers?: Array<{ account: string; amount: number; currency: string; notes?: Record<string, string> }>,
 ) {
   const client = getRazorpayClient(credentials);
   const options: Record<string, unknown> = {
@@ -64,6 +65,7 @@ export async function createPaymentOrder(
     payment_capture: 1,
   };
   if (notes) options.notes = notes;
+  if (transfers && transfers.length > 0) options.transfers = transfers;
   const order = await client.orders.create(options as any);
   return order;
 }

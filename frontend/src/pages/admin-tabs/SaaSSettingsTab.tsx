@@ -52,7 +52,7 @@ export default function SaaSSettingsTab() {
       <p className="muted">{t("adminTabs.saasSettings.description")}</p>
       <div className="field-stack">
         <label>
-          Church
+          {t("admin.church")}
           <select value={churchId} onChange={(e) => { setChurchId(e.target.value); setSettings(null); }}>
             <option value="">{t("admin.selectChurch")}</option>
             {churches.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.unique_id || c.church_code || c.id.slice(0, 8)})</option>)}

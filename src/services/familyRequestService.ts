@@ -186,20 +186,37 @@ export async function listFamilyMemberRequests(
 
   const { data: members } = await db
     .from("members")
-    .select("id, full_name, phone_number")
+    .select("id, full_name, phone_number, membership_id, verification_status")
     .in("id", Array.from(memberIds));
 
-  const memberMap = new Map<string, { full_name: string; phone_number: string | null }>();
+  const memberMap = new Map<string, { full_name: string; phone_number: string | null; membership_id: string | null; verification_status: string | null }>();
   for (const m of members || []) {
-    memberMap.set(m.id, { full_name: m.full_name, phone_number: m.phone_number });
+    memberMap.set(m.id, { full_name: m.full_name, phone_number: m.phone_number, membership_id: m.membership_id, verification_status: m.verification_status });
+  }
+
+  // Count existing family members for each member
+  const memberIdArr = Array.from(memberIds);
+  const { data: familyCounts } = await db
+    .from("family_members")
+    .select("member_id")
+    .in("member_id", memberIdArr);
+  const familyCountMap = new Map<string, number>();
+  for (const fc of familyCounts || []) {
+    familyCountMap.set(fc.member_id, (familyCountMap.get(fc.member_id) || 0) + 1);
   }
 
   return data.map((r: any) => ({
     ...r,
     requester_name: memberMap.get(r.requester_member_id)?.full_name || "Unknown",
     requester_phone: memberMap.get(r.requester_member_id)?.phone_number || null,
+    requester_membership_id: memberMap.get(r.requester_member_id)?.membership_id || null,
+    requester_verification: memberMap.get(r.requester_member_id)?.verification_status || null,
+    requester_family_count: familyCountMap.get(r.requester_member_id) || 0,
     target_name: memberMap.get(r.target_member_id)?.full_name || "Unknown",
     target_phone: memberMap.get(r.target_member_id)?.phone_number || null,
+    target_membership_id: memberMap.get(r.target_member_id)?.membership_id || null,
+    target_verification: memberMap.get(r.target_member_id)?.verification_status || null,
+    target_family_count: familyCountMap.get(r.target_member_id) || 0,
   }));
 }
 

@@ -141,7 +141,7 @@ export default function CsvUpload({ onDataReady, maxRows = 500 }: Props) {
       >
         <Upload size={24} style={{ opacity: 0.4 }} />
         <p>{fileName || t("csv.dropzoneHint")}</p>
-        <span className="muted">CSV format: Name, Email, Phone, Address</span>
+        <span className="muted">{t("csv.formatHint")}</span>
         <input
           ref={fileRef}
           type="file"

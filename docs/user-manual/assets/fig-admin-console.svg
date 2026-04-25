@@ -1,0 +1,44 @@
+<svg width="1200" height="760" viewBox="0 0 1200 760" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="760" rx="36" fill="#F6F1FA"/>
+  <rect x="44" y="44" width="236" height="672" rx="28" fill="#2E2A5A"/>
+  <text x="88" y="104" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="800">Admin Tools</text>
+  <g fill="#DCD0FF" font-family="Arial, Helvetica, sans-serif" font-size="18">
+    <text x="88" y="164">Console</text>
+    <text x="88" y="198">Member Operations</text>
+    <text x="88" y="232">Church Operations</text>
+    <text x="88" y="266">Manual Payment</text>
+    <text x="88" y="300">Income Dashboard</text>
+    <text x="88" y="334">Push Notifications</text>
+    <text x="88" y="368">Bulk Import</text>
+    <text x="88" y="402">Audit Log</text>
+  </g>
+  <rect x="312" y="44" width="844" height="108" rx="28" fill="#FFFFFF" stroke="#DCD0FF" stroke-width="3"/>
+  <text x="352" y="98" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="34" font-weight="800">Admin Console</text>
+  <text x="352" y="128" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="18">Operational overview for churches, admins, pastors, members, and growth</text>
+  <rect x="312" y="178" width="248" height="142" rx="24" fill="#2E2A5A"/>
+  <rect x="584" y="178" width="248" height="142" rx="24" fill="#3D3880"/>
+  <rect x="856" y="178" width="248" height="142" rx="24" fill="#5A5280"/>
+  <text x="342" y="230" fill="#DCD0FF" font-family="Arial, Helvetica, sans-serif" font-size="16">Churches</text>
+  <text x="342" y="280" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="44" font-weight="800">18</text>
+  <text x="614" y="230" fill="#DCD0FF" font-family="Arial, Helvetica, sans-serif" font-size="16">Admins</text>
+  <text x="614" y="280" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="44" font-weight="800">42</text>
+  <text x="886" y="230" fill="#DCD0FF" font-family="Arial, Helvetica, sans-serif" font-size="16">Pastors</text>
+  <text x="886" y="280" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="44" font-weight="800">26</text>
+  <rect x="312" y="348" width="394" height="308" rx="24" fill="#FFFFFF" stroke="#DCD0FF" stroke-width="3"/>
+  <text x="344" y="390" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="800">Church Directory</text>
+  <rect x="344" y="418" width="330" height="72" rx="18" fill="#F7F2F7"/>
+  <rect x="344" y="506" width="330" height="72" rx="18" fill="#F7F2F7"/>
+  <text x="366" y="448" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="700">CSI Christ Church Pastorate II</text>
+  <text x="366" y="470" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="14">Unique ID, address, members, admins, pastors</text>
+  <text x="366" y="536" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="700">St. Thomas Congregation</text>
+  <text x="366" y="558" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="14">Code, location, member totals, assigned leaders</text>
+  <rect x="730" y="348" width="374" height="308" rx="24" fill="#FFFFFF" stroke="#DCD0FF" stroke-width="3"/>
+  <text x="762" y="390" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="800">Admin Directory</text>
+  <rect x="762" y="418" width="310" height="72" rx="18" fill="#F7F2F7"/>
+  <rect x="762" y="506" width="310" height="72" rx="18" fill="#F7F2F7"/>
+  <text x="784" y="448" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="700">Narra Sampath Rajkumar</text>
+  <text x="784" y="470" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="14">Email, phone, linked church</text>
+  <text x="784" y="536" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="700">Jeevan Paul</text>
+  <text x="784" y="558" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="14">Email, phone, linked church</text>
+  <text x="600" y="722" text-anchor="middle" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="700">Reference Screen: Admin Console and Directory Views</text>
+</svg>

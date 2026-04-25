@@ -2,9 +2,10 @@ import { Router } from "express";
 import { AuthRequest, requireAuth } from "../middleware/requireAuth";
 import { requireRegisteredUser } from "../middleware/requireRegisteredUser";
 import { isSuperAdminEmail } from "../middleware/requireSuperAdmin";
-import { pool } from "../services/dbClient";
+import { pool, rawQuery } from "../services/dbClient";
 import { safeErrorMessage } from "../utils/safeError";
 import { persistAuditLog } from "../utils/auditLog";
+import { validate, createDonationFundSchema, updateDonationFundSchema } from "../utils/zodSchemas";
 
 const router = Router();
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -20,7 +21,7 @@ const DEFAULT_FUNDS = [
 
 /** Seed default funds for a church if none exist yet */
 async function seedDefaultFunds(churchId: string): Promise<void> {
-  const { rows } = await pool.query(
+  const { rows } = await rawQuery(
     `SELECT 1 FROM donation_funds WHERE church_id = $1 LIMIT 1`,
     [churchId]
   );
@@ -34,30 +35,27 @@ async function seedDefaultFunds(churchId: string): Promise<void> {
     params.push(f.name, f.description, f.sort_order);
     idx += 3;
   }
-  await pool.query(
+  await rawQuery(
     `INSERT INTO donation_funds (church_id, name, description, sort_order) VALUES ${values.join(", ")} ON CONFLICT DO NOTHING`,
     params
   );
 }
 
-// ── Public: list active funds (no auth) ──
-// Used by the public donation page. Returns all active fund names across all churches.
-router.get("/public", async (_req, res) => {
+// MED-004: Require church_id to prevent cross-tenant fund enumeration
+router.get("/public", async (req, res) => {
   try {
+    const churchId = String(req.query.church_id || "").trim();
+    if (!churchId || !UUID_RE.test(churchId)) {
+      return res.status(400).json({ error: "church_id query parameter is required" });
+    }
     const { rows } = await pool.query(
-      `SELECT name FROM (
-         SELECT DISTINCT ON (LOWER(name)) name, sort_order
-         FROM donation_funds
-         WHERE is_active = true
-         ORDER BY LOWER(name), sort_order
-       ) sub
-       ORDER BY sort_order, name`
+      `SELECT name, description FROM donation_funds WHERE church_id = $1 AND is_active = true ORDER BY sort_order, name LIMIT 100`,
+      [churchId]
     );
     if (rows.length === 0) {
-      // No churches have been seeded yet — return the defaults as labels
-      return res.json(DEFAULT_FUNDS.map((f) => f.name));
+      return res.json(DEFAULT_FUNDS.map((f) => ({ name: f.name, description: f.description || "" })));
     }
-    return res.json(rows.map((r: { name: string }) => r.name));
+    return res.json(rows.map((r: { name: string; description: string | null }) => ({ name: r.name, description: r.description || "" })));
   } catch (err: any) {
     return res.status(500).json({ error: safeErrorMessage(err, "Failed to list funds") });
   }
@@ -82,11 +80,12 @@ router.get("/", requireAuth, requireRegisteredUser, async (req: AuthRequest, res
     // Lazy-seed default funds on first access
     await seedDefaultFunds(churchId);
 
-    const { rows } = await pool.query(
+    const { rows } = await rawQuery(
       `SELECT id, church_id, name, description, is_active, sort_order, created_at, updated_at
        FROM donation_funds
        WHERE church_id = $1
-       ORDER BY sort_order, name`,
+       ORDER BY sort_order, name
+       LIMIT 100`,
       [churchId]
     );
     return res.json(rows);
@@ -96,7 +95,7 @@ router.get("/", requireAuth, requireRegisteredUser, async (req: AuthRequest, res
 });
 
 // ── Create fund ──
-router.post("/", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+router.post("/", requireAuth, requireRegisteredUser, validate(createDonationFundSchema), async (req: AuthRequest, res) => {
   try {
     const isSA = req.user && isSuperAdminEmail(req.user.email, req.user.phone);
     let churchId: string;
@@ -116,14 +115,14 @@ router.post("/", requireAuth, requireRegisteredUser, async (req: AuthRequest, re
 
     if (!name) return res.status(400).json({ error: "Fund name is required" });
 
-    const { rows } = await pool.query(
+    const { rows } = await rawQuery(
       `INSERT INTO donation_funds (church_id, name, description, is_active, sort_order, created_by)
        VALUES ($1, $2, $3, true, $4, $5)
        RETURNING id, church_id, name, description, is_active, sort_order, created_at, updated_at`,
       [churchId, name, description, sortOrder, req.user!.id]
     );
 
-    await persistAuditLog(req as AuthRequest, "donation_fund.create", "donation_fund", rows[0].id, { name });
+    await persistAuditLog(req as AuthRequest, "donation_fund.create", "donation_fund", rows[0].id as string, { name });
 
     return res.status(201).json(rows[0]);
   } catch (err: any) {
@@ -135,7 +134,7 @@ router.post("/", requireAuth, requireRegisteredUser, async (req: AuthRequest, re
 });
 
 // ── Update fund ──
-router.put("/:id", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+router.put("/:id", requireAuth, requireRegisteredUser, validate(updateDonationFundSchema), async (req: AuthRequest, res) => {
   try {
     const fundId = String(req.params.id);
     if (!UUID_RE.test(fundId)) return res.status(400).json({ error: "Invalid fund id" });
@@ -143,7 +142,7 @@ router.put("/:id", requireAuth, requireRegisteredUser, async (req: AuthRequest, 
     const isSA = req.user && isSuperAdminEmail(req.user.email, req.user.phone);
 
     // Verify ownership
-    const { rows: existing } = await pool.query("SELECT church_id FROM donation_funds WHERE id = $1", [fundId]);
+    const { rows: existing } = await rawQuery("SELECT church_id FROM donation_funds WHERE id = $1", [fundId]);
     if (existing.length === 0) return res.status(404).json({ error: "Fund not found" });
 
     if (!isSA) {
@@ -171,7 +170,7 @@ router.put("/:id", requireAuth, requireRegisteredUser, async (req: AuthRequest, 
     if (vals.length === 0) return res.status(400).json({ error: "No fields to update" });
 
     vals.push(fundId);
-    const { rows } = await pool.query(
+    const { rows } = await rawQuery(
       `UPDATE donation_funds SET ${sets.join(", ")} WHERE id = $${idx}
        RETURNING id, church_id, name, description, is_active, sort_order, created_at, updated_at`,
       vals
@@ -196,7 +195,7 @@ router.delete("/:id", requireAuth, requireRegisteredUser, async (req: AuthReques
 
     const isSA = req.user && isSuperAdminEmail(req.user.email, req.user.phone);
 
-    const { rows: existing } = await pool.query("SELECT church_id, name FROM donation_funds WHERE id = $1", [fundId]);
+    const { rows: existing } = await rawQuery("SELECT church_id, name FROM donation_funds WHERE id = $1", [fundId]);
     if (existing.length === 0) return res.status(404).json({ error: "Fund not found" });
 
     if (!isSA) {
@@ -204,7 +203,7 @@ router.delete("/:id", requireAuth, requireRegisteredUser, async (req: AuthReques
       if (!["pastor", "admin"].includes(req.user!.role)) return res.status(403).json({ error: "Admin access required" });
     }
 
-    await pool.query("DELETE FROM donation_funds WHERE id = $1", [fundId]);
+    await rawQuery("DELETE FROM donation_funds WHERE id = $1", [fundId]);
 
     await persistAuditLog(req as AuthRequest, "donation_fund.delete", "donation_fund", fundId, { name: existing[0].name });
 

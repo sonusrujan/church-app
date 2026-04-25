@@ -19,9 +19,16 @@ import {
   listMyFamilyMemberCreateRequests,
   reviewFamilyMemberCreateRequest,
 } from "../services/familyMemberCreateService";
+import {
+  createAccountDeletionRequest,
+  listAccountDeletionRequests,
+  reviewAccountDeletionRequest,
+} from "../services/accountDeletionRequestService";
 import { safeErrorMessage } from "../utils/safeError";
 import { persistAuditLog } from "../utils/auditLog";
 import { queueNotification } from "../services/notificationService";
+import { validate, membershipRequestSchema, reviewDecisionSchema, cancellationRequestSchema, familyCreateRequestSchema, accountDeletionRequestSchema } from "../utils/zodSchemas";
+import { logger } from "../utils/logger";
 
 const router = Router();
 
@@ -40,7 +47,7 @@ const membershipRequestLimiter = rateLimit({
 
 // Public-ish: requires auth (Google login) but NOT requireRegisteredUser
 // This is the self-registration endpoint
-router.post("/membership-requests", requireAuth, membershipRequestLimiter, async (req: AuthRequest, res: Response) => {
+router.post("/membership-requests", requireAuth, membershipRequestLimiter, validate(membershipRequestSchema), async (req: AuthRequest, res: Response) => {
   try {
     const { church_code, full_name, phone_number, address, membership_id, message } = req.body;
 
@@ -104,7 +111,7 @@ router.get("/membership-requests", requireAuth, requireRegisteredUser, async (re
 });
 
 // Admin: approve/reject membership request
-router.post("/membership-requests/:id/review", requireAuth, requireRegisteredUser, async (req: AuthRequest, res: Response) => {
+router.post("/membership-requests/:id/review", requireAuth, requireRegisteredUser, validate(reviewDecisionSchema), async (req: AuthRequest, res: Response) => {
   try {
     const role = req.user?.role;
     const isSuperAdmin = isSuperAdminEmail(req.user?.email, req.user?.phone);
@@ -148,7 +155,7 @@ router.post("/membership-requests/:id/review", requireAuth, requireRegisteredUse
             body: decision === "approved"
               ? "Your membership request has been approved! Welcome to the church."
               : `Your membership request has been rejected.${review_note ? ` Note: ${review_note}` : ""}`,
-          }).catch(() => {});
+          }).catch((err) => { logger.warn({ err }, "Failed to send membership_request_review notification"); });
         }
       }
     } catch { /* non-critical */ }
@@ -162,7 +169,7 @@ router.post("/membership-requests/:id/review", requireAuth, requireRegisteredUse
 // ═══ Cancellation Requests ═══
 
 // Member: request subscription cancellation
-router.post("/cancellation-requests", requireAuth, requireRegisteredUser, async (req: AuthRequest, res: Response) => {
+router.post("/cancellation-requests", requireAuth, requireRegisteredUser, validate(cancellationRequestSchema), async (req: AuthRequest, res: Response) => {
   try {
     const { subscription_id, reason } = req.body;
 
@@ -222,7 +229,7 @@ router.get("/cancellation-requests", requireAuth, requireRegisteredUser, async (
 });
 
 // Admin: approve/reject cancellation request
-router.post("/cancellation-requests/:id/review", requireAuth, requireRegisteredUser, async (req: AuthRequest, res: Response) => {
+router.post("/cancellation-requests/:id/review", requireAuth, requireRegisteredUser, validate(reviewDecisionSchema), async (req: AuthRequest, res: Response) => {
   try {
     const role = req.user?.role;
     const isSuperAdmin = isSuperAdminEmail(req.user?.email, req.user?.phone);
@@ -266,7 +273,7 @@ router.post("/cancellation-requests/:id/review", requireAuth, requireRegisteredU
             body: decision === "approved"
               ? "Your subscription cancellation request has been approved."
               : "Your subscription cancellation request has been rejected.",
-          }).catch(() => {});
+          }).catch((err) => { logger.warn({ err }, "Failed to send cancellation_request_review notification"); });
         }
       }
     } catch { /* non-critical */ }
@@ -280,7 +287,7 @@ router.post("/cancellation-requests/:id/review", requireAuth, requireRegisteredU
 // ═══ Family Member Create Requests ═══
 
 // Member: submit a request to create a new family member
-router.post("/family-create-requests", requireAuth, requireRegisteredUser, async (req: AuthRequest, res: Response) => {
+router.post("/family-create-requests", requireAuth, requireRegisteredUser, validate(familyCreateRequestSchema), async (req: AuthRequest, res: Response) => {
   try {
     const { getMemberDashboardByEmail } = require("../services/userService");
     const dashboard = await getMemberDashboardByEmail(req.user!.email, req.user!.phone);
@@ -352,7 +359,7 @@ router.get("/family-create-requests", requireAuth, requireRegisteredUser, async 
 });
 
 // Admin: approve/reject family create request
-router.post("/family-create-requests/:id/review", requireAuth, requireRegisteredUser, async (req: AuthRequest, res: Response) => {
+router.post("/family-create-requests/:id/review", requireAuth, requireRegisteredUser, validate(reviewDecisionSchema), async (req: AuthRequest, res: Response) => {
   try {
     const role = req.user?.role;
     const isSuperAdmin = isSuperAdminEmail(req.user?.email, req.user?.phone);
@@ -395,7 +402,7 @@ router.post("/family-create-requests/:id/review", requireAuth, requireRegistered
             body: decision === "approved"
               ? "Your family member request has been approved."
               : "Your family member request has been rejected.",
-          }).catch(() => {});
+          }).catch((err) => { logger.warn({ err }, "Failed to send family_request_review notification"); });
         }
       }
     } catch { /* non-critical */ }
@@ -403,6 +410,119 @@ router.post("/family-create-requests/:id/review", requireAuth, requireRegistered
     return res.json(result);
   } catch (err: any) {
     return res.status(400).json({ error: safeErrorMessage(err, "Failed to review request.") });
+  }
+});
+
+// ═══ Account Deletion Requests ═══
+
+// Member: request account deletion
+router.post("/account-deletion-requests", requireAuth, requireRegisteredUser, validate(accountDeletionRequestSchema), async (req: AuthRequest, res: Response) => {
+  try {
+    const { reason } = req.body;
+
+    const { getMemberDashboardByEmail } = require("../services/userService");
+    const dashboard = await getMemberDashboardByEmail(req.user!.email, req.user!.phone);
+
+    if (!dashboard?.member) {
+      return res.status(400).json({ error: "Member profile not found." });
+    }
+
+    if (!dashboard.member.church_id) {
+      return res.status(400).json({ error: "No church associated." });
+    }
+
+    const result = await createAccountDeletionRequest(
+      dashboard.member.id,
+      req.user!.id,
+      dashboard.member.church_id,
+      typeof reason === "string" ? reason : undefined
+    );
+
+    await persistAuditLog(req, "account_deletion_request.created", "account_deletion_request", result.id, {
+      member_id: dashboard.member.id,
+    });
+
+    return res.status(201).json(result);
+  } catch (err: any) {
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to submit deletion request.") });
+  }
+});
+
+// Admin: list account deletion requests
+router.get("/account-deletion-requests", requireAuth, requireRegisteredUser, async (req: AuthRequest, res: Response) => {
+  try {
+    const role = req.user?.role;
+    const isSuperAdmin = isSuperAdminEmail(req.user?.email, req.user?.phone);
+
+    if (role !== "admin" && !isSuperAdmin) {
+      return res.status(403).json({ error: "Admin access required." });
+    }
+
+    const churchId = isSuperAdmin
+      ? ((req.query.church_id as string) || req.user?.church_id)
+      : req.user?.church_id;
+    if (!churchId) {
+      return res.status(400).json({ error: "Church ID required." });
+    }
+
+    const status = req.query.status as string | undefined;
+    const requests = await listAccountDeletionRequests(churchId, status);
+    return res.json(requests);
+  } catch (err: any) {
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to load deletion requests.") });
+  }
+});
+
+// Admin: approve/reject account deletion request
+router.post("/account-deletion-requests/:id/review", requireAuth, requireRegisteredUser, validate(reviewDecisionSchema), async (req: AuthRequest, res: Response) => {
+  try {
+    const role = req.user?.role;
+    const isSuperAdmin = isSuperAdminEmail(req.user?.email, req.user?.phone);
+
+    if (role !== "admin" && !isSuperAdmin) {
+      return res.status(403).json({ error: "Admin access required." });
+    }
+
+    const { decision, review_note } = req.body;
+    if (decision !== "approved" && decision !== "rejected") {
+      return res.status(400).json({ error: "Decision must be 'approved' or 'rejected'." });
+    }
+
+    const callerChurchId = isSuperAdmin ? undefined : req.user?.church_id;
+    const result = await reviewAccountDeletionRequest(
+      req.params.id as string,
+      decision,
+      req.user!.id,
+      typeof review_note === "string" ? review_note : undefined,
+      callerChurchId
+    );
+
+    await persistAuditLog(req, `account_deletion_request.${decision}`, "account_deletion_request", req.params.id as string, {
+      decision,
+      review_note,
+    });
+
+    // Push notification to the member about deletion decision
+    try {
+      const { db } = await import("../services/dbClient");
+      const { data: delReq } = await db.from("account_deletion_requests").select("user_id, church_id").eq("id", req.params.id).maybeSingle();
+      if (delReq?.user_id && delReq?.church_id) {
+        queueNotification({
+          church_id: delReq.church_id,
+          recipient_user_id: delReq.user_id,
+          channel: "push",
+          notification_type: "account_deletion_review",
+          subject: `Account Deletion ${decision === "approved" ? "Approved" : "Rejected"}`,
+          body: decision === "approved"
+            ? "Your account deletion request has been approved. Your account has been removed."
+            : `Your account deletion request has been rejected.${review_note ? ` Note: ${review_note}` : ""}`,
+        }).catch((err) => { logger.warn({ err }, "Failed to send account_deletion_review notification"); });
+      }
+    } catch { /* non-critical */ }
+
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to review deletion request.") });
   }
 });
 

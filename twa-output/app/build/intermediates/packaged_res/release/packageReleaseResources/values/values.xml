@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <bool name="enableNotification">true</bool>
+    <bool name="enableSiteSettingsShortcut">true</bool>
+    <color name="backgroundColor">#FFFFFF</color>
+    <color name="colorPrimary">#2E2A5A</color>
+    <color name="colorPrimaryDark">#1A1840</color>
+    <color name="navigationColor">#2E2A5A</color>
+    <color name="navigationColorDark">#1A1840</color>
+    <color name="navigationDividerColor">#2E2A5A</color>
+    <color name="navigationDividerColorDark">#1A1840</color>
+    <color name="shortcut_background">#F5F5F5</color>
+    <integer name="splashScreenFadeOutDuration">300</integer>
+    <string name="appName" translatable="false">Shalom Church App</string>
+    <string name="assetStatements">
+    [{
+        \"relation\": [\"delegate_permission/common.handle_all_urls\"],
+        \"target\": {
+            \"namespace\": \"web\",
+            \"site\": \"https://shalomapp.in\"
+        }
+    }]
+    
+  </string>
+    <string name="fallbackType" translatable="false">customtabs</string>
+    <string name="generatorApp" translatable="false">bubblewrap-cli</string>
+    <string name="hostName" translatable="false">shalomapp.in</string>
+    <string name="launchUrl" translatable="false">https://shalomapp.in/</string>
+    <string name="launcherName" translatable="false">Shalom</string>
+    <string name="orientation" translatable="false">portrait</string>
+    <string name="providerAuthority" translatable="false">com.shalomapp.twa.fileprovider</string>
+    <string name="webManifestUrl" translatable="false">https://shalomapp.in/manifest.json</string>
+</resources>

@@ -1,54 +1,61 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { apiRequest } from "../../lib/api";
 import { useApp } from "../../context/AppContext";
 import { useI18n } from "../../i18n";
 
+function normalizePhone(p: string) {
+  const d = p.replace(/\D/g, "");
+  return d.length === 12 && d.startsWith("91") ? `+${d}` : d.length === 10 ? `+91${d}` : d;
+}
+
 export default function RolesTab() {
   const { t } = useI18n();
-  const { token, busyKey, setNotice, withAuthRequest, churches, loadAdmins } = useApp();
+  const { token, busyKey, setNotice, withAuthRequest, churches, admins, loadAdmins } = useApp();
 
-  const [grantIdentifier, setGrantIdentifier] = useState("");
+  const [grantPhone, setGrantPhone] = useState("");
   const [grantChurchId, setGrantChurchId] = useState("");
-  const [revokeIdentifier, setRevokeIdentifier] = useState("");
+  const [revokePhone, setRevokePhone] = useState("");
 
-  function parseIdentifier(val: string): { email?: string; phone_number?: string } {
-    const trimmed = val.trim();
-    if (/^\+?\d[\d\s-]{6,14}$/.test(trimmed.replace(/[\s-]/g, ""))) {
-      return { phone_number: trimmed };
-    }
-    return { email: trimmed };
-  }
+  const existingAdminPhones = useMemo(
+    () => new Set(admins.map((a) => normalizePhone(a.phone_number || "")).filter(Boolean)),
+    [admins],
+  );
+
+  const isDuplicate = useMemo(() => {
+    const input = normalizePhone(grantPhone.trim());
+    return input.length >= 10 && existingAdminPhones.has(input);
+  }, [grantPhone, existingAdminPhones]);
 
   async function grantAdmin() {
-    if (!grantIdentifier.trim()) { setNotice({ tone: "error", text: t("adminTabs.roles.grantEmailRequired") }); return; }
+    if (!grantPhone.trim()) { setNotice({ tone: "error", text: t("adminTabs.roles.grantPhoneRequired") }); return; }
+    if (isDuplicate) { setNotice({ tone: "error", text: t("adminTabs.roles.alreadyAdmin") }); return; }
     const { isUuid } = await import("../../types");
     const churchId = grantChurchId.trim();
-    if (churchId && !isUuid(churchId)) { setNotice({ tone: "error", text: "Selected church is invalid." }); return; }
-    const ident = parseIdentifier(grantIdentifier);
+    if (churchId && !isUuid(churchId)) { setNotice({ tone: "error", text: t("adminTabs.roles.errorInvalidChurch") }); return; }
     const result = await withAuthRequest(
       "grant",
-      () => apiRequest<unknown>("/api/admins/grant", { method: "POST", token, body: { ...ident, church_id: churchId || undefined } }),
+      () => apiRequest<unknown>("/api/admins/grant", { method: "POST", token, body: { phone_number: grantPhone.trim(), church_id: churchId || undefined } }),
       t("adminTabs.roles.grantSuccess"),
     );
-    if (result) { setGrantIdentifier(""); await loadAdmins(); }
+    if (result) { setGrantPhone(""); setGrantChurchId(""); await loadAdmins(); }
   }
 
   async function revokeAdmin() {
-    if (!revokeIdentifier.trim()) { setNotice({ tone: "error", text: t("adminTabs.roles.revokeEmailRequired") }); return; }
-    const ident = parseIdentifier(revokeIdentifier);
+    if (!revokePhone.trim()) { setNotice({ tone: "error", text: t("adminTabs.roles.revokePhoneRequired") }); return; }
     const result = await withAuthRequest(
       "revoke",
-      () => apiRequest<unknown>("/api/admins/revoke", { method: "POST", token, body: ident }),
+      () => apiRequest<unknown>("/api/admins/revoke", { method: "POST", token, body: { phone_number: revokePhone.trim() } }),
       t("adminTabs.roles.revokeSuccess"),
     );
-    if (result) { setRevokeIdentifier(""); await loadAdmins(); }
+    if (result) { setRevokePhone(""); await loadAdmins(); }
   }
 
   return (
     <article className="panel">
       <h3>{t("adminTabs.roles.title")}</h3>
       <div className="field-stack">
-        <label>{t("adminTabs.roles.grantEmailLabel")}<input value={grantIdentifier} onChange={(e) => setGrantIdentifier(e.target.value)} placeholder="Phone or email" /></label>
+        <label>{t("adminTabs.roles.grantPhoneLabel")}<input value={grantPhone} onChange={(e) => setGrantPhone(e.target.value)} placeholder="+91 9876543210" /></label>
+        {isDuplicate && <p className="field-hint field-error" style={{ color: "var(--error, #b3261e)", fontSize: "0.82rem", margin: "-0.25rem 0 0" }}>{t("adminTabs.roles.alreadyAdmin")}</p>}
         <label>
           {t("adminTabs.roles.grantChurchLabel")}
           <select value={grantChurchId} onChange={(e) => setGrantChurchId(e.target.value)}>
@@ -57,11 +64,11 @@ export default function RolesTab() {
           </select>
         </label>
         <div className="actions-row">
-          <button className="btn btn-primary" onClick={grantAdmin} disabled={busyKey === "grant"}>
+          <button className="btn btn-primary" onClick={grantAdmin} disabled={busyKey === "grant" || isDuplicate}>
             {busyKey === "grant" ? t("common.processing") : t("adminTabs.roles.grantButton")}
           </button>
         </div>
-        <label>{t("adminTabs.roles.revokeEmailLabel")}<input value={revokeIdentifier} onChange={(e) => setRevokeIdentifier(e.target.value)} placeholder="Phone or email" /></label>
+        <label>{t("adminTabs.roles.revokePhoneLabel")}<input value={revokePhone} onChange={(e) => setRevokePhone(e.target.value)} placeholder="+91 9876543210" /></label>
         <button className="btn btn-danger" onClick={revokeAdmin} disabled={busyKey === "revoke"}>
           {busyKey === "revoke" ? t("common.processing") : t("adminTabs.roles.revokeButton")}
         </button>

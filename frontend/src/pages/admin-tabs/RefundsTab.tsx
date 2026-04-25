@@ -14,16 +14,16 @@ export default function RefundsTab() {
   const [method, setMethod] = useState("original_method");
 
   async function record() {
-    if (!paymentId.trim() || !isUuid(paymentId.trim())) { setNotice({ tone: "error", text: "Valid Payment ID is required." }); return; }
+    if (!paymentId.trim() || !isUuid(paymentId.trim())) { setNotice({ tone: "error", text: t("adminTabs.refunds.errorValidPaymentId") }); return; }
     const amt = Number(amount);
-    if (!amt || amt <= 0) { setNotice({ tone: "error", text: "Refund amount must be a positive number." }); return; }
+    if (!amt || amt <= 0) { setNotice({ tone: "error", text: t("adminTabs.refunds.errorPositiveAmount") }); return; }
     await withAuthRequest("record-refund", async () => {
       await apiRequest(`/api/ops/payments/${encodeURIComponent(paymentId.trim())}/refund`, {
         method: "POST", token,
         body: { refund_amount: amt, refund_reason: reason.trim() || undefined, refund_method: method },
       });
       setPaymentId(""); setAmount(""); setReason("");
-    }, "Refund recorded.");
+    }, t("adminTabs.refunds.successRecorded"));
   }
 
   return (
@@ -44,9 +44,9 @@ export default function RefundsTab() {
         </label>
         <label>{t("adminTabs.refunds.reasonLabel")}<input value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t("adminTabs.refunds.reasonPlaceholder")} /></label>
         <button className="btn btn-primary" onClick={() => {
-          if (!paymentId.trim() || !isUuid(paymentId.trim())) { setNotice({ tone: "error", text: "Valid Payment ID is required." }); return; }
+          if (!paymentId.trim() || !isUuid(paymentId.trim())) { setNotice({ tone: "error", text: t("adminTabs.refunds.errorValidPaymentId") }); return; }
           const amt = Number(amount);
-          if (!amt || amt <= 0) { setNotice({ tone: "error", text: "Refund amount must be a positive number." }); return; }
+          if (!amt || amt <= 0) { setNotice({ tone: "error", text: t("adminTabs.refunds.errorPositiveAmount") }); return; }
           openOperationConfirmDialog(
             t("adminTabs.refunds.confirmTitle"),
             t("adminTabs.refunds.confirmMessage", { amount: amt, id: paymentId.trim().slice(0, 8) + "..." }),

@@ -11,6 +11,11 @@ import type {
   IncomeSummary,
 } from "../types";
 
+// M-3: Re-export sub-context hooks for targeted subscriptions (fewer re-renders)
+export { useAuthCtx } from "./AuthContext";
+export { useUICtx } from "./UIContext";
+export { useDataCtx } from "./DataContext";
+
 export interface AppContextValue {
   // Auth
   token: string;
@@ -54,6 +59,19 @@ export interface AppContextValue {
   loadIncomeSummary: (overrideChurchId?: string) => Promise<void>;
   loadContext: () => Promise<AuthContextData | null>;
 
+  // Admin badge counts
+  adminCounts: {
+    membership_requests: number;
+    family_requests: number;
+    cancellation_requests: number;
+    account_deletion_requests: number;
+    refund_requests: number;
+    prayer_requests: number;
+    events: number;
+    notifications: number;
+  } | null;
+  refreshAdminCounts: () => Promise<void>;
+
   // Payments
   paymentsEnabled: boolean;
   paymentConfigError: string;
@@ -65,11 +83,14 @@ export interface AppContextValue {
     description: string,
     keyword: string,
     action: () => void | Promise<void>,
+    onDismiss?: () => void,
   ) => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
 
+/** Backward-compatible hook that combines Auth + UI + Data contexts.
+ *  Prefer useAuthCtx / useUICtx / useDataCtx for fewer re-renders. */
 export function useApp(): AppContextValue {
   const ctx = useContext(AppContext);
   if (!ctx) throw new Error("useApp must be used within AppContext.Provider");

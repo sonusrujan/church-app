@@ -101,13 +101,20 @@ export default function AnnouncementsTab() {
 
   async function handleDelete(id: string) {
     if (!token) return;
-    try {
-      await apiRequest(`/api/ops/announcements/${id}`, { method: "DELETE", token });
-      setNotice({ tone: "success", text: t("adminTabs.announcements.successDeleted") });
-      void loadItems();
-    } catch {
-      setNotice({ tone: "error", text: t("adminTabs.announcements.errorDeleteFailed") });
-    }
+    openOperationConfirmDialog(
+      t("adminTabs.announcements.deleteTitle"),
+      t("adminTabs.announcements.deleteMessage"),
+      t("adminTabs.announcements.deleteConfirmWord"),
+      async () => {
+        try {
+          await apiRequest(`/api/ops/announcements/${id}`, { method: "DELETE", token });
+          setNotice({ tone: "success", text: t("adminTabs.announcements.successDeleted") });
+          void loadItems();
+        } catch {
+          setNotice({ tone: "error", text: t("adminTabs.announcements.errorDeleteFailed") });
+        }
+      },
+    );
   }
 
   async function handleClearAll() {
@@ -161,7 +168,7 @@ export default function AnnouncementsTab() {
         }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <strong>{editingId ? t("adminTabs.announcements.editAnnouncement") : t("adminTabs.announcements.newAnnouncement")}</strong>
-            <button className="btn btn-ghost btn-sm" onClick={closeForm}><X size={16} /></button>
+            <button className="btn btn-ghost btn-sm" onClick={closeForm} aria-label="Close"><X size={16} /></button>
           </div>
           <label style={{ fontSize: "0.88rem" }}>
             {t("adminTabs.announcements.labelTitle")}
@@ -204,10 +211,10 @@ export default function AnnouncementsTab() {
                 <span className="event-meta">{formatDate(item.created_at)}</span>
               </div>
               <div style={{ display: "flex", gap: "0.5rem", flexShrink: 0 }}>
-                <button className="btn btn-ghost btn-sm" onClick={() => openEdit(item)} title={t("common.edit")}>
+                <button className="btn btn-ghost btn-sm" onClick={() => openEdit(item)} title={t("common.edit")} aria-label={t("common.edit")}>
                   <Pencil size={14} />
                 </button>
-                <button className="btn btn-ghost btn-sm" onClick={() => handleDelete(item.id)} title={t("common.delete")}>
+                <button className="btn btn-ghost btn-sm" onClick={() => handleDelete(item.id)} title={t("common.delete")} aria-label={t("common.delete")}>
                   <Trash2 size={14} />
                 </button>
               </div>

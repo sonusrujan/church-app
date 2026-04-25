@@ -19,7 +19,7 @@ type DonationFund = {
 
 export default function DonationFundsTab() {
   const { t } = useI18n();
-  const { token, isSuperAdmin, churches, setNotice, busyKey, withAuthRequest } = useApp();
+  const { token, isSuperAdmin, churches, setNotice, busyKey, withAuthRequest, openOperationConfirmDialog } = useApp();
 
   // ── Church selector (super admin) ──
   const [selectedChurchId, setSelectedChurchId] = useState("");
@@ -120,11 +120,17 @@ export default function DonationFundsTab() {
 
   // ── Delete ──
   async function handleDelete(fund: DonationFund) {
-    if (!confirm(`Delete "${fund.name}"? This cannot be undone.`)) return;
-    await withAuthRequest(`delete-fund-${fund.id}`, async () => {
-      await apiRequest(`/api/donation-funds/${fund.id}`, { method: "DELETE", token });
-      await loadFunds();
-    }, t("adminTabs.donationFunds.successFundDeleted"));
+    openOperationConfirmDialog(
+      t("adminTabs.donationFunds.confirmDeleteTitle"),
+      t("adminTabs.donationFunds.confirmDeleteMessage", { name: fund.name }),
+      t("adminTabs.donationFunds.confirmDeleteKeyword"),
+      async () => {
+        await withAuthRequest(`delete-fund-${fund.id}`, async () => {
+          await apiRequest(`/api/donation-funds/${fund.id}`, { method: "DELETE", token });
+          await loadFunds();
+        }, t("adminTabs.donationFunds.successFundDeleted"));
+      },
+    );
   }
 
   return (
@@ -139,7 +145,7 @@ export default function DonationFundsTab() {
       {/* ── Church selector (super admin only) ── */}
       {isSuperAdmin ? (
         <div style={{ marginBottom: "1rem", display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-          <label style={{ fontWeight: 600 }}>Church:</label>
+          <label style={{ fontWeight: 600 }}>{t("admin.church")}:</label>
           <select
             value={selectedChurchId}
             onChange={(e) => setSelectedChurchId(e.target.value)}

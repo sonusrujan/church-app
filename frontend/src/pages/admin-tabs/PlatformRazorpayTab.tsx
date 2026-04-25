@@ -6,6 +6,7 @@ import { useI18n } from "../../i18n";
 type PlatformConfigState = {
   key_id: string;
   has_key_secret: boolean;
+  public_donation_fee_percent: number;
 };
 
 export default function PlatformRazorpayTab() {
@@ -15,6 +16,7 @@ export default function PlatformRazorpayTab() {
   const [config, setConfig] = useState<PlatformConfigState | null>(null);
   const [keyId, setKeyId] = useState("");
   const [keySecret, setKeySecret] = useState("");
+  const [donationFeePercent, setDonationFeePercent] = useState(5);
 
   async function loadConfig() {
     const data = await withAuthRequest(
@@ -26,6 +28,7 @@ export default function PlatformRazorpayTab() {
     setConfig(data);
     setKeyId(data.key_id || "");
     setKeySecret("");
+    setDonationFeePercent(data.public_donation_fee_percent ?? 5);
   }
 
   async function saveConfig() {
@@ -37,6 +40,7 @@ export default function PlatformRazorpayTab() {
         body: {
           key_id: keyId.trim() || undefined,
           key_secret: keySecret.trim() || undefined,
+          public_donation_fee_percent: donationFeePercent,
         },
       }),
       t("adminTabs.platformRazorpay.configSavedSuccess"),
@@ -45,6 +49,7 @@ export default function PlatformRazorpayTab() {
     setConfig(result);
     setKeyId(result.key_id || "");
     setKeySecret("");
+    setDonationFeePercent(result.public_donation_fee_percent ?? 5);
   }
 
   return (
@@ -75,6 +80,23 @@ export default function PlatformRazorpayTab() {
                 : t("adminTabs.platformRazorpay.keySecretPlaceholderNew")
             }
           />
+        </label>
+      </div>
+
+      <div className="field-stack" style={{ marginTop: "1.25rem" }}>
+        <label>
+          {t("adminTabs.platformRazorpay.donationFeeLabel")}
+          <input
+            type="number"
+            min={0}
+            max={50}
+            step={0.5}
+            value={donationFeePercent}
+            onChange={(e) => setDonationFeePercent(Number(e.target.value))}
+          />
+          <span className="muted" style={{ fontSize: "0.8rem" }}>
+            {t("adminTabs.platformRazorpay.donationFeeHint")}
+          </span>
         </label>
       </div>
 

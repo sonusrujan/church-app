@@ -7,6 +7,8 @@ import {
   createChurchEvent,
   createChurchNotification,
   createPrayerRequest,
+  updatePrayerRequest,
+  deletePrayerRequestByMember,
   listChurchEvents,
   listChurchNotifications,
   listPrayerRequests,
@@ -17,13 +19,22 @@ import {
   listAllEvents,
   listAllNotifications,
   getAdminPendingCounts,
+  toggleEventRsvp,
+  getEventRsvpSummaries,
+  markNotificationsRead,
+  getReadNotificationIds,
+  getNotificationPreferences,
+  updateNotificationPreference,
 } from "../services/engagementService";
 import { logSuperAdminAudit } from "../utils/superAdminAudit";
 import { persistAuditLog } from "../utils/auditLog";
 import { notifyChurchMembers } from "../services/notificationService";
 import { logger } from "../utils/logger";
+import { validate, createEventSchema, createNotificationSchema } from "../utils/zodSchemas";
 
 const router = Router();
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function resolveChurchScope(req: AuthRequest, providedChurchId?: string) {
   if (!req.user) {
@@ -32,7 +43,10 @@ function resolveChurchScope(req: AuthRequest, providedChurchId?: string) {
 
   const requested = typeof providedChurchId === "string" ? providedChurchId.trim() : "";
   if (isSuperAdminEmail(req.user.email, req.user.phone)) {
-    return requested || req.user.church_id;
+    const resolved = requested || req.user.church_id;
+    // MED-005: Validate UUID format
+    if (resolved && !UUID_RE.test(resolved)) throw new Error("Invalid church_id format");
+    return resolved;
   }
 
   return req.user.church_id;
@@ -69,7 +83,7 @@ router.get("/admin-counts", requireAuth, requireRegisteredUser, async (req: Auth
   }
 });
 
-router.post("/events", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+router.post("/events", requireAuth, requireRegisteredUser, validate(createEventSchema), async (req: AuthRequest, res) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: "Unauthenticated" });
@@ -89,6 +103,8 @@ router.post("/events", requireAuth, requireRegisteredUser, async (req: AuthReque
       title: req.body?.title,
       message: req.body?.message,
       event_date: req.body?.event_date,
+      end_time: req.body?.end_time,
+      location: req.body?.location,
       image_url: req.body?.image_url,
       created_by: req.user.id,
     });
@@ -126,7 +142,7 @@ router.get("/notifications", requireAuth, requireRegisteredUser, async (req: Aut
       return res.status(400).json({ error: "church_id is required" });
     }
 
-    const limit = Number(req.query.limit) || 100;
+    const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 200);
     const offset = Number(req.query.offset) || 0;
     const notifications = await listChurchNotifications(churchId, limit, offset);
     return res.json(notifications);
@@ -135,7 +151,7 @@ router.get("/notifications", requireAuth, requireRegisteredUser, async (req: Aut
   }
 });
 
-router.post("/notifications", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+router.post("/notifications", requireAuth, requireRegisteredUser, validate(createNotificationSchema), async (req: AuthRequest, res) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: "Unauthenticated" });
@@ -203,6 +219,8 @@ router.put("/events/:id", requireAuth, requireRegisteredUser, async (req: AuthRe
       title: req.body?.title,
       message: req.body?.message,
       event_date: req.body?.event_date,
+      end_time: req.body?.end_time,
+      location: req.body?.location,
       image_url: req.body?.image_url,
     });
 
@@ -356,6 +374,132 @@ router.get("/prayer-requests", requireAuth, requireRegisteredUser, async (req: A
     return res.json(rows);
   } catch (err: any) {
     return res.status(400).json({ error: safeErrorMessage(err, "Failed to list prayer requests") });
+  }
+});
+
+// ── Member edit/delete own prayer request ─────────────────────
+
+router.patch("/prayer-requests/:id", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: "Unauthenticated" });
+    const requestId = String(req.params.id);
+    if (!UUID_RE.test(requestId)) return res.status(400).json({ error: "Invalid request ID" });
+
+    const churchId = resolveChurchScope(req, req.body?.church_id);
+    if (!churchId) return res.status(400).json({ error: "church_id is required" });
+
+    // Resolve member to verify ownership
+    const { rows: memberRows } = await (await import("../services/dbClient")).pool.query(
+      `SELECT id FROM members WHERE user_id = $1 AND church_id = $2 AND deleted_at IS NULL LIMIT 1`,
+      [req.user.id, churchId],
+    );
+    if (!memberRows.length) return res.status(403).json({ error: "Member profile not found" });
+
+    const updated = await updatePrayerRequest(requestId, memberRows[0].id, req.body?.details);
+    persistAuditLog(req, "engagement.prayer_request.update", "prayer_request", requestId, { church_id: churchId });
+    return res.json(updated);
+  } catch (err: any) {
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to update prayer request") });
+  }
+});
+
+router.delete("/prayer-requests/:id", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: "Unauthenticated" });
+    const requestId = String(req.params.id);
+    if (!UUID_RE.test(requestId)) return res.status(400).json({ error: "Invalid request ID" });
+
+    const churchId = resolveChurchScope(req, String(req.query.church_id || ""));
+    if (!churchId) return res.status(400).json({ error: "church_id is required" });
+
+    const { rows: memberRows } = await (await import("../services/dbClient")).pool.query(
+      `SELECT id FROM members WHERE user_id = $1 AND church_id = $2 AND deleted_at IS NULL LIMIT 1`,
+      [req.user.id, churchId],
+    );
+    if (!memberRows.length) return res.status(403).json({ error: "Member profile not found" });
+
+    const result = await deletePrayerRequestByMember(requestId, memberRows[0].id);
+    persistAuditLog(req, "engagement.prayer_request.delete", "prayer_request", requestId, { church_id: churchId });
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to delete prayer request") });
+  }
+});
+
+// ── RSVP ──────────────────────────────────────────────────────
+
+// Toggle RSVP for an event
+router.post("/events/:id/rsvp", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+  try {
+    const eventId = String(req.params.id);
+    if (!UUID_RE.test(eventId)) return res.status(400).json({ error: "Invalid event ID" });
+    const status = req.body?.status === "interested" ? "interested" : "going";
+    const result = await toggleEventRsvp(eventId, req.user!.id, status);
+    return res.json({ rsvp: result });
+  } catch (err: any) {
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to update RSVP") });
+  }
+});
+
+// Get RSVP summaries for a batch of events (used by frontend)
+router.post("/events/rsvp-summaries", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+  try {
+    const eventIds = req.body?.event_ids;
+    if (!Array.isArray(eventIds) || eventIds.length === 0) return res.json({});
+    // Limit to 200 IDs
+    const safeIds = eventIds.slice(0, 200).filter((id: string) => UUID_RE.test(id));
+    const summaries = await getEventRsvpSummaries(safeIds, req.user!.id);
+    return res.json(summaries);
+  } catch (err: any) {
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to get RSVP summaries") });
+  }
+});
+
+// ── Notification read tracking ────────────────────────────────
+
+// Get read notification IDs for current user
+router.get("/notifications/read-ids", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+  try {
+    const ids = await getReadNotificationIds(req.user!.id);
+    return res.json(ids);
+  } catch (err: any) {
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to get read IDs") });
+  }
+});
+
+// Mark notifications as read
+router.post("/notifications/mark-read", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+  try {
+    const ids = req.body?.notification_ids;
+    if (!Array.isArray(ids) || ids.length === 0) return res.json({ ok: true });
+    await markNotificationsRead(req.user!.id, ids);
+    return res.json({ ok: true });
+  } catch (err: any) {
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to mark notifications read") });
+  }
+});
+
+// ── Notification Preferences ──────────────────────────────────
+
+router.get("/notification-preferences", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+  try {
+    const prefs = await getNotificationPreferences(req.user!.id);
+    return res.json(prefs);
+  } catch (err: any) {
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to get preferences") });
+  }
+});
+
+router.put("/notification-preferences", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+  try {
+    const { category, enabled } = req.body || {};
+    if (!category || typeof enabled !== "boolean") {
+      return res.status(400).json({ error: "category (string) and enabled (boolean) are required" });
+    }
+    await updateNotificationPreference(req.user!.id, category, enabled);
+    return res.json({ ok: true });
+  } catch (err: any) {
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to update preference") });
   }
 });
 

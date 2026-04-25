@@ -19,9 +19,8 @@ const fallbackStrings: Record<string, { title: string; fallback: string; reload:
 };
 
 function getStrings() {
-  const saved = typeof localStorage !== "undefined" ? localStorage.getItem("language") : null;
-  const lang = saved || navigator.language?.slice(0, 2) || "en";
-  return fallbackStrings[lang] || fallbackStrings.en;
+  const lang = typeof localStorage !== "undefined" ? localStorage.getItem("shalom_language") : null;
+  return fallbackStrings[lang || "en"] || fallbackStrings.en;
 }
 
 export class ErrorBoundary extends Component<Props, State> {
@@ -36,13 +35,14 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("ErrorBoundary caught:", error, info.componentStack);
+    import("./sentry").then(({ Sentry }) => Sentry.captureException(error, { extra: { componentStack: info.componentStack } })).catch(() => { /* sentry not init */ });
   }
 
   render() {
     if (this.state.hasError) {
       const s = getStrings();
       return (
-        <div className="error-boundary-root">
+        <div className="error-boundary-root" role="alert">
           <h1>{s.title}</h1>
           <p>
             {this.state.error?.message || s.fallback}

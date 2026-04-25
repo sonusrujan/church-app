@@ -9,15 +9,13 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
-import { apiRequest } from "../../lib/api";
+import { apiRequest, apiBlobRequest } from "../../lib/api";
 import { useApp } from "../../context/AppContext";
 import LoadingSkeleton from "../../components/LoadingSkeleton";
 import EmptyState from "../../components/EmptyState";
 import type { IncomeDetail } from "../../types";
 import { formatAmount, emptyWeeklyIncome, emptyMonthlyTrend } from "../../types";
 import { useI18n } from "../../i18n";
-
-const API = import.meta.env.VITE_API_URL || "";
 
 type ReportPeriod = "daily" | "monthly" | "yearly" | "custom";
 const currentYear = new Date().getFullYear();
@@ -73,14 +71,11 @@ export default function IncomeDashboardTab() {
       if (reportPeriod === "monthly" || reportPeriod === "yearly") params.set("year", String(reportYear));
       if (reportPeriod === "monthly") params.set("month", String(reportMonth));
       if (reportPeriod === "custom") { params.set("start_date", customStart); params.set("end_date", customEnd); }
-      const res = await fetch(`${API}/api/admins/payment-report?${params}`, {
-        headers: { Authorization: `Bearer ${token}` },
+      const blob = await apiBlobRequest(`/api/admins/payment-report?${params}`, {
+        token,
+        accept: "text/csv",
       });
-      if (!res.ok) { const e = await res.json().catch(() => ({ error: t("adminTabs.incomeDashboard.errorDownloadFailed") })); throw new Error(e.error || t("adminTabs.incomeDashboard.errorDownloadFailed")); }
-      const blob = await res.blob();
-      const cd = res.headers.get("Content-Disposition") || "";
-      const match = cd.match(/filename="?([^"]+)"?/);
-      const filename = match?.[1] || `payment_report_${reportPeriod}.csv`;
+      const filename = `payment_report_${reportPeriod}.csv`;
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a"); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
       setNotice({ tone: "success", text: t("adminTabs.incomeDashboard.successDownloaded") });
@@ -95,7 +90,7 @@ export default function IncomeDashboardTab() {
       {isSuperAdmin ? (
         <div className="field-stack" style={{ marginBottom: "1.5rem" }}>
           <label>
-            Church
+            {t("admin.church")}
             <select value={incomeChurchId} onChange={(e) => setIncomeChurchId(e.target.value)}>
               <option value="">{t("admin.selectChurch")}</option>
               {churches.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.church_code || c.id.slice(0, 8)})</option>)}

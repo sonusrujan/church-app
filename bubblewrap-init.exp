@@ -1,0 +1,144 @@
+#!/usr/bin/expect -f
+
+set timeout 600
+
+# Source the environment
+set env(PATH) "/opt/homebrew/opt/openjdk@17/bin:$env(PATH)"
+set env(JAVA_HOME) "/opt/homebrew/opt/openjdk@17"
+
+cd /Users/sonu/Desktop/Church_Project/twa-output
+
+spawn bubblewrap init --manifest=https://shalomapp.in/manifest.json
+
+# Android SDK install prompt
+expect "Do you want Bubblewrap to install the Android SDK" {
+    send "Y\r"
+}
+
+# Accept Android SDK terms
+expect "Do you agree to the Android SDK terms" {
+    send "y\r"
+}
+
+# Wait for SDK download to finish, then answer the config prompts
+# Domain
+expect "Domain being opened in the TWA" {
+    send "shalomapp.in\r"
+}
+
+# App name
+expect "Name of the application" {
+    send "Shalom Church App\r"
+}
+
+# Launcher name (short name)
+expect "Name to be shown on the Android Launcher" {
+    send "Shalom\r"
+}
+
+# Theme color
+expect "Color used for the status bar" {
+    send "#2E2A5A\r"
+}
+
+# Navigation color
+expect "Color used for the navigation bar" {
+    send "#2E2A5A\r"
+}
+
+# Navigation color dark
+expect "Dark color used for the navigation bar" {
+    send "#1a1840\r"
+}
+
+# Navigation divider color
+expect "Color used for the navigation bar divider" {
+    send "#2E2A5A\r"
+}
+
+# Navigation divider dark
+expect "Dark color used for the navigation bar divider" {
+    send "#1a1840\r"
+}
+
+# Background color
+expect "Color used for the splash screen background" {
+    send "#ffffff\r"
+}
+
+# Start URL
+expect "Relative path to open the TWA" {
+    send "/\r"
+}
+
+# Icon URL
+expect "URL to an image that is at least 512x512px" {
+    send "https://shalomapp.in/icon-512.png\r"
+}
+
+# Maskable icon URL
+expect "URL to an image that is at least 512x512px to be used when generating maskable icons" {
+    send "https://shalomapp.in/icon-512.png\r"
+}
+
+# Notification delegation
+expect "notification delegation" {
+    send "y\r"
+}
+
+# Package ID
+expect "Android Package Name" {
+    send "com.shalomapp.twa\r"
+}
+
+# App version name
+expect "application version name" {
+    send "1.0.0\r"
+}
+
+# App version code
+expect "application version code" {
+    send "1\r"
+}
+
+# Signing key info - Key store location
+expect -re "Location of the Signing Key|signing key" {
+    send "./android.keystore\r"
+}
+
+# Key name/alias
+expect -re "Key name|alias" {
+    send "shalom\r"
+}
+
+# Display mode
+expect -re "display mode|Display mode" {
+    send "\r"
+}
+
+# Fallback type
+expect -re "Fallback Type|fallback" {
+    send "\r"
+}
+
+# Shortcuts
+expect -re "shortcuts" {
+    send "\r"
+}
+
+# Source of icon for notification
+expect -re "notification" {
+    send "\r"
+}
+
+# Generation mode
+expect -re "generation|Generation" {
+    send "\r"
+}
+
+# Wait for project generation
+expect -re "\\$|Project generated" {
+    puts "Done!"
+}
+
+expect eof

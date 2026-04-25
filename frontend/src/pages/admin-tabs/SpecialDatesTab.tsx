@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Download, Gift } from "lucide-react";
-import { API_BASE_URL } from "../../lib/api";
+import { apiBlobRequest } from "../../lib/api";
 import { useApp } from "../../context/AppContext";
 import { useI18n } from "../../i18n";
 
@@ -13,12 +13,10 @@ export default function SpecialDatesTab() {
 
   async function handleExport() {
     await withAuthRequest("export-special-dates", async () => {
-      const resp = await fetch(
-        `${API_BASE_URL}/api/special-dates/export?range=${range}`,
-        { headers: { Authorization: `Bearer ${token}` } },
+      const blob = await apiBlobRequest(
+        `/api/special-dates/export?range=${range}`,
+        { token, accept: "text/csv" },
       );
-      if (!resp.ok) throw new Error("Export failed");
-      const blob = await resp.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;

@@ -24,10 +24,10 @@ export default function CreateChurchTab() {
 
   async function createChurch() {
     if (!name.trim()) { setNotice({ tone: "error", text: t("adminTabs.createChurch.errorNameRequired") }); return; }
-    const adminEmails = admins.split(",").map((e) => e.trim()).filter(Boolean);
-    const { isValidEmail } = await import("../../types");
-    const invalid = adminEmails.find((e) => !isValidEmail(e));
-    if (invalid) { setNotice({ tone: "error", text: t("adminTabs.createChurch.errorInvalidEmail", { email: invalid }) }); return; }
+    const adminPhones = admins.split(",").map((p) => p.trim()).filter(Boolean);
+    const PHONE_RE = /^\+?\d{7,15}$/;
+    const invalid = adminPhones.find((p) => !PHONE_RE.test(p.replace(/[\s-]/g, "")));
+    if (invalid) { setNotice({ tone: "error", text: `Invalid phone number: ${invalid}` }); return; }
     if (phone.trim()) {
       const normalizedPhone = normalizeIndianPhone(phone);
       if (!isValidIndianPhone(normalizedPhone)) {
@@ -45,7 +45,7 @@ export default function CreateChurchTab() {
           address: address.trim() || undefined,
           location: location.trim() || undefined,
           contact_phone: phone.trim() ? normalizeIndianPhone(phone) : undefined,
-          admin_emails: adminEmails.length ? adminEmails : undefined,
+          admin_phones: adminPhones.length ? adminPhones : undefined,
           member_subscription_enabled: memberSubEnabled,
           church_subscription_enabled: churchSubEnabled,
           church_subscription_amount: churchSubEnabled ? parseFloat(churchSubAmount) || 0 : undefined,
@@ -79,7 +79,7 @@ export default function CreateChurchTab() {
           </div>
         </label>
         {phoneWarning && <span className="field-error">{phoneWarning}</span>}
-        <label>{t("adminTabs.createChurch.labelAdminEmails")}<input value={admins} onChange={(e) => setAdmins(e.target.value)} placeholder={t("adminTabs.createChurch.placeholderAdminEmails")} /></label>
+        <label>{t("adminTabs.createChurch.labelAdminPhones")}<input value={admins} onChange={(e) => setAdmins(e.target.value)} placeholder={t("adminTabs.createChurch.placeholderAdminPhones")} /></label>
 
         <p className="muted" style={{ marginTop: "0.75rem", marginBottom: "0.25rem", fontWeight: 600 }}>{t("adminTabs.createChurch.saasConfigTitle")}</p>
         <label className="checkbox-line">

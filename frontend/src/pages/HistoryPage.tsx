@@ -1,391 +1,266 @@
-import { useMemo, useState } from "react";
-import { Navigate } from "react-router-dom";
-import { TrendingUp, Clock, Repeat, Search, Receipt, Download, ChevronLeft, ChevronRight, FileText, Heart, CreditCard } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Navigate, Link } from "react-router-dom";
+import { Download, ChevronLeft, ChevronRight, Receipt, RotateCcw, AlertTriangle } from "lucide-react";
 import { useApp } from "../context/AppContext";
-import { paginate, totalPages } from "../components/Pagination";
-import { formatAmount, formatDate, humanizePaymentMethod, isManualPayment, type ReceiptRow } from "../types";
+import { apiRequest, apiBlobRequest } from "../lib/api";
+import { formatAmount, formatDate, type MonthlyPaymentHistoryRow } from "../types";
+import LoadingSkeleton from "../components/LoadingSkeleton";
 import { useI18n } from "../i18n";
 
-type FilterTab = "all" | "subscriptions" | "donations";
+const PAGE_SIZE = 10;
+
+function monthYearLabel(monthIso?: string | null) {
+  if (!monthIso) return "-";
+  const d = new Date(monthIso);
+  if (Number.isNaN(d.getTime())) return monthIso;
+  return d.toLocaleDateString("en-IN", { month: "short", year: "numeric" });
+}
 
 export default function HistoryPage() {
-  const { token, isSuperAdmin, memberDashboard, setNotice } = useApp();
-  const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
+  const { token, isSuperAdmin, memberDashboard, setNotice, withAuthRequest } = useApp();
   const { t } = useI18n();
 
-  const [filterTab, setFilterTab] = useState<FilterTab>("all");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [receiptPage, setReceiptPage] = useState(1);
-  const [historyPage, setHistoryPage] = useState(1);
-  const ITEMS_PER_PAGE = 8;
+  const [rows, setRows] = useState<MonthlyPaymentHistoryRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
+  const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
+  const [failedIds, setFailedIds] = useState<Set<string>>(new Set());
+  const [selectedPersonName, setSelectedPersonName] = useState<string>("all");
 
-  const sortedReceipts = useMemo(() => {
-    const receipts = [...(memberDashboard?.receipts || [])];
-    receipts.sort(
-      (a, b) => new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime(),
-    );
-    return receipts;
-  }, [memberDashboard?.receipts]);
-
-  const filteredReceipts = useMemo(() => {
-    let items = sortedReceipts;
-
-    if (filterTab === "subscriptions") {
-      items = items.filter((r) => r.subscription_id);
-    } else if (filterTab === "donations") {
-      items = items.filter((r) => !r.subscription_id);
+  const personOptions = useMemo(() => {
+    const out: Array<{ value: string; label: string }> = [{ value: "all", label: t("historyPage.allFamilyMembers") }];
+    const selfName = memberDashboard?.member?.full_name?.trim();
+    if (selfName) out.push({ value: selfName, label: selfName });
+    for (const fm of memberDashboard?.family_members || []) {
+      if (fm.full_name?.trim()) out.push({ value: fm.full_name.trim(), label: fm.full_name.trim() });
     }
+    const seen = new Set<string>();
+    return out.filter((o) => {
+      if (seen.has(o.value)) return false;
+      seen.add(o.value);
+      return true;
+    });
+  }, [memberDashboard?.member?.full_name, memberDashboard?.family_members]);
 
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      items = items.filter(
-        (r) =>
-          (r.receipt_number || "").toLowerCase().includes(q) ||
-          (r.transaction_id || "").toLowerCase().includes(q) ||
-          (r.payment_method || "").toLowerCase().includes(q) ||
-          formatAmount(r.amount).toLowerCase().includes(q),
-      );
-    }
+  useEffect(() => {
+    setPage(1);
+  }, [selectedPersonName]);
 
-    return items;
-  }, [sortedReceipts, filterTab, searchQuery]);
-
-  // Reset page when filter/search changes
-  useMemo(() => setReceiptPage(1), [filterTab, searchQuery]);
-
-  // Stats
-  const totalContributed = useMemo(() => {
-    return sortedReceipts
-      .filter((r) => (r.payment_status || "").toLowerCase() === "success")
-      .reduce((sum, r) => sum + Number(r.amount || 0), 0);
-  }, [sortedReceipts]);
-
-  const activeSubscriptions = memberDashboard?.subscriptions?.filter(
-    (s) => s.status === "active",
-  ).length || 0;
-
-  const pendingCount = sortedReceipts.filter(
-    (r) => (r.payment_status || "").toLowerCase() === "pending",
-  ).length;
-
-  async function downloadReceipt(receipt: ReceiptRow) {
-    if (!token) {
-      setNotice({ tone: "error", text: "Please sign in again to download receipts." });
-      return;
-    }
-    if (downloadingIds.has(receipt.id)) return;
-
-    setDownloadingIds((prev) => new Set(prev).add(receipt.id));
-
-    try {
-      const endpoint = receipt.receipt_download_path || `/api/payments/${receipt.id}/receipt`;
-      const response = await fetch(
-        `${import.meta.env.VITE_API_URL || "http://localhost:4000"}${endpoint}`,
-        {
-          method: "GET",
-          headers: { Authorization: `Bearer ${token}`, Accept: "application/pdf" },
-        },
-      );
-
-      if (!response.ok) {
-        const contentType = response.headers.get("content-type") || "";
-        let message = `Failed to download receipt (${response.status})`;
-        if (contentType.includes("application/json")) {
-          const payload = await response.json();
-          message = payload?.error || payload?.message || message;
-        } else {
-          const text = await response.text();
-          if (text) message = text;
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      if (!token) return;
+      setLoading(true);
+      try {
+        const offset = (page - 1) * PAGE_SIZE;
+        const query = new URLSearchParams({
+          limit: String(PAGE_SIZE + 1),
+          offset: String(offset),
+          from_date: "2025-01-01",
+        });
+        if (selectedPersonName && selectedPersonName !== "all") {
+          query.set("person_name", selectedPersonName);
         }
-        throw new Error(message);
+        const data = await apiRequest<MonthlyPaymentHistoryRow[]>(`/api/payments/my-monthly-history?${query.toString()}`, { token });
+        if (cancelled) return;
+        setRows(data.slice(0, PAGE_SIZE));
+        setHasMore(data.length > PAGE_SIZE);
+      } catch (err: unknown) {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : t("historyPage.errorLoadFailed");
+        setNotice({ tone: "error", text: message });
+      } finally {
+        if (!cancelled) setLoading(false);
       }
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [token, page, selectedPersonName, setNotice]);
 
-      const blob = await response.blob();
-      const contentDisposition = response.headers.get("content-disposition") || "";
-      const filenameMatch = contentDisposition.match(/filename=\"?([^\"]+)\"?/i);
-      const filename =
-        filenameMatch?.[1] || `receipt-${receipt.receipt_number || receipt.id}.pdf`;
-
+  async function downloadReceipt(row: MonthlyPaymentHistoryRow) {
+    const pid = row.payment_id;
+    if (!token || !pid || downloadingIds.has(pid)) return;
+    setDownloadingIds((prev) => new Set(prev).add(pid));
+    try {
+      const blob = await apiBlobRequest(`/api/payments/${pid}/receipt`, { token });
       const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = filename;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `receipt-${row.receipt_number || pid.slice(0, 8)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
       URL.revokeObjectURL(url);
-    } catch (err: any) {
-      setNotice({ tone: "error", text: err.message || t("historyPage.errorDownloadReceiptFailed") });
+    } catch (err: unknown) {
+      setFailedIds((prev) => new Set(prev).add(pid));
+      const message = err instanceof Error ? err.message : t("historyPage.errorDownloadReceiptFailed");
+      setNotice({ tone: "error", text: message });
     } finally {
       setDownloadingIds((prev) => {
         const next = new Set(prev);
-        next.delete(receipt.id);
+        next.delete(pid);
         return next;
       });
     }
   }
 
-  if (isSuperAdmin) return <Navigate to="/dashboard" replace />;
+  const [reportingId, setReportingId] = useState<string | null>(null);
+  const [reportText, setReportText] = useState("");
 
-  const paginatedReceipts = paginate(filteredReceipts, receiptPage, ITEMS_PER_PAGE);
-  const receiptTotalPages = totalPages(filteredReceipts.length, ITEMS_PER_PAGE);
-  const historyItems = memberDashboard?.history || [];
-  const paginatedHistory = paginate(historyItems, historyPage, 10);
-  const historyTotalPages = totalPages(historyItems.length, 10);
+  async function submitReport(row: MonthlyPaymentHistoryRow) {
+    if (!reportText.trim() || !row.payment_id) return;
+    await withAuthRequest(
+      "report-issue",
+      () => apiRequest("/api/ops/refund-requests", {
+        method: "POST",
+        token,
+        body: { payment_id: row.payment_id, reason: reportText.trim(), amount: row.paid_amount },
+      }),
+      t("historyPage.reportSubmitted"),
+    );
+    setReportingId(null);
+    setReportText("");
+  }
+
+  if (isSuperAdmin) return <Navigate to="/dashboard" replace />;
 
   return (
     <div className="history-page">
-      {/* Page Header */}
       <div className="history-header">
-        <h1 className="history-title">{t("history.heading")}</h1>
-        <p className="history-subtitle">
-          {t("history.subtitle")}
-        </p>
+        <h1 className="history-title">{t("historyPage.title")}</h1>
+        <p className="history-subtitle">{t("historyPage.subtitle")}</p>
       </div>
 
-      {/* Stats Grid */}
-      <div className="history-stats-grid">
-        <div className="history-stat-card">
-          <div className="history-stat-top">
-            <span className="history-stat-label">{t("history.totalContributed")}</span>
-            <TrendingUp size={20} className="history-stat-icon history-stat-icon--success" />
-          </div>
-          <div className="history-stat-value">{formatAmount(totalContributed)}</div>
-          <div className="history-stat-sub history-stat-sub--success">
-            {t("history.successfulPayments", { n: String(sortedReceipts.filter((r) => (r.payment_status || "").toLowerCase() === "success").length) })}
-          </div>
-        </div>
-        <div className="history-stat-card">
-          <div className="history-stat-top">
-            <span className="history-stat-label">{t("history.pending")}</span>
-            <Clock size={20} className="history-stat-icon history-stat-icon--warning" />
-          </div>
-          <div className="history-stat-value">{pendingCount}</div>
-          <div className="history-stat-sub">{t("history.processingNormally")}</div>
-        </div>
-        <div className="history-stat-card">
-          <div className="history-stat-top">
-            <span className="history-stat-label">{t("history.activeSubscriptions")}</span>
-            <Repeat size={20} className="history-stat-icon history-stat-icon--success" />
-          </div>
-          <div className="history-stat-value">{activeSubscriptions}</div>
-          <div className="history-stat-sub">{t("history.monthlyRenewals")}</div>
-        </div>
-      </div>
-
-      {/* Transaction List */}
       <div className="history-table-container">
-        {/* Filters Row */}
-        <div className="history-filters">
-          <div className="history-filter-tabs">
-            <button
-              className={`history-filter-btn ${filterTab === "all" ? "active" : ""}`}
-              onClick={() => setFilterTab("all")}
+        <div className="history-filters" style={{ justifyContent: "space-between", gap: 12 }}>
+          <label style={{ display: "inline-flex", flexDirection: "column", gap: 6 }}>
+            <span style={{ fontWeight: 600 }}>{t("historyPage.selectPerson")}</span>
+            <select
+              value={selectedPersonName}
+              onChange={(e) => setSelectedPersonName(e.target.value)}
+              style={{ minWidth: 260 }}
             >
-              {t("history.allTransactions")}
-            </button>
-            <button
-              className={`history-filter-btn ${filterTab === "subscriptions" ? "active" : ""}`}
-              onClick={() => setFilterTab("subscriptions")}
-            >
-              {t("history.subscriptions")}
-            </button>
-            <button
-              className={`history-filter-btn ${filterTab === "donations" ? "active" : ""}`}
-              onClick={() => setFilterTab("donations")}
-            >
-              {t("history.donations")}
-            </button>
-          </div>
-          <div className="history-search">
-            <Search size={16} className="history-search-icon" />
-            <input
-              type="text"
-              placeholder={t("history.searchPlaceholder")}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="history-search-input"
-            />
-          </div>
+              {personOptions.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </label>
+          <span className="muted" style={{ fontSize: "0.85rem", alignSelf: "end" }}>{rows.length > 0 ? t("historyPage.paginationInfo", { start: String((page - 1) * PAGE_SIZE + 1), end: String((page - 1) * PAGE_SIZE + rows.length), total: String(hasMore ? "..." : ((page - 1) * PAGE_SIZE + rows.length)) }) : ""}</span>
         </div>
 
-        {/* Table */}
-        {paginatedReceipts.length ? (
-          <>
-            <div className="history-table-scroll">
-              <table className="history-table">
-                <thead>
-                  <tr>
-                    <th>{t("history.date")}</th>
-                    <th>{t("history.description")}</th>
-                    <th>{t("history.amount")}</th>
-                    <th>Status</th>
-                    <th className="history-th-right">{t("history.action")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {paginatedReceipts.map((receipt) => (
-                    <tr key={receipt.id} className="history-row">
-                      <td className="history-cell-date">{formatDate(receipt.payment_date)}</td>
-                      <td>
-                        <div className="history-cell-desc">
-                          <div className={`history-cell-icon ${receipt.subscription_id ? "history-cell-icon--sub" : "history-cell-icon--donation"}`}>
-                            {receipt.subscription_id ? <CreditCard size={16} /> : <Heart size={16} />}
-                          </div>
-                          <div>
-                            <span className="history-cell-title">
-                              {receipt.payment_category === "subscription" || receipt.subscription_id
-                                ? t("history.subscriptionPayment")
-                                : receipt.payment_category === "donation"
-                                  ? t("history.donation")
-                                  : t("history.donation")}
-                              {isManualPayment(receipt.payment_method) ? " (Manual)" : ""}
-                              {receipt.person_name && receipt.member_id !== memberDashboard?.member?.id
-                                ? ` — ${receipt.person_name}`
-                                : ""}
-                            </span>
-                            <span className="history-cell-receipt-no">
-                              {humanizePaymentMethod(receipt.payment_method)}
-                              {receipt.receipt_number ? ` · #${receipt.receipt_number}` : ""}
-                            </span>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="history-cell-amount">{formatAmount(receipt.amount)}</td>
-                      <td>
-                        <span className={`history-status-badge ${
-                          (receipt.payment_status || "").toLowerCase() === "success"
-                            ? "history-status--paid"
-                            : (receipt.payment_status || "").toLowerCase() === "pending"
-                              ? "history-status--pending"
-                              : "history-status--other"
-                        }`}>
-                          {(receipt.payment_status || "pending").charAt(0).toUpperCase() + (receipt.payment_status || "pending").slice(1)}
-                        </span>
-                      </td>
-                      <td className="history-cell-action">
-                        <button
-                          className="history-receipt-btn"
-                          disabled={downloadingIds.has(receipt.id)}
-                          onClick={() => downloadReceipt(receipt)}
-                        >
-                          <Download size={14} />
-                          {downloadingIds.has(receipt.id) ? "..." : t("history.receipt")}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Pagination */}
-            <div className="history-pagination">
-              <span className="history-pagination-info">
-                Showing {(receiptPage - 1) * ITEMS_PER_PAGE + 1} to{" "}
-                {Math.min(receiptPage * ITEMS_PER_PAGE, filteredReceipts.length)} of{" "}
-                {filteredReceipts.length} transactions
-              </span>
-              <div className="history-pagination-btns">
-                <button
-                  className="history-pagination-btn"
-                  disabled={receiptPage <= 1}
-                  onClick={() => setReceiptPage((p) => p - 1)}
-                  aria-label="Previous page"
-                >
-                  <ChevronLeft size={18} />
-                </button>
-                <button
-                  className="history-pagination-btn"
-                  disabled={receiptPage >= receiptTotalPages}
-                  onClick={() => setReceiptPage((p) => p + 1)}
-                  aria-label="Next page"
-                >
-                  <ChevronRight size={18} />
-                </button>
-              </div>
-            </div>
-          </>
-        ) : (
-          <div className="history-empty">
-            <Receipt size={32} />
-            <p>{t("history.noTransactions")}{searchQuery ? ` matching "${searchQuery}"` : ""}.</p>
-          </div>
-        )}
-      </div>
-
-      {/* Subscription History */}
-      {historyItems.length ? (
-        <div className="history-table-container">
-          <div className="history-section-header">
-            <h2>{t("history.subscriptionHistory")}</h2>
-          </div>
+        {loading ? (
+          <LoadingSkeleton lines={6} />
+        ) : rows.length ? (
           <div className="history-table-scroll">
             <table className="history-table">
               <thead>
                 <tr>
-                  <th>{t("history.date")}</th>
-                  <th>{t("history.description")}</th>
-                  <th>{t("history.amount")}</th>
-                  <th>{t("history.status")}</th>
+                  <th>{t("historyPage.monthAndYear")}</th>
+                  <th>{t("historyPage.status")}</th>
+                  <th>{t("historyPage.paidAmount")}</th>
+                  <th>{t("historyPage.paidBy")}</th>
+                  <th>{t("historyPage.paidDate")}</th>
+                  <th>{t("historyPage.receipt")}</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
-                {paginatedHistory.map((item) => (
-                  <tr key={`${item.type}-${item.id}`} className="history-row">
-                    <td className="history-cell-date">{formatDate(item.date)}</td>
+                {rows.map((row) => {
+                  const isPaid = row.due_status === "paid";
+                  const isImported = row.due_status === "imported_paid";
+                  const isPending = !isPaid && !isImported;
+                  return (
+                  <tr key={row.id} className={`history-row ${isPending ? "history-row-pending" : ""}`}>
+                    <td>{monthYearLabel(row.month_year)}</td>
                     <td>
-                      <div className="history-cell-desc">
-                        <div className={`history-cell-icon ${item.type === "payment" ? "history-cell-icon--sub" : "history-cell-icon--event"}`}>
-                          {item.type === "payment" ? <CreditCard size={16} /> : <FileText size={16} />}
-                        </div>
-                        <span className="history-cell-title">
-                          {item.type === "payment" ? "Payment" : "Subscription"}: {item.title}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="history-cell-amount">{formatAmount(item.amount)}</td>
-                    <td>
-                      <span className={`history-status-badge ${
-                        item.status === "active" || item.status === "paid"
-                          ? "history-status--paid"
-                          : item.status === "cancelled"
-                            ? "history-status--other"
-                            : "history-status--pending"
-                      }`}>
-                        {item.status.charAt(0).toUpperCase() + item.status.slice(1)}
+                      <span className={`history-status-badge ${isPaid ? "badge-paid" : isImported ? "badge-imported" : "badge-pending"}`}>
+                        {isPaid ? t("historyPage.statusPaid") : isImported ? t("historyPage.statusImported") : t("historyPage.statusUnpaid")}
                       </span>
                     </td>
+                    <td className="history-cell-amount">{isPending ? "-" : formatAmount(row.paid_amount)}</td>
+                    <td>{row.person_name || t("common.member")}</td>
+                    <td>{row.paid_date ? formatDate(row.paid_date) : "-"}</td>
+                    <td className="history-cell-action">
+                      {isPaid && row.payment_id ? (
+                        failedIds.has(row.payment_id) ? (
+                        <button
+                          className="history-receipt-btn"
+                            onClick={() => { setFailedIds((prev) => { const n = new Set(prev); n.delete(row.payment_id!); return n; }); downloadReceipt(row); }}
+                        >
+                          <RotateCcw size={14} />
+                          {t("common.retry")}
+                        </button>
+                      ) : (
+                        <button
+                          className="history-receipt-btn"
+                          onClick={() => downloadReceipt(row)}
+                            disabled={downloadingIds.has(row.payment_id!)}
+                        >
+                          <Download size={14} />
+                            {downloadingIds.has(row.payment_id!) ? t("common.loading") : t("historyPage.downloadBtn")}
+                        </button>
+                        )
+                      ) : (
+                        <span className="muted">-</span>
+                      )}
+                    </td>
+                    <td>
+                      {isPaid && row.payment_id ? (
+                        reportingId === row.payment_id ? (
+                          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                            <input
+                              value={reportText}
+                              onChange={(e) => setReportText(e.target.value)}
+                              placeholder={t("historyPage.reportPlaceholder")}
+                              style={{ fontSize: "0.8rem", padding: "2px 6px", borderRadius: 4, border: "1px solid #ddd", width: 140 }}
+                            />
+                            <button className="history-receipt-btn" onClick={() => void submitReport(row)} disabled={!reportText.trim()} style={{ fontSize: "0.75rem" }}>
+                              {t("common.submit")}
+                            </button>
+                            <button className="history-receipt-btn" onClick={() => { setReportingId(null); setReportText(""); }} style={{ fontSize: "0.75rem" }}>
+                              {t("common.cancel")}
+                            </button>
+                          </div>
+                        ) : (
+                          <button className="history-receipt-btn" onClick={() => setReportingId(row.payment_id!)} style={{ fontSize: "0.75rem", color: "var(--error, #c33)" }}>
+                            <AlertTriangle size={12} />
+                            {t("historyPage.reportIssue")}
+                          </button>
+                        )
+                      ) : null}
+                    </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
-          {historyTotalPages > 1 ? (
-            <div className="history-pagination">
-              <span className="history-pagination-info">
-                Showing {(historyPage - 1) * 10 + 1} to {Math.min(historyPage * 10, historyItems.length)} of {historyItems.length}
-              </span>
-              <div className="history-pagination-btns">
-                <button className="history-pagination-btn" disabled={historyPage <= 1} onClick={() => setHistoryPage((p) => p - 1)} aria-label="Previous page"><ChevronLeft size={18} /></button>
-                <button className="history-pagination-btn" disabled={historyPage >= historyTotalPages} onClick={() => setHistoryPage((p) => p + 1)} aria-label="Next page"><ChevronRight size={18} /></button>
-              </div>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
+        ) : (
+          <div className="history-empty">
+            <Receipt size={30} />
+            <p>{t("historyPage.noEntries")}</p>
+            <Link to="/dashboard" className="btn btn-primary" style={{ marginTop: "0.75rem" }}>
+              {t("historyPage.goToDashboard")}
+            </Link>
+          </div>
+        )}
 
-      {/* Footer CTA */}
-      <div className="history-footer-cta">
-        <div className="history-footer-cta-text">
-          <h3>{t("history.specializedStatement")}</h3>
-          <p>{t("history.exportDescription")}</p>
+        <div className="history-pagination" style={{ marginTop: 12 }}>
+          <span className="history-pagination-info">{rows.length > 0 ? t("historyPage.paginationInfo", { start: String((page - 1) * PAGE_SIZE + 1), end: String((page - 1) * PAGE_SIZE + rows.length), total: String(hasMore ? "..." : ((page - 1) * PAGE_SIZE + rows.length)) }) : ""}</span>
+          <div className="history-pagination-btns">
+            <button className="history-pagination-btn" disabled={page <= 1 || loading} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+              <ChevronLeft size={18} />
+            </button>
+            <button className="history-pagination-btn" disabled={!hasMore || loading} onClick={() => setPage((p) => p + 1)}>
+              <ChevronRight size={18} />
+            </button>
+          </div>
         </div>
-        <div className="history-footer-cta-actions">
-          <a href="/donate" className="btn btn-primary">{t("history.makeDonation")}</a>
-        </div>
-        <div className="history-footer-cta-blur" />
       </div>
+
     </div>
   );
 }

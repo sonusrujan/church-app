@@ -10,7 +10,7 @@ import { useI18n } from "../../i18n";
 
 export default function FamilyRequestsTab() {
   const { t } = useI18n();
-  const { token, busyKey, setNotice, withAuthRequest } = useApp();
+  const { token, busyKey, setNotice, withAuthRequest, refreshAdminCounts } = useApp();
 
   const [requests, setRequests] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -39,6 +39,7 @@ export default function FamilyRequestsTab() {
         method: "POST", token, body: { decision },
       });
       void loadRequests();
+      void refreshAdminCounts();
     }, decision === "approved" ? t("adminTabs.familyRequests.successApproved") : t("adminTabs.familyRequests.successRejected"));
   }
 
@@ -67,6 +68,11 @@ export default function FamilyRequestsTab() {
                 <strong>{req.target_name || "Target"}</strong>
                 <span className="muted">{t("adminTabs.familyRequests.asRelation")} {req.relation}</span>
                 <span className={`event-badge ${req.status === "pending" ? "badge-system" : req.status === "approved" ? "badge-created" : "badge-overdue"}`}>{req.status}</span>
+              </div>
+              <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: "0.85rem" }} className="muted">
+                {req.requester_membership_id ? <span>{t("adminTabs.familyRequests.memberIdLabel")} {req.requester_membership_id}</span> : null}
+                {req.requester_verification ? <span className={`event-badge ${req.requester_verification === "verified" ? "badge-created" : "badge-system"}`}>{req.requester_verification}</span> : null}
+                <span>{t("adminTabs.familyRequests.familyCountLabel")} {req.requester_family_count ?? 0}</span>
               </div>
               {req.requester_phone ? <span className="muted">{t("adminTabs.familyRequests.requesterPhone")} {req.requester_phone}</span> : null}
               <span className="muted">{t("adminTabs.familyRequests.requestedLabel")} {formatDate(req.created_at)}</span>

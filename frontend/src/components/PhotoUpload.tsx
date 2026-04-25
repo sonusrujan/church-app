@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { API_BASE_URL, tryRefreshToken } from "../lib/api";
+import { API_BASE_URL, tryRefreshToken, apiRequest } from "../lib/api";
 import CropModal from "./CropModal";
 import { useI18n } from "../i18n";
 
@@ -140,13 +140,11 @@ export default function PhotoUpload({
     setDeleting(true);
     setError("");
     try {
-      const resp = await fetch(`${API_BASE_URL}/api/uploads/image`, {
+      await apiRequest("/api/uploads/image", {
         method: "DELETE",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        credentials: "include",
-        body: JSON.stringify({ url: currentUrl }),
+        token,
+        body: { url: currentUrl },
       });
-      if (!resp.ok) throw new Error("Delete failed");
       onDeleted();
     } catch {
       setError(t("photo.errorDeleteFailed"));
@@ -220,7 +218,7 @@ export default function PhotoUpload({
             </span>
           </div>
         ) : currentUrl ? (
-          <img src={currentUrl} alt="Photo" className="photo-upload-img" />
+          <img src={currentUrl} alt="Photo" className="photo-upload-img" loading="lazy" />
         ) : fallback ? (
           <>{fallback}</>
         ) : (

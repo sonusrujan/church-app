@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { createPortal } from "react-dom";
+import { useI18n } from "../i18n";
 
 interface CropModalProps {
   /** The raw File the user selected */
@@ -14,6 +15,7 @@ interface CropModalProps {
 
 /** Lightweight image crop modal — no external dependencies. */
 export default function CropModal({ file, onCropped, onCancel, aspect = 1 }: CropModalProps) {
+  const { t } = useI18n();
   const [imgSrc, setImgSrc] = useState("");
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -124,9 +126,9 @@ export default function CropModal({ file, onCropped, onCancel, aspect = 1 }: Cro
   const viewportSize = 280;
 
   return createPortal(
-    <div className="crop-modal-overlay" onClick={onCancel}>
-      <div className="crop-modal" onClick={(e) => e.stopPropagation()}>
-        <h3 className="crop-modal-title">Crop Image</h3>
+    <div className="crop-modal-overlay" onClick={onCancel} onKeyDown={(e) => { if (e.key === "Escape") onCancel(); }}>
+      <div className="crop-modal" role="dialog" aria-modal="true" aria-labelledby="crop-modal-title" onClick={(e) => e.stopPropagation()}>
+        <h3 id="crop-modal-title" className="crop-modal-title">{t("crop.title")}</h3>
 
         <div
           ref={viewportRef}
@@ -143,7 +145,7 @@ export default function CropModal({ file, onCropped, onCancel, aspect = 1 }: Cro
           <img
             ref={imgRef}
             src={imgSrc}
-            alt="Crop preview"
+            alt={t("crop.previewAlt")}
             className="crop-image"
             onLoad={handleImgLoad}
             style={{
@@ -152,12 +154,12 @@ export default function CropModal({ file, onCropped, onCancel, aspect = 1 }: Cro
             }}
             draggable={false}
           />
-          <div className="crop-guide" />
+          <div className="crop-guide" aria-hidden="true" />
         </div>
 
         <div className="crop-controls">
           <label className="crop-zoom-label">
-            <span>Zoom</span>
+            <span>{t("crop.zoom")}</span>
             <input
               type="range"
               min="1"
@@ -171,8 +173,8 @@ export default function CropModal({ file, onCropped, onCancel, aspect = 1 }: Cro
         </div>
 
         <div className="crop-actions">
-          <button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button>
-          <button type="button" className="btn btn-primary" onClick={handleCrop}>Crop & Upload</button>
+          <button type="button" className="btn btn-ghost" onClick={onCancel}>{t("common.cancel")}</button>
+          <button type="button" className="btn btn-primary" onClick={handleCrop}>{t("crop.cropUpload")}</button>
         </div>
       </div>
     </div>,

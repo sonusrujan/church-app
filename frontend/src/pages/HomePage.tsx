@@ -12,9 +12,12 @@ export default function HomePage() {
 
   return (
     <section className="auth-shell splash-screen">
-      <Link to="/signin" className="splash-logo-link">
-        <img src={shalomLogo} alt="Shalom" className="splash-logo" />
+      <Link to="/signin" className="splash-logo-link" aria-label="Go to sign in">
+        <img src={shalomLogo} alt="Shalom Church App" className="splash-logo" />
+        <h1 className="splash-title">Shalom</h1>
+        <p className="splash-tagline">Church Management Made Simple</p>
       </Link>
+      <p className="splash-hint">Tap to continue</p>
     </section>
   );
 }

@@ -1,0 +1,28 @@
+<svg width="1200" height="760" viewBox="0 0 1200 760" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="760" rx="36" fill="#F6F1FA"/>
+  <rect x="54" y="50" width="1092" height="660" rx="28" fill="#FFFFFF" stroke="#DCD0FF" stroke-width="3"/>
+  <text x="96" y="104" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="34" font-weight="800">Super Admin &amp; Diocese Management</text>
+  <rect x="96" y="142" width="300" height="516" rx="24" fill="#F7F2F7"/>
+  <text x="126" y="184" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="800">Dioceses</text>
+  <rect x="126" y="208" width="240" height="56" rx="18" fill="#FFFFFF" stroke="#DCD0FF"/>
+  <rect x="126" y="278" width="240" height="56" rx="18" fill="#FFFFFF" stroke="#DCD0FF"/>
+  <rect x="126" y="348" width="240" height="56" rx="18" fill="#FFFFFF" stroke="#DCD0FF"/>
+  <text x="146" y="243" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="16">Hyderabad Diocese</text>
+  <text x="146" y="313" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="16">Kurnool Diocese</text>
+  <text x="146" y="383" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="16">Coastal Diocese</text>
+  <rect x="430" y="142" width="300" height="516" rx="24" fill="#F7F2F7"/>
+  <text x="460" y="184" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="800">Assigned Churches</text>
+  <rect x="460" y="208" width="240" height="56" rx="18" fill="#FFFFFF" stroke="#DCD0FF"/>
+  <rect x="460" y="278" width="240" height="56" rx="18" fill="#FFFFFF" stroke="#DCD0FF"/>
+  <text x="480" y="243" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="16">CSI Christ Church Pastorate II</text>
+  <text x="480" y="313" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="16">St. Luke Fellowship</text>
+  <rect x="764" y="142" width="340" height="516" rx="24" fill="#F7F2F7"/>
+  <text x="794" y="184" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="800">Platform Controls</text>
+  <text x="794" y="232" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="16">SaaS subscriptions, free trials, platform Razorpay, global reports, audit monitoring</text>
+  <rect x="794" y="278" width="276" height="48" rx="16" fill="#FFFFFF" stroke="#DCD0FF"/>
+  <rect x="794" y="342" width="276" height="48" rx="16" fill="#FFFFFF" stroke="#DCD0FF"/>
+  <rect x="794" y="406" width="276" height="48" rx="16" fill="#FFFFFF" stroke="#DCD0FF"/>
+  <rect x="794" y="482" width="180" height="50" rx="18" fill="#2E2A5A"/>
+  <text x="884" y="514" text-anchor="middle" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="700">Open Report</text>
+  <text x="600" y="722" text-anchor="middle" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="700">Reference Screen: Diocese Assignment and Platform Governance</text>
+</svg>

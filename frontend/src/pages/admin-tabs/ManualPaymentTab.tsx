@@ -3,7 +3,7 @@ import { apiRequest } from "../../lib/api";
 import { useApp } from "../../context/AppContext";
 import SearchSelect, { type SearchSelectOption } from "../../components/SearchSelect";
 import type { MemberRow, SubscriptionRow } from "../../types";
-import { isUuid } from "../../types";
+import { isUuid, formatAmount } from "../../types";
 import { useI18n } from "../../i18n";
 
 type PaymentPurpose = "subscription" | "donation" | "other";
@@ -125,7 +125,7 @@ export default function ManualPaymentTab() {
                 <option value="">{t("adminTabs.manualPayment.selectSubscription")}</option>
                 {memberSubs.map((s) => (
                   <option key={s.id} value={s.id}>
-                    {s.plan_name} — ₹{Number(s.amount).toFixed(0)}/{s.billing_cycle} ({s.status})
+                    {s.plan_name} — {formatAmount(Number(s.amount))}/{s.billing_cycle} ({s.status})
                   </option>
                 ))}
               </select>
@@ -146,7 +146,7 @@ export default function ManualPaymentTab() {
             <option value="other">{t("adminTabs.manualPayment.methodOther")}</option>
           </select>
         </label>
-        <label>{t("adminTabs.manualPayment.paymentDateLabel")}<input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label>
+        <label>{t("adminTabs.manualPayment.paymentDateLabel")}<input type="date" value={date} onChange={(e) => setDate(e.target.value)} max={new Date().toISOString().split("T")[0]} /></label>
         <label>{t("adminTabs.manualPayment.noteLabel")}<input value={note} onChange={(e) => setNote(e.target.value)} placeholder={t("adminTabs.manualPayment.notePlaceholder")} /></label>
         <button className="btn btn-primary" onClick={() => void record()} disabled={busyKey === "manual-payment"}>
           {busyKey === "manual-payment" ? t("adminTabs.manualPayment.recording") : t("adminTabs.manualPayment.recordPayment")}

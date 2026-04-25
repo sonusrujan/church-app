@@ -121,8 +121,8 @@ export default function AdminOpsTab() {
                 const admin = results.find((r) => r.id === selectedId);
                 openOperationConfirmDialog(
                   t("adminTabs.adminOps.removeAdminRole"),
-                  `Are you sure you want to remove admin privileges from ${admin?.full_name || admin?.email || "this user"}? They will lose all admin access.`,
-                  "REMOVE",
+                  t("adminTabs.adminOps.confirmRemoveMessage", { name: admin?.full_name || admin?.email || "this user" }),
+                  t("adminTabs.adminOps.confirmRemoveKeyword"),
                   deleteAdmin,
                 );
               }} disabled={busyKey === "super-admin-delete"}>

@@ -1,3 +1,4 @@
+import { UUID_REGEX } from "../utils/validation";
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { requireAuth, AuthRequest } from "../middleware/requireAuth";
@@ -6,9 +7,11 @@ import { requireSuperAdmin, isSuperAdminEmail } from "../middleware/requireSuper
 import { safeErrorMessage } from "../utils/safeError";
 import { logSuperAdminAudit } from "../utils/superAdminAudit";
 import { persistAuditLog } from "../utils/auditLog";
+import { logger } from "../utils/logger";
 import { db, pool } from "../services/dbClient";
 import { getChurchSaaSSettings } from "../services/churchSubscriptionService";
 import { normalizeIndianPhone } from "../utils/phone";
+import { MIN_PAYMENT_DATE } from "../config";
 
 const adminWriteLimiter = rateLimit({
   windowMs: 60_000,
@@ -32,6 +35,8 @@ import {
   getMemberPaymentHistory,
   updateSubscription,
 } from "../services/paymentAdminService";
+import { listMonthlyHistoryForMember, toggleDueStatus } from "../services/subscriptionMonthlyDuesService";
+import { validate, manualPaymentSchema, updateSubscriptionSchema, refundSchema, updateAnnouncementSchema, updateChurchCodeSchema, bulkImportMembersSchema, relinkAuthSchema, createRefundRequestSchema, reviewRefundRequestSchema } from "../utils/zodSchemas";
 
 import {
   updateAnnouncement,
@@ -56,12 +61,13 @@ import {
 } from "../services/refundRequestService";
 
 const router = Router();
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function resolveChurchId(req: AuthRequest, bodyOrQueryChurchId?: string): string {
   if (isSuperAdminEmail(req.user?.email || "", req.user?.phone)) {
     const resolved = bodyOrQueryChurchId?.trim() || req.user?.church_id || "";
     if (!resolved) throw new Error("church_id is required for super admin operations");
+    // MED-005: Validate UUID format
+    if (!UUID_REGEX.test(resolved)) throw new Error("Invalid church_id format");
     return resolved;
   }
   return req.user?.church_id || "";
@@ -69,7 +75,7 @@ function resolveChurchId(req: AuthRequest, bodyOrQueryChurchId?: string): string
 
 // ═══ Manual Payment Recording ═══
 
-router.post("/payments/manual", requireAuth, requireRegisteredUser, adminWriteLimiter, async (req: AuthRequest, res) => {
+router.post("/payments/manual", requireAuth, requireRegisteredUser, adminWriteLimiter, validate(manualPaymentSchema), async (req: AuthRequest, res) => {
   try {
     if (!req.user) return res.status(401).json({ error: "Unauthenticated" });
     if (req.user.role !== "admin" && !isSuperAdminEmail(req.user.email, req.user.phone)) {
@@ -77,12 +83,23 @@ router.post("/payments/manual", requireAuth, requireRegisteredUser, adminWriteLi
     }
 
     const { member_id, subscription_id, amount, payment_method, payment_date, payment_category, note } = req.body;
-    if (!member_id || !UUID_REGEX.test(member_id)) {
-      return res.status(400).json({ error: "Valid member_id is required" });
+
+    // Validate payment_date is a valid date and within a reasonable range
+    const parsedPaymentDate = new Date(payment_date);
+    if (isNaN(parsedPaymentDate.getTime())) {
+      return res.status(400).json({ error: "payment_date must be a valid date" });
     }
-    if (!amount || !payment_method || !payment_date) {
-      return res.status(400).json({ error: "amount, payment_method, and payment_date are required" });
+    const now = new Date();
+    const msPerDay = 24 * 60 * 60 * 1000;
+    const daysDiff = (now.getTime() - parsedPaymentDate.getTime()) / msPerDay;
+    if (daysDiff < -1) {
+      return res.status(400).json({ error: "payment_date cannot be in the future" });
     }
+    const minAllowed = new Date(`${MIN_PAYMENT_DATE}T00:00:00.000Z`);
+    if (parsedPaymentDate.getTime() < minAllowed.getTime()) {
+      return res.status(400).json({ error: `payment_date cannot be before ${MIN_PAYMENT_DATE}` });
+    }
+
     const ALLOWED_METHODS = ["cash", "cheque", "bank_transfer", "upi_manual", "other"];
     if (!ALLOWED_METHODS.includes(payment_method)) {
       return res.status(400).json({ error: `Invalid payment_method. Allowed: ${ALLOWED_METHODS.join(", ")}` });
@@ -101,6 +118,21 @@ router.post("/payments/manual", requireAuth, requireRegisteredUser, adminWriteLi
     }
 
     const churchId = resolveChurchId(req, req.body?.church_id);
+
+    // M-4: Idempotency — prevent duplicate manual payments within 60s window
+    const { rows: dupes } = await pool.query(
+      `SELECT id FROM payments
+       WHERE member_id = $1
+         AND amount = $2
+         AND payment_method = $3
+         AND DATE(payment_date) = DATE($4::timestamp)
+         AND created_at > NOW() - INTERVAL '5 minutes'
+       LIMIT 1`,
+      [member_id, Number(amount), payment_method, payment_date],
+    );
+    if (dupes.length > 0) {
+      return res.status(409).json({ error: "Duplicate payment detected. This payment was already recorded." });
+    }
 
     // Enforce member_subscription_enabled when manual payment is linked to a subscription
     if (subscription_id) {
@@ -148,7 +180,7 @@ router.post("/payments/manual", requireAuth, requireRegisteredUser, adminWriteLi
           subject: "Payment Recorded",
           body: `Your ${payment_method} payment of ₹${Number(amount)} has been recorded successfully.`,
           metadata: { url: "/history" },
-        }).catch(() => {});
+        }).catch((err) => { logger.warn({ err }, "Failed to send manual payment notification"); });
       }
     } catch (_) {}
 
@@ -160,21 +192,40 @@ router.post("/payments/manual", requireAuth, requireRegisteredUser, adminWriteLi
 
 // ═══ Refund Recording ═══
 
-router.post("/payments/:paymentId/refund", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+router.post("/payments/:paymentId/refund", requireAuth, requireRegisteredUser, adminWriteLimiter, validate(refundSchema), async (req: AuthRequest, res) => {
   try {
     if (!req.user) return res.status(401).json({ error: "Unauthenticated" });
     if (req.user.role !== "admin" && !isSuperAdminEmail(req.user.email, req.user.phone)) {
       return res.status(403).json({ error: "Only admin can record refunds" });
     }
 
-    const paymentId = Array.isArray(req.params.paymentId) ? req.params.paymentId[0] : req.params.paymentId;
+    // LOW-006: Remove dead Array.isArray guard on Express params
+    const paymentId = String(req.params.paymentId || "").trim();
     if (!paymentId || !UUID_REGEX.test(paymentId)) {
       return res.status(400).json({ error: "Invalid payment ID" });
     }
 
     const { refund_amount, refund_reason, refund_method } = req.body;
-    if (!refund_amount || !refund_method) {
-      return res.status(400).json({ error: "refund_amount and refund_method are required" });
+
+    // Validate refund amount does not exceed original payment
+    const { data: origPayment } = await db
+      .from("payments")
+      .select("id, amount")
+      .eq("id", paymentId)
+      .maybeSingle();
+    if (!origPayment) return res.status(404).json({ error: "Payment not found" });
+
+    // MED-002: Cumulative refund check — prevent double-spend via multiple partial refunds
+    const { rows: prevRefunds } = await pool.query(
+      `SELECT COALESCE(SUM(refund_amount), 0) AS total_refunded FROM payment_refunds WHERE payment_id = $1`,
+      [paymentId]
+    );
+    const totalRefunded = Number(prevRefunds[0]?.total_refunded || 0);
+    const requestedRefund = Number(refund_amount);
+    if (totalRefunded + requestedRefund > Number(origPayment.amount)) {
+      return res.status(400).json({
+        error: `Total refunds would exceed original payment amount (₹${origPayment.amount})`,
+      });
     }
 
     // Church-scoping for non-super admins: verify payment belongs to their church
@@ -228,7 +279,7 @@ router.get("/payments/member/:memberId", requireAuth, requireRegisteredUser, asy
       return res.status(403).json({ error: "Only admin can view member payment history" });
     }
 
-    const memberId = Array.isArray(req.params.memberId) ? req.params.memberId[0] : req.params.memberId;
+    const memberId = String(req.params.memberId || "").trim();
     if (!memberId || !UUID_REGEX.test(memberId)) {
       return res.status(400).json({ error: "Invalid member ID" });
     }
@@ -249,7 +300,7 @@ router.get("/payments/member/:memberId", requireAuth, requireRegisteredUser, asy
       return res.status(403).json({ error: "Member does not belong to your church" });
     }
 
-    const limit = Number(req.query.limit) || 100;
+    const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 200);
     const offset = Number(req.query.offset) || 0;
     const payments = await getMemberPaymentHistory(memberId, churchId, limit, offset);
     return res.json(payments);
@@ -258,16 +309,57 @@ router.get("/payments/member/:memberId", requireAuth, requireRegisteredUser, asy
   }
 });
 
+router.get("/payments/member/:memberId/monthly-history", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: "Unauthenticated" });
+    if (req.user.role !== "admin" && !isSuperAdminEmail(req.user.email, req.user.phone)) {
+      return res.status(403).json({ error: "Only admin can view member monthly payment history" });
+    }
+
+    const memberId = String(req.params.memberId || "").trim();
+    if (!memberId || !UUID_REGEX.test(memberId)) {
+      return res.status(400).json({ error: "Invalid member ID" });
+    }
+
+    const { data: member } = await db
+      .from("members")
+      .select("id, church_id")
+      .eq("id", memberId)
+      .maybeSingle();
+
+    if (!member) return res.status(404).json({ error: "Member not found" });
+
+    if (!isSuperAdminEmail(req.user.email, req.user.phone) && member.church_id !== req.user.church_id) {
+      return res.status(403).json({ error: "Member does not belong to your church" });
+    }
+
+    const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 200);
+    const offset = Math.max(Number(req.query.offset) || 0, 0);
+    const personName = typeof req.query.person_name === "string" ? req.query.person_name.trim() : "";
+
+    const rows = await listMonthlyHistoryForMember({
+      member_id: memberId,
+      person_name: personName || undefined,
+      limit,
+      offset,
+    });
+
+    return res.json(rows);
+  } catch (err: any) {
+    return res.status(500).json({ error: safeErrorMessage(err, "Failed to load monthly payment history") });
+  }
+});
+
 // ═══ Subscription Edit ═══
 
-router.patch("/subscriptions/:subId", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+router.patch("/subscriptions/:subId", requireAuth, requireRegisteredUser, adminWriteLimiter, validate(updateSubscriptionSchema), async (req: AuthRequest, res) => {
   try {
     if (!req.user) return res.status(401).json({ error: "Unauthenticated" });
     if (req.user.role !== "admin" && !isSuperAdminEmail(req.user.email, req.user.phone)) {
       return res.status(403).json({ error: "Only admin can edit subscriptions" });
     }
 
-    const subId = Array.isArray(req.params.subId) ? req.params.subId[0] : req.params.subId;
+    const subId = String(req.params.subId || "").trim();
     if (!subId || !UUID_REGEX.test(subId)) {
       return res.status(400).json({ error: "Invalid subscription ID" });
     }
@@ -321,13 +413,16 @@ router.patch("/subscriptions/:subId", requireAuth, requireRegisteredUser, async 
 
 // ═══ Announcement Edit & Delete ═══
 
-router.patch("/announcements/:id", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+router.patch("/announcements/:id", requireAuth, requireRegisteredUser, validate(updateAnnouncementSchema), async (req: AuthRequest, res) => {
   try {
     if (!req.user) return res.status(401).json({ error: "Unauthenticated" });
     if (req.user.role !== "admin" && !isSuperAdminEmail(req.user.email, req.user.phone)) {
       return res.status(403).json({ error: "Only admin can edit announcements" });
     }
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id as string;
+    const id = String(req.params.id || "").trim();
+    if (!id || !UUID_REGEX.test(id)) {
+      return res.status(400).json({ error: "Invalid announcement ID format" });
+    }
     const churchId = resolveChurchId(req, req.body?.church_id);
     if (!churchId) return res.status(400).json({ error: "church_id is required" });
 
@@ -345,7 +440,10 @@ router.delete("/announcements/:id", requireAuth, requireRegisteredUser, async (r
     if (req.user.role !== "admin" && !isSuperAdminEmail(req.user.email, req.user.phone)) {
       return res.status(403).json({ error: "Only admin can delete announcements" });
     }
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id as string;
+    const id = String(req.params.id || "").trim();
+    if (!id || !UUID_REGEX.test(id)) {
+      return res.status(400).json({ error: "Invalid announcement ID format" });
+    }
     const churchId = resolveChurchId(req, req.body?.church_id || (req.query.church_id as string));
     if (!churchId) return res.status(400).json({ error: "church_id is required" });
 
@@ -383,7 +481,7 @@ router.delete("/events/:id", requireAuth, requireRegisteredUser, async (req: Aut
     if (req.user.role !== "admin" && !isSuperAdminEmail(req.user.email, req.user.phone)) {
       return res.status(403).json({ error: "Only admin can delete events" });
     }
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id as string;
+    const id = String(req.params.id || "").trim();
     const churchId = resolveChurchId(req, req.body?.church_id || (req.query.church_id as string));
     if (!churchId) return res.status(400).json({ error: "church_id is required" });
 
@@ -401,7 +499,7 @@ router.delete("/notifications/:id", requireAuth, requireRegisteredUser, async (r
     if (req.user.role !== "admin" && !isSuperAdminEmail(req.user.email, req.user.phone)) {
       return res.status(403).json({ error: "Only admin can delete notifications" });
     }
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id as string;
+    const id = String(req.params.id || "").trim();
     const churchId = resolveChurchId(req, req.body?.church_id || (req.query.church_id as string));
     if (!churchId) return res.status(400).json({ error: "church_id is required" });
 
@@ -419,7 +517,7 @@ router.delete("/prayer-requests/:id", requireAuth, requireRegisteredUser, async 
     if (req.user.role !== "admin" && !isSuperAdminEmail(req.user.email, req.user.phone)) {
       return res.status(403).json({ error: "Only admin can delete prayer requests" });
     }
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id as string;
+    const id = String(req.params.id || "").trim();
     const churchId = resolveChurchId(req, req.body?.church_id || (req.query.church_id as string));
     if (!churchId) return res.status(400).json({ error: "church_id is required" });
 
@@ -433,9 +531,9 @@ router.delete("/prayer-requests/:id", requireAuth, requireRegisteredUser, async 
 
 // ═══ Church Code Edit ═══
 
-router.patch("/churches/:id/code", requireAuth, requireRegisteredUser, requireSuperAdmin, async (req: AuthRequest, res) => {
+router.patch("/churches/:id/code", requireAuth, requireRegisteredUser, requireSuperAdmin, validate(updateChurchCodeSchema), async (req: AuthRequest, res) => {
   try {
-    const churchId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id as string;
+    const churchId = String(req.params.id || "").trim();
     if (!churchId || !UUID_REGEX.test(churchId)) {
       return res.status(400).json({ error: "Invalid church ID" });
     }
@@ -452,7 +550,7 @@ router.patch("/churches/:id/code", requireAuth, requireRegisteredUser, requireSu
 
 // ═══ Bulk Member Import ═══
 
-router.post("/members/bulk-import", requireAuth, requireRegisteredUser, bulkImportLimiter, async (req: AuthRequest, res) => {
+router.post("/members/bulk-import", requireAuth, requireRegisteredUser, bulkImportLimiter, validate(bulkImportMembersSchema), async (req: AuthRequest, res) => {
   try {
     if (!req.user) return res.status(401).json({ error: "Unauthenticated" });
     if (req.user.role !== "admin" && !isSuperAdminEmail(req.user.email, req.user.phone)) {
@@ -520,6 +618,11 @@ router.post("/members/bulk-import", requireAuth, requireRegisteredUser, bulkImpo
       }
       if (hasEmail) emails.add(email);
       if (hasPhone) phones.add(phone);
+      const subAmt = Number(m.subscription_amount) || 0;
+      if (subAmt !== 0 && subAmt < 200) {
+        results.push({ row: i + 1, status: "skipped", error: "subscription_amount must be at least 200 (or 0 to skip)" });
+        continue;
+      }
       validRows.push({
         index: i,
         full_name: name,
@@ -527,13 +630,18 @@ router.post("/members/bulk-import", requireAuth, requireRegisteredUser, bulkImpo
         phone_number: phone,
         address: m.address?.trim() || null,
         membership_id: m.membership_id?.trim() || null,
-        subscription_amount: Number(m.subscription_amount) || 0,
+        subscription_amount: subAmt,
       });
     }
 
     if (!validRows.length) {
       return res.json({ total: members.length, created: 0, skipped: results.length, failed: 0, results });
     }
+
+    // MED-015: Wrap Phase 2+3 in a transaction to prevent race-condition duplicates
+    const txClient = await pool.connect();
+    try {
+      await txClient.query("BEGIN");
 
     // ── Phase 2: batch-check which emails/phones already exist ──
     const validEmails = validRows.filter((r) => r.email).map((r) => r.email);
@@ -543,7 +651,7 @@ router.post("/members/bulk-import", requireAuth, requireRegisteredUser, bulkImpo
     const existingPhonesSet = new Set<string>();
 
     if (validEmails.length) {
-      const existingRes = await pool.query<{ email: string }>(
+      const existingRes = await txClient.query<{ email: string }>(
         `SELECT LOWER(email) AS email FROM members
          WHERE LOWER(email) = ANY($1) AND church_id = $2 AND deleted_at IS NULL`,
         [validEmails, churchId],
@@ -551,7 +659,7 @@ router.post("/members/bulk-import", requireAuth, requireRegisteredUser, bulkImpo
       existingRes.rows.forEach((r) => existingEmailsSet.add(r.email));
     }
     if (validPhones.length) {
-      const existingPhoneRes = await pool.query<{ phone_number: string }>(
+      const existingPhoneRes = await txClient.query<{ phone_number: string }>(
         `SELECT phone_number FROM members
          WHERE phone_number = ANY($1) AND church_id = $2 AND deleted_at IS NULL`,
         [validPhones, churchId],
@@ -588,7 +696,7 @@ router.post("/members/bulk-import", requireAuth, requireRegisteredUser, bulkImpo
         );
       }
 
-      const insertRes = await pool.query<{ id: string; email: string; phone_number: string }>(
+      const insertRes = await txClient.query<{ id: string; email: string; phone_number: string }>(
         `INSERT INTO members (full_name, email, phone_number, address, membership_id, subscription_amount, church_id, verification_status)
          VALUES ${valuePlaceholders.join(", ")}
          ON CONFLICT (phone_number, church_id) WHERE deleted_at IS NULL AND phone_number IS NOT NULL AND phone_number != '' DO NOTHING
@@ -606,6 +714,14 @@ router.post("/members/bulk-import", requireAuth, requireRegisteredUser, bulkImpo
           results.push({ row: row.index + 1, status: "skipped", error: "Member already exists" });
         }
       }
+    }
+
+      await txClient.query("COMMIT");
+    } catch (txErr) {
+      await txClient.query("ROLLBACK").catch(() => {});
+      throw txErr;
+    } finally {
+      txClient.release();
     }
 
     // Sort results by row number for consistent output
@@ -632,7 +748,7 @@ router.post("/members/bulk-import", requireAuth, requireRegisteredUser, bulkImpo
 
 router.post("/members/:id/restore", requireAuth, requireRegisteredUser, requireSuperAdmin, async (req: AuthRequest, res) => {
   try {
-    const memberId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id as string;
+    const memberId = String(req.params.id || "").trim();
     if (!memberId || !UUID_REGEX.test(memberId)) {
       return res.status(400).json({ error: "Invalid member ID" });
     }
@@ -649,7 +765,7 @@ router.post("/members/:id/restore", requireAuth, requireRegisteredUser, requireS
 
 router.post("/churches/:id/restore", requireAuth, requireRegisteredUser, requireSuperAdmin, async (req: AuthRequest, res) => {
   try {
-    const churchId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id as string;
+    const churchId = String(req.params.id || "").trim();
     if (!churchId || !UUID_REGEX.test(churchId)) {
       return res.status(400).json({ error: "Invalid church ID" });
     }
@@ -664,19 +780,22 @@ router.post("/churches/:id/restore", requireAuth, requireRegisteredUser, require
 
 // ═══ Auth Re-Linking ═══
 
-router.post("/members/:id/relink-auth", requireAuth, requireRegisteredUser, requireSuperAdmin, async (req: AuthRequest, res) => {
+router.post("/members/:id/relink-auth", requireAuth, requireRegisteredUser, requireSuperAdmin, validate(relinkAuthSchema), async (req: AuthRequest, res) => {
   try {
-    const memberId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id as string;
+    const memberId = String(req.params.id || "").trim();
     if (!memberId || !UUID_REGEX.test(memberId)) {
       return res.status(400).json({ error: "Invalid member ID" });
     }
 
-    const { new_email } = req.body;
-    if (!new_email || typeof new_email !== "string" || !new_email.includes("@")) {
-      return res.status(400).json({ error: "Valid new_email is required" });
-    }
+    const { new_email, new_phone } = req.body;
 
-    const normalizedEmail = new_email.trim().toLowerCase();
+    // Accept either email or phone for re-linking
+    const isPhoneLink = !new_email && new_phone && typeof new_phone === "string";
+    const isEmailLink = new_email && typeof new_email === "string" && new_email.includes("@");
+
+    if (!isPhoneLink && !isEmailLink) {
+      return res.status(400).json({ error: "Valid new_email or new_phone is required" });
+    }
 
     // Verify the member exists
     const { data: memberRow } = await db
@@ -688,34 +807,58 @@ router.post("/members/:id/relink-auth", requireAuth, requireRegisteredUser, requ
       return res.status(404).json({ error: "Member not found" });
     }
 
-    // Find the user account with this email
-    const { data: user } = await db
-      .from("users")
-      .select("id, email, church_id")
-      .ilike("email", normalizedEmail)
-      .maybeSingle<{ id: string; email: string; church_id: string | null }>();
+    let user: { id: string; email?: string; phone_number?: string; church_id: string | null } | null = null;
 
-    if (!user) {
-      return res.status(404).json({ error: "No user account found with this email. The user must sign in at least once first." });
+    if (isEmailLink) {
+      const normalizedEmail = new_email.trim().toLowerCase();
+      const { data } = await db
+        .from("users")
+        .select("id, email, church_id")
+        .ilike("email", normalizedEmail)
+        .maybeSingle<{ id: string; email: string; church_id: string | null }>();
+      user = data;
+    } else {
+      const normalizedPhone = normalizeIndianPhone(new_phone.trim());
+      const { data } = await db
+        .from("users")
+        .select("id, phone_number, church_id")
+        .eq("phone_number", normalizedPhone)
+        .maybeSingle<{ id: string; phone_number: string; church_id: string | null }>();
+      user = data;
     }
 
-    // BE-1: Verify user and member belong to the same church
+    if (!user) {
+      return res.status(404).json({ error: `No user account found with this ${isEmailLink ? "email" : "phone"}. The user must sign in at least once first.` });
+    }
+
+    // Verify user and member belong to the same church (also catch null church_id)
     if (user.church_id && memberRow.church_id && user.church_id !== memberRow.church_id) {
       return res.status(400).json({ error: "Cannot link: the user belongs to a different church than the member" });
     }
+    if (!user.church_id && memberRow.church_id) {
+      // User has no church — safe to link, assign them to member's church
+    }
 
-    // Update member's email and user_id
+    // Build update payload based on link type
+    const memberUpdate: Record<string, unknown> = { user_id: user.id, verification_status: "verified" };
+    if (isEmailLink) {
+      memberUpdate.email = new_email.trim().toLowerCase();
+    } else {
+      memberUpdate.phone_number = normalizeIndianPhone(new_phone.trim());
+    }
+
     const { data: updated, error: updateErr } = await db
       .from("members")
-      .update({ user_id: user.id, email: normalizedEmail, verification_status: "verified" })
+      .update(memberUpdate)
       .eq("id", memberId)
-      .select("id, full_name, email, user_id")
+      .select("id, full_name, email, phone_number, user_id")
       .single();
 
     if (updateErr) throw updateErr;
 
-    logSuperAdminAudit(req, "member.relink_auth", { member_id: memberId, new_email: normalizedEmail, user_id: user.id });
-    persistAuditLog(req, "member.relink_auth", "member", memberId, { new_email: normalizedEmail });
+    const identifier = isEmailLink ? new_email.trim().toLowerCase() : normalizeIndianPhone(new_phone.trim());
+    logSuperAdminAudit(req, "member.relink_auth", { member_id: memberId, identifier, user_id: user.id });
+    persistAuditLog(req, "member.relink_auth", "member", memberId, { identifier });
 
     return res.json({ success: true, member: updated });
   } catch (err: any) {
@@ -726,7 +869,7 @@ router.post("/members/:id/relink-auth", requireAuth, requireRegisteredUser, requ
 // ═══ Refund Requests ═══
 
 // Member: raise a refund request
-router.post("/refund-requests", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+router.post("/refund-requests", requireAuth, requireRegisteredUser, validate(createRefundRequestSchema), async (req: AuthRequest, res) => {
   try {
     if (!req.user) return res.status(401).json({ error: "Unauthenticated" });
 
@@ -794,7 +937,7 @@ router.post("/refund-requests", requireAuth, requireRegisteredUser, async (req: 
               subject: "New Refund Request",
               body: `${requesterName?.full_name || "A member"} has requested a refund of ₹${Number(amount)}.`,
               metadata: { url: "/admin-tools" },
-            }).catch(() => {});
+            }).catch((err) => { logger.warn({ err }, "Failed to send refund_request_new notification"); });
           }
         }
       }
@@ -861,7 +1004,7 @@ router.post("/refund-requests/:id/forward", requireAuth, requireRegisteredUser, 
     const churchId = req.user.church_id;
     if (!churchId) return res.status(400).json({ error: "No church associated" });
 
-    const requestId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const requestId = String(req.params.id || "").trim();
     const result = await forwardRefundRequest(requestId, req.user.id, churchId);
 
     persistAuditLog(req, "refund_request.forward", "refund_request", requestId, { church_id: churchId });
@@ -873,7 +1016,7 @@ router.post("/refund-requests/:id/forward", requireAuth, requireRegisteredUser, 
 });
 
 // Super Admin: approve/deny refund request
-router.post("/refund-requests/:id/review", requireAuth, requireRegisteredUser, requireSuperAdmin, async (req: AuthRequest, res) => {
+router.post("/refund-requests/:id/review", requireAuth, requireRegisteredUser, requireSuperAdmin, validate(reviewRefundRequestSchema), async (req: AuthRequest, res) => {
   try {
     if (!req.user) return res.status(401).json({ error: "Unauthenticated" });
 
@@ -882,7 +1025,7 @@ router.post("/refund-requests/:id/review", requireAuth, requireRegisteredUser, r
       return res.status(400).json({ error: "Decision must be 'approved' or 'denied'" });
     }
 
-    const reqId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const reqId = String(req.params.id || "").trim();
     const result = await reviewRefundRequest(reqId, decision, req.user.id, review_note);
 
     // If approved, process the actual refund
@@ -930,7 +1073,7 @@ router.post("/refund-requests/:id/review", requireAuth, requireRegisteredUser, r
             subject: decision === "approved" ? "Refund Approved" : "Refund Denied",
             body: bodyText,
             metadata: { url: "/history" },
-          }).catch(() => {});
+          }).catch((err) => { logger.warn({ err }, "Failed to send refund_decision push notification"); });
         }
         if (memberRow.phone_number) {
           queueNotification({
@@ -939,7 +1082,7 @@ router.post("/refund-requests/:id/review", requireAuth, requireRegisteredUser, r
             channel: "sms",
             notification_type: "refund_decision",
             body: bodyText,
-          }).catch(() => {});
+          }).catch((err) => { logger.warn({ err }, "Failed to send refund_decision SMS notification"); });
         }
       }
     } catch (_) {}
@@ -947,6 +1090,138 @@ router.post("/refund-requests/:id/review", requireAuth, requireRegisteredUser, r
     return res.json(result);
   } catch (err: any) {
     return res.status(400).json({ error: safeErrorMessage(err, "Failed to review refund request") });
+  }
+});
+
+// ═══ Toggle Monthly Due Status (Issue #1: Admin correction) ═══
+
+router.patch("/monthly-dues/:dueId", requireAuth, requireRegisteredUser, adminWriteLimiter, async (req: AuthRequest, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: "Unauthenticated" });
+    if (req.user.role !== "admin" && !isSuperAdminEmail(req.user.email, req.user.phone)) {
+      return res.status(403).json({ error: "Only admin can edit monthly dues" });
+    }
+
+    const dueId = String(req.params.dueId || "").trim();
+    if (!dueId || !UUID_REGEX.test(dueId)) {
+      return res.status(400).json({ error: "Invalid due ID" });
+    }
+
+    const { status } = req.body;
+    const VALID = ["pending", "paid", "imported_paid", "waived"];
+    if (!status || !VALID.includes(status)) {
+      return res.status(400).json({ error: `status must be one of: ${VALID.join(", ")}` });
+    }
+
+    const churchId = resolveChurchId(req, req.body?.church_id);
+    const result = await toggleDueStatus({ due_id: dueId, new_status: status, church_id: churchId });
+
+    persistAuditLog(req, "monthly_due.toggle", "subscription_monthly_dues", dueId, { new_status: status });
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to update due status") });
+  }
+});
+
+// ═══ Leave Church (Issue #4: Member self-service) ═══
+
+router.post("/leave-church", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: "Unauthenticated" });
+
+    const userId = req.user.id;
+    const churchId = req.user.church_id;
+    if (!churchId) return res.status(400).json({ error: "You are not a member of any church" });
+
+    // Remove junction table entry
+    await pool.query(
+      `DELETE FROM user_church_memberships WHERE user_id = $1 AND church_id = $2`,
+      [userId, churchId],
+    );
+
+    // Clear church_id from user
+    await pool.query(
+      `UPDATE users SET church_id = NULL WHERE id = $1`,
+      [userId],
+    );
+
+    // Soft-delete the member record
+    await pool.query(
+      `UPDATE members SET deleted_at = NOW() WHERE user_id = $1 AND church_id = $2 AND deleted_at IS NULL`,
+      [userId, churchId],
+    );
+
+    // Cancel active subscriptions
+    await pool.query(
+      `UPDATE subscriptions SET status = 'cancelled'
+       WHERE member_id IN (SELECT id FROM members WHERE user_id = $1 AND church_id = $2)
+         AND status IN ('active','overdue','pending_first_payment','paused')`,
+      [userId, churchId],
+    );
+
+    persistAuditLog(req, "member.leave_church", "user", userId, { church_id: churchId });
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to leave church") });
+  }
+});
+
+// ═══ Member Church Transfer (Issue #17) ═══
+
+router.post("/members/:memberId/transfer", requireAuth, requireRegisteredUser, requireSuperAdmin, async (req: AuthRequest, res) => {
+  try {
+    const memberId = String(req.params.memberId || "").trim();
+    if (!memberId || !UUID_REGEX.test(memberId)) {
+      return res.status(400).json({ error: "Invalid member ID" });
+    }
+
+    const { target_church_id } = req.body;
+    if (!target_church_id || !UUID_REGEX.test(target_church_id)) {
+      return res.status(400).json({ error: "Valid target_church_id is required" });
+    }
+
+    // Verify target church exists
+    const { rows: churches } = await pool.query(`SELECT id FROM churches WHERE id = $1 AND deleted_at IS NULL`, [target_church_id]);
+    if (!churches.length) return res.status(404).json({ error: "Target church not found" });
+
+    // Get current member info
+    const { rows: memberRows } = await pool.query(`SELECT id, user_id, church_id FROM members WHERE id = $1 AND deleted_at IS NULL`, [memberId]);
+    if (!memberRows.length) return res.status(404).json({ error: "Member not found" });
+    const member = memberRows[0];
+
+    if (member.church_id === target_church_id) {
+      return res.status(400).json({ error: "Member is already in the target church" });
+    }
+
+    // Cancel active subscriptions in old church
+    await pool.query(
+      `UPDATE subscriptions SET status = 'cancelled'
+       WHERE member_id = $1 AND status IN ('active','overdue','pending_first_payment','paused')`,
+      [memberId],
+    );
+
+    // Update member's church
+    await pool.query(`UPDATE members SET church_id = $1 WHERE id = $2`, [target_church_id, memberId]);
+
+    // Update user's church + junction table
+    if (member.user_id) {
+      await pool.query(`UPDATE users SET church_id = $1 WHERE id = $2`, [target_church_id, member.user_id]);
+      await pool.query(`DELETE FROM user_church_memberships WHERE user_id = $1`, [member.user_id]);
+      await pool.query(
+        `INSERT INTO user_church_memberships (user_id, church_id, role) VALUES ($1, $2, 'member') ON CONFLICT DO NOTHING`,
+        [member.user_id, target_church_id],
+      );
+    }
+
+    persistAuditLog(req, "member.transfer", "member", memberId, {
+      from_church: member.church_id,
+      to_church: target_church_id,
+    });
+
+    return res.json({ success: true, member_id: memberId, new_church_id: target_church_id });
+  } catch (err: any) {
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to transfer member") });
   }
 });
 

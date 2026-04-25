@@ -12,8 +12,11 @@ export default function PastorsTab() {
   const { t } = useI18n();
   const { token, authContext, isSuperAdmin, busyKey, setNotice, withAuthRequest, churches, pastors, loadPastors, loadChurches } = useApp();
 
-  // Super admin search/edit
-  const [fromChurchId, setFromChurchId] = useState(churches[0]?.id || "");
+  const isAdmin = authContext?.auth.role === "admin";
+  const canWrite = isSuperAdmin || isAdmin;
+
+  // Search/edit
+  const [fromChurchId, setFromChurchId] = useState(isSuperAdmin ? (churches[0]?.id || "") : (authContext?.auth.church_id || ""));
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<PastorRow[]>([]);
   const [selectedId, setSelectedId] = useState("");
@@ -21,36 +24,37 @@ export default function PastorsTab() {
   const [editName, setEditName] = useState("");
   const [editPhone, setEditPhone] = useState("");
   const [editEmail, setEditEmail] = useState("");
+  const [editDetails, setEditDetails] = useState("");
+  const [editIsActive, setEditIsActive] = useState(true);
   const [searchPage, setSearchPage] = useState(1);
 
   // Pastor add form
-  const [pastorChurchId, setPastorChurchId] = useState(churches[0]?.id || "");
+  const [pastorChurchId, setPastorChurchId] = useState(isSuperAdmin ? (churches[0]?.id || "") : (authContext?.auth.church_id || ""));
   const [pastorName, setPastorName] = useState("");
   const [pastorPhone, setPastorPhone] = useState("");
   const [pastorEmail, setPastorEmail] = useState("");
   const [pastorDetails, setPastorDetails] = useState("");
-  const [pastorTransferChurchId, setPastorTransferChurchId] = useState("");
   const [listPage, setListPage] = useState(1);
 
   useEffect(() => { setSearchPage(1); }, [searchResults]);
   useEffect(() => { setListPage(1); }, [pastors]);
 
-  // ── Super admin operations ──
+  const scopedChurchId = isSuperAdmin ? fromChurchId.trim() : (authContext?.auth.church_id || "");
 
-  async function superSearch() {
-    if (!isSuperAdmin) return;
-    const cid = fromChurchId.trim();
+  async function searchPastors() {
+    if (!canWrite) return;
+    const cid = scopedChurchId;
     if (!cid || !isUuid(cid)) {
-      setNotice({ tone: "error", text: "Select source church for pastor operations." });
+      setNotice({ tone: "error", text: t("adminTabs.pastors.errorSelectSourceChurch") });
       return;
     }
     const rows = await withAuthRequest(
-      "super-pastor-search",
+      "pastor-search",
       () => apiRequest<PastorRow[]>(
         `/api/pastors/list?church_id=${encodeURIComponent(cid)}&active_only=false`,
         { token },
       ),
-      "Pastor search complete.",
+      t("adminTabs.pastors.successSearchComplete"),
     );
     if (!rows) return;
     const filtered = searchQuery.trim()
@@ -67,201 +71,189 @@ export default function PastorsTab() {
     setEditName(pastor.full_name || "");
     setEditPhone(pastor.phone_number || "");
     setEditEmail(pastor.email || "");
+    setEditDetails((pastor as Record<string, unknown>).details as string || "");
+    setEditIsActive((pastor as Record<string, unknown>).is_active !== false);
   }
 
-  async function superUpdate() {
-    if (!isSuperAdmin || !selectedId) return;
-    const cid = fromChurchId.trim();
-    if (!cid || !isUuid(cid)) { setNotice({ tone: "error", text: "Select source church for pastor operations." }); return; }
+  function clearSelection() {
+    setSelectedId(""); setEditName(""); setEditPhone(""); setEditEmail("");
+    setEditDetails(""); setEditIsActive(true);
+  }
+
+  async function updatePastor() {
+    if (!canWrite || !selectedId) return;
+    const cid = scopedChurchId;
+    if (!cid || !isUuid(cid)) { setNotice({ tone: "error", text: t("adminTabs.pastors.errorSelectSourceChurch") }); return; }
     const updated = await withAuthRequest(
-      "super-pastor-update",
+      "pastor-update",
       () => apiRequest<PastorRow>(`/api/pastors/${selectedId}`, {
         method: "PATCH", token,
-        body: { church_id: cid, full_name: editName.trim() || undefined, phone_number: editPhone.trim() || undefined, email: editEmail.trim() || undefined },
+        body: {
+          church_id: cid,
+          full_name: editName.trim() || undefined,
+          phone_number: editPhone.trim() || undefined,
+          email: editEmail.trim() || undefined,
+          details: editDetails.trim() || undefined,
+          is_active: editIsActive,
+        },
       }),
-      "Pastor updated.",
+      t("adminTabs.pastors.successUpdated"),
     );
     if (updated) setSearchResults((cur) => cur.map((r) => (r.id === updated.id ? updated : r)));
   }
 
-  async function superTransfer() {
-    if (!isSuperAdmin || !selectedId) return;
-    const from = fromChurchId.trim();
-    const to = superTargetChurchId.trim();
+  async function transferPastorById(pastorId: string, from: string, to: string) {
+    if (!canWrite) return;
     if (!from || !to || !isUuid(from) || !isUuid(to)) {
-      setNotice({ tone: "error", text: "Select valid source and target churches for transfer." });
+      setNotice({ tone: "error", text: t("adminTabs.pastors.errorSelectBothChurches") });
       return;
     }
+    if (from === to) { setNotice({ tone: "error", text: t("adminTabs.pastors.errorSameChurch") }); return; }
     const transferred = await withAuthRequest(
-      "super-pastor-transfer",
-      () => apiRequest<PastorRow>(`/api/pastors/${selectedId}/transfer`, {
+      "pastor-transfer",
+      () => apiRequest<PastorRow>(`/api/pastors/${pastorId}/transfer`, {
         method: "POST", token, body: { from_church_id: from, to_church_id: to },
       }),
-      "Pastor transferred.",
+      t("adminTabs.pastors.successTransferred"),
     );
     if (!transferred) return;
-    setSearchResults((cur) => cur.filter((r) => r.id !== selectedId));
-    setSelectedId(""); setEditName(""); setEditPhone(""); setEditEmail("");
+    setSearchResults((cur) => cur.filter((r) => r.id !== pastorId));
+    if (pastorId === selectedId) clearSelection();
     await loadChurches();
+    await loadPastors();
   }
 
-  async function superDelete() {
-    if (!isSuperAdmin || !selectedId) return;
-    const cid = fromChurchId.trim();
-    if (!cid || !isUuid(cid)) { setNotice({ tone: "error", text: "Select source church for pastor operations." }); return; }
+  async function deletePastorById(pastorId: string, cid: string) {
+    if (!canWrite) return;
+    if (!cid || !isUuid(cid)) { setNotice({ tone: "error", text: t("adminTabs.pastors.errorSelectSourceChurch") }); return; }
     const result = await withAuthRequest(
-      "super-pastor-delete",
-      () => apiRequest<{ deleted: true; id: string }>(`/api/pastors/${selectedId}`, {
+      "pastor-delete",
+      () => apiRequest<{ deleted: true; id: string }>(`/api/pastors/${pastorId}`, {
         method: "DELETE", token, body: { church_id: cid },
       }),
-      "Pastor deleted.",
+      t("adminTabs.pastors.successDeleted"),
     );
     if (!result) return;
-    setSearchResults((cur) => cur.filter((r) => r.id !== selectedId));
-    setSelectedId("");
+    setSearchResults((cur) => cur.filter((r) => r.id !== pastorId));
+    if (pastorId === selectedId) clearSelection();
+    await loadPastors();
   }
-
-  // ── Shared pastor add/delete/transfer ──
 
   async function createPastor() {
     const cid = isSuperAdmin ? pastorChurchId.trim() : authContext?.auth.church_id || "";
-    if (!cid) { setNotice({ tone: "error", text: "Select a church before adding a pastor." }); return; }
-    if (!isUuid(cid)) { setNotice({ tone: "error", text: "Selected church is invalid." }); return; }
-    if (!pastorName.trim() || !pastorPhone.trim()) { setNotice({ tone: "error", text: "Pastor name and phone are required." }); return; }
+    if (!cid) { setNotice({ tone: "error", text: t("adminTabs.pastors.errorSelectSourceChurch") }); return; }
+    if (!isUuid(cid)) { setNotice({ tone: "error", text: t("adminTabs.pastors.errorInvalidChurch") }); return; }
+    if (!pastorName.trim() || !pastorPhone.trim()) { setNotice({ tone: "error", text: t("adminTabs.pastors.errorNamePhoneRequired") }); return; }
     const created = await withAuthRequest(
       "create-pastor",
       () => apiRequest<PastorRow>("/api/pastors/create", {
         method: "POST", token,
         body: { church_id: cid, full_name: pastorName.trim(), phone_number: normalizeIndianPhone(pastorPhone), email: pastorEmail.trim() || undefined, details: pastorDetails.trim() || undefined },
       }),
-      "Pastor added successfully.",
+      t("adminTabs.pastors.successAdded"),
     );
     if (!created) return;
     setPastorName(""); setPastorPhone(""); setPastorEmail(""); setPastorDetails("");
     await loadPastors();
   }
 
-  async function deletePastor(pastorId: string) {
-    const cid = isSuperAdmin ? pastorChurchId.trim() : authContext?.auth.church_id || "";
-    if (!cid) { setNotice({ tone: "error", text: "Select a church before deleting a pastor." }); return; }
-    await withAuthRequest(
-      "delete-pastor",
-      () => apiRequest<{ deleted: true; id: string }>(`/api/pastors/${pastorId}`, {
-        method: "DELETE", token, body: { church_id: cid },
-      }),
-      "Pastor deleted successfully.",
-    );
-    await loadPastors();
-  }
-
-  async function transferPastor(pastorId: string) {
-    if (!isSuperAdmin) { setNotice({ tone: "error", text: "Only super admin can transfer pastors." }); return; }
-    const from = pastorChurchId.trim();
-    const to = pastorTransferChurchId.trim();
-    if (!from || !to) { setNotice({ tone: "error", text: "Select both source and target churches for transfer." }); return; }
-    if (!isUuid(from) || !isUuid(to)) { setNotice({ tone: "error", text: "Selected church is invalid." }); return; }
-    if (from === to) { setNotice({ tone: "error", text: "Source and target church cannot be the same." }); return; }
-    await withAuthRequest(
-      "transfer-pastor",
-      () => apiRequest<PastorRow>(`/api/pastors/${pastorId}/transfer`, {
-        method: "POST", token, body: { from_church_id: from, to_church_id: to },
-      }),
-      "Pastor transferred successfully.",
-    );
-    await loadPastors();
-    await loadChurches();
-  }
-
   return (
     <article className="panel">
       <h3>{t("adminTabs.pastors.title")}</h3>
       <div className="field-stack">
-        {isSuperAdmin ? (
-          <>
-            <label>
-              {t("adminTabs.pastors.sourceChurchLabel")}
-              <select value={fromChurchId} onChange={(e) => setFromChurchId(e.target.value)}>
-                <option value="">{t("admin.selectChurch")}</option>
-                {churches.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.unique_id || c.church_code || c.id.slice(0, 8)})</option>)}
-              </select>
-            </label>
-            <label>
-              {t("adminTabs.pastors.searchPastorLabel")}
-              <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder={t("adminTabs.pastors.searchPlaceholder")} />
-            </label>
-            <div className="actions-row">
-              <button className="btn" onClick={superSearch} disabled={busyKey === "super-pastor-search"}>
-                {busyKey === "super-pastor-search" ? t("common.searching") : t("adminTabs.pastors.searchPastors")}
-              </button>
-            </div>
-            <div className="list-stack">
-              {searchResults.length ? (
-                <>
-                  {paginate(searchResults, searchPage, 8).map((p) => (
-                    <div key={p.id} className="list-item">
-                      <strong>{p.full_name}</strong>
-                      <span>{p.phone_number}</span>
-                      <span>{p.email || t("adminTabs.pastors.noEmail")}</span>
-                      <div className="actions-row"><button className="btn" onClick={() => selectPastor(p)}>{t("adminTabs.pastors.selectPastor")}</button></div>
-                    </div>
-                  ))}
-                  <Pagination page={searchPage} total={totalPages(searchResults.length, 8)} onPageChange={setSearchPage} />
-                </>
-              ) : <EmptyState icon={<UserRound size={32} />} title={t("adminTabs.pastors.emptySearchTitle")} description={t("adminTabs.pastors.emptySearchDescription")} />}
-            </div>
-            {selectedId ? (
-              <>
-                <label>{t("adminTabs.pastors.pastorNameLabel")}<input value={editName} onChange={(e) => setEditName(e.target.value)} /></label>
-                <label>{t("adminTabs.pastors.pastorPhoneLabel")}<input value={editPhone} onChange={(e) => setEditPhone(e.target.value)} /></label>
-                <label>{t("adminTabs.pastors.pastorEmailLabel")}<input value={editEmail} onChange={(e) => setEditEmail(e.target.value)} /></label>
-                <label>
-                  {t("adminTabs.pastors.transferToChurchLabel")}
-                  <select value={superTargetChurchId} onChange={(e) => setSuperTargetChurchId(e.target.value)}>
-                    <option value="">{t("adminTabs.pastors.selectTargetChurch")}</option>
-                    {churches.filter((c) => c.id !== fromChurchId).map((c) => (
-                      <option key={c.id} value={c.id}>{c.name} ({c.unique_id || c.church_code || c.id.slice(0, 8)})</option>
-                    ))}
-                  </select>
-                </label>
-                <div className="actions-row">
-                  <button className="btn" onClick={superUpdate} disabled={busyKey === "super-pastor-update"}>
-                    {busyKey === "super-pastor-update" ? t("adminTabs.pastors.updating") : t("adminTabs.pastors.updatePastor")}
-                  </button>
-                  <button className="btn" onClick={superTransfer} disabled={busyKey === "super-pastor-transfer"}>
-                    {busyKey === "super-pastor-transfer" ? t("adminTabs.pastors.transferring") : t("adminTabs.pastors.transferPastor")}
-                  </button>
-                  <button className="btn btn-danger" onClick={superDelete} disabled={busyKey === "super-pastor-delete"}>
-                    {busyKey === "super-pastor-delete" ? t("adminTabs.pastors.deleting") : t("adminTabs.pastors.deletePastor")}
-                  </button>
-                </div>
-              </>
-            ) : null}
-          </>
-        ) : null}
-
-        {/* Shared pastor add form */}
-        <label>
-          {t("adminTabs.pastors.churchRequiredLabel")}
-          <select
-            value={isSuperAdmin ? pastorChurchId : authContext?.auth.church_id || ""}
-            onChange={(e) => { if (isSuperAdmin) setPastorChurchId(e.target.value); }}
-            disabled={!isSuperAdmin}
-          >
-            {isSuperAdmin ? <option value="">{t("admin.selectChurch")}</option> : null}
-            {(isSuperAdmin ? churches : churches.slice(0, 1)).map((c) => (
-              <option key={c.id} value={c.id}>{c.name} ({c.unique_id || c.church_code || c.id.slice(0, 8)})</option>
-            ))}
-            {!isSuperAdmin && !churches.length && authContext?.auth.church_id ? (
-              <option value={authContext.auth.church_id}>Current Church</option>
-            ) : null}
-          </select>
-        </label>
+        {/* Church selector */}
         {isSuperAdmin ? (
           <label>
-            {t("adminTabs.pastors.transferToChurchLabel")}
-            <select value={pastorTransferChurchId} onChange={(e) => setPastorTransferChurchId(e.target.value)}>
-              <option value="">{t("adminTabs.pastors.selectTargetChurch")}</option>
-              {churches.filter((c) => c.id !== pastorChurchId).map((c) => (
+            {t("adminTabs.pastors.sourceChurchLabel")}
+            <select value={fromChurchId} onChange={(e) => setFromChurchId(e.target.value)}>
+              <option value="">{t("admin.selectChurch")}</option>
+              {churches.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.unique_id || c.church_code || c.id.slice(0, 8)})</option>)}
+            </select>
+          </label>
+        ) : null}
+
+        {/* Search */}
+        <label>
+          {t("adminTabs.pastors.searchPastorLabel")}
+          <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder={t("adminTabs.pastors.searchPlaceholder")}
+            onKeyDown={(e) => { if (e.key === "Enter") searchPastors(); }} />
+        </label>
+        <div className="actions-row">
+          <button className="btn" onClick={searchPastors} disabled={busyKey === "pastor-search"}>
+            {busyKey === "pastor-search" ? t("common.searching") : t("adminTabs.pastors.searchPastors")}
+          </button>
+        </div>
+
+        {/* Search results */}
+        <div className="list-stack">
+          {searchResults.length ? (
+            <>
+              {paginate(searchResults, searchPage, 8).map((p) => (
+                <div key={p.id} className={`list-item${selectedId === p.id ? " list-item--selected" : ""}`}>
+                  <strong>{p.full_name}</strong>
+                  <span>{p.phone_number}</span>
+                  <span>{p.email || t("adminTabs.pastors.noEmail")}</span>
+                  <div className="actions-row"><button className="btn" onClick={() => selectPastor(p)}>{t("adminTabs.pastors.selectPastor")}</button></div>
+                </div>
+              ))}
+              <Pagination page={searchPage} total={totalPages(searchResults.length, 8)} onPageChange={setSearchPage} />
+            </>
+          ) : <EmptyState icon={<UserRound size={32} />} title={t("adminTabs.pastors.emptySearchTitle")} description={t("adminTabs.pastors.emptySearchDescription")} />}
+        </div>
+
+        {/* Edit selected pastor */}
+        {selectedId && canWrite ? (
+          <div style={{ borderLeft: "3px solid var(--primary)", paddingLeft: "1rem", marginTop: "0.5rem" }}>
+            <h4 style={{ marginBottom: "0.5rem" }}>{t("adminTabs.pastors.editPastorTitle")}</h4>
+            <label>{t("adminTabs.pastors.pastorNameLabel")}<input value={editName} onChange={(e) => setEditName(e.target.value)} /></label>
+            <label>{t("adminTabs.pastors.pastorPhoneLabel")}<input value={editPhone} onChange={(e) => setEditPhone(e.target.value)} /></label>
+            <label>{t("adminTabs.pastors.pastorEmailLabel")}<input value={editEmail} onChange={(e) => setEditEmail(e.target.value)} /></label>
+            <label>{t("adminTabs.pastors.detailsLabel")}<textarea value={editDetails} onChange={(e) => setEditDetails(e.target.value)} placeholder={t("adminTabs.pastors.detailsPlaceholder")} /></label>
+            <label>
+              {t("adminTabs.pastors.activeStatusLabel")}
+              <select value={editIsActive ? "true" : "false"} onChange={(e) => setEditIsActive(e.target.value === "true")}>
+                <option value="true">{t("adminTabs.pastors.statusActive")}</option>
+                <option value="false">{t("adminTabs.pastors.statusInactive")}</option>
+              </select>
+            </label>
+            {isSuperAdmin ? (
+              <label>
+                {t("adminTabs.pastors.transferToChurchLabel")}
+                <select value={superTargetChurchId} onChange={(e) => setSuperTargetChurchId(e.target.value)}>
+                  <option value="">{t("adminTabs.pastors.selectTargetChurch")}</option>
+                  {churches.filter((c) => c.id !== fromChurchId).map((c) => (
+                    <option key={c.id} value={c.id}>{c.name} ({c.unique_id || c.church_code || c.id.slice(0, 8)})</option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            <div className="actions-row" style={{ marginTop: "0.75rem" }}>
+              <button className="btn btn-primary" onClick={updatePastor} disabled={busyKey === "pastor-update"}>
+                {busyKey === "pastor-update" ? t("adminTabs.pastors.updating") : t("adminTabs.pastors.updatePastor")}
+              </button>
+              {isSuperAdmin ? (
+                <button className="btn" onClick={() => void transferPastorById(selectedId, scopedChurchId, superTargetChurchId)} disabled={busyKey === "pastor-transfer" || !superTargetChurchId}>
+                  {busyKey === "pastor-transfer" ? t("adminTabs.pastors.transferring") : t("adminTabs.pastors.transferPastor")}
+                </button>
+              ) : null}
+              <button className="btn btn-danger" onClick={() => void deletePastorById(selectedId, scopedChurchId)} disabled={busyKey === "pastor-delete"}>
+                {busyKey === "pastor-delete" ? t("adminTabs.pastors.deleting") : t("adminTabs.pastors.deletePastor")}
+              </button>
+              <button className="btn" onClick={clearSelection}>{t("common.cancel")}</button>
+            </div>
+          </div>
+        ) : null}
+
+        <hr style={{ margin: "1.5rem 0", opacity: 0.2 }} />
+
+        {/* Add pastor form */}
+        <h4>{t("adminTabs.pastors.addPastor")}</h4>
+        {isSuperAdmin ? (
+          <label>
+            {t("adminTabs.pastors.churchRequiredLabel")}
+            <select value={pastorChurchId} onChange={(e) => setPastorChurchId(e.target.value)}>
+              <option value="">{t("admin.selectChurch")}</option>
+              {churches.map((c) => (
                 <option key={c.id} value={c.id}>{c.name} ({c.unique_id || c.church_code || c.id.slice(0, 8)})</option>
               ))}
             </select>
@@ -292,15 +284,10 @@ export default function PastorsTab() {
               <div key={p.id} className="list-item">
                 <strong>{p.full_name}</strong>
                 <span>{p.phone_number}</span>
-                <span>{p.email || "No email"}</span>
+                <span>{p.email || t("adminTabs.pastors.noEmail")}</span>
                 <div className="actions-row">
-                  {isSuperAdmin ? (
-                    <button className="btn" onClick={() => void transferPastor(p.id)} disabled={busyKey === "transfer-pastor" || !pastorTransferChurchId}>
-                      {busyKey === "transfer-pastor" ? t("adminTabs.pastors.transferring") : t("adminTabs.pastors.transferPastor")}
-                    </button>
-                  ) : null}
-                  <button className="btn btn-danger" onClick={() => void deletePastor(p.id)} disabled={busyKey === "delete-pastor"}>
-                    {busyKey === "delete-pastor" ? t("adminTabs.pastors.deleting") : t("adminTabs.pastors.deletePastor")}
+                  <button className="btn btn-danger" onClick={() => void deletePastorById(p.id, isSuperAdmin ? pastorChurchId : (authContext?.auth.church_id || ""))} disabled={busyKey === "pastor-delete"}>
+                    {busyKey === "pastor-delete" ? t("adminTabs.pastors.deleting") : t("adminTabs.pastors.deletePastor")}
                   </button>
                 </div>
               </div>

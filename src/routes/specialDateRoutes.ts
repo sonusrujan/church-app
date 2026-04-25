@@ -1,3 +1,4 @@
+import { UUID_REGEX } from "../utils/validation";
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { requireAuth, AuthRequest } from "../middleware/requireAuth";
@@ -6,6 +7,7 @@ import { safeErrorMessage } from "../utils/safeError";
 import { isSuperAdminEmail } from "../middleware/requireSuperAdmin";
 import { persistAuditLog } from "../utils/auditLog";
 import { logger } from "../utils/logger";
+import { validate, createSpecialDateSchema, updateSpecialDateSchema } from "../utils/zodSchemas";
 import {
   createSpecialDate,
   listSpecialDates,
@@ -16,7 +18,6 @@ import {
 } from "../services/specialDateService";
 
 const router = Router();
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function qs(val: unknown): string {
   if (Array.isArray(val)) return String(val[0] ?? "");
@@ -42,7 +43,10 @@ function resolveScopedChurchId(req: AuthRequest, requestedChurchId?: string) {
 router.get("/list", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
   try {
     if (!req.user) return res.status(401).json({ error: "Unauthenticated" });
-    const memberId = qs(req.query.member_id) || req.registeredProfile?.id || "";
+    const isAdmin = req.user.role === "admin" || isSuperAdminEmail(req.user.email, req.user.phone);
+    const requestedMemberId = qs(req.query.member_id);
+    const ownMemberId = req.registeredProfile?.id || "";
+    const memberId = isAdmin ? (requestedMemberId || ownMemberId) : ownMemberId;
     if (!memberId || !UUID_REGEX.test(memberId)) {
       return res.status(400).json({ error: "Valid member_id required" });
     }
@@ -74,7 +78,7 @@ router.get("/check-dob", requireAuth, requireRegisteredUser, async (req: AuthReq
 });
 
 // ── Add special date ──
-router.post("/", requireAuth, requireRegisteredUser, writeLimiter, async (req: AuthRequest, res) => {
+router.post("/", requireAuth, requireRegisteredUser, writeLimiter, validate(createSpecialDateSchema), async (req: AuthRequest, res) => {
   try {
     if (!req.user) return res.status(401).json({ error: "Unauthenticated" });
     const churchId = resolveScopedChurchId(req, req.body.church_id);
@@ -86,7 +90,10 @@ router.post("/", requireAuth, requireRegisteredUser, writeLimiter, async (req: A
     if (!occasion_date) return res.status(400).json({ error: "occasion_date required" });
     if (!person_name?.trim()) return res.status(400).json({ error: "person_name required" });
 
-    const memberId = req.body.member_id || req.registeredProfile?.id || "";
+    const isAdmin = req.user.role === "admin" || isSuperAdminEmail(req.user.email, req.user.phone);
+    const requestedMemberId = req.body.member_id;
+    const ownMemberId = req.registeredProfile?.id || "";
+    const memberId = isAdmin ? (requestedMemberId || ownMemberId) : ownMemberId;
     if (!memberId || !UUID_REGEX.test(memberId)) {
       return res.status(400).json({ error: "Valid member_id required" });
     }
@@ -101,7 +108,7 @@ router.post("/", requireAuth, requireRegisteredUser, writeLimiter, async (req: A
       notes,
     });
 
-    persistAuditLog(req, "special_date.create", "member_special_dates", row.id, { occasion_type, occasion_date }).catch(() => {});
+    persistAuditLog(req, "special_date.create", "member_special_dates", row.id, { occasion_type, occasion_date }).catch((err) => { logger.warn({ err }, "Audit log failed for special_date.create"); });
 
     return res.status(201).json({ data: row });
   } catch (err: any) {
@@ -110,14 +117,28 @@ router.post("/", requireAuth, requireRegisteredUser, writeLimiter, async (req: A
 });
 
 // ── Update special date ──
-router.put("/:id", requireAuth, requireRegisteredUser, writeLimiter, async (req: AuthRequest, res) => {
+router.put("/:id", requireAuth, requireRegisteredUser, writeLimiter, validate(updateSpecialDateSchema), async (req: AuthRequest, res) => {
   try {
     if (!req.user) return res.status(401).json({ error: "Unauthenticated" });
     const id = String(req.params.id);
     if (!UUID_REGEX.test(id)) return res.status(400).json({ error: "Invalid id" });
     const churchId = resolveScopedChurchId(req, qs(req.query.church_id));
+
+    // Ownership check: only the owning member or an admin can update
+    const isAdmin = req.user.role === "admin" || isSuperAdminEmail(req.user.email, req.user.phone);
+    if (!isAdmin) {
+      const { data: existing } = await (await import("../services/dbClient")).db
+        .from("member_special_dates").select("member_id").eq("id", id).maybeSingle();
+      if (!existing || existing.member_id !== req.registeredProfile?.id) {
+        return res.status(403).json({ error: "You can only update your own special dates" });
+      }
+    }
+
     const { occasion_type, occasion_date, person_name, spouse_name, notes } = req.body;
     const row = await updateSpecialDate(id, churchId, { occasion_type, occasion_date, person_name, spouse_name, notes });
+
+    persistAuditLog(req, "special_date.update", "member_special_dates", id, { occasion_type, occasion_date }).catch((err) => { logger.warn({ err }, "Audit log failed for special_date.update"); });
+
     return res.json({ data: row });
   } catch (err: any) {
     return res.status(500).json({ error: safeErrorMessage(err, "Failed to update special date") });
@@ -131,9 +152,20 @@ router.delete("/:id", requireAuth, requireRegisteredUser, writeLimiter, async (r
     const id = String(req.params.id);
     if (!UUID_REGEX.test(id)) return res.status(400).json({ error: "Invalid id" });
     const churchId = resolveScopedChurchId(req, qs(req.query.church_id));
+
+    // Ownership check: only the owning member or an admin can delete
+    const isAdmin = req.user.role === "admin" || isSuperAdminEmail(req.user.email, req.user.phone);
+    if (!isAdmin) {
+      const { data: existing } = await (await import("../services/dbClient")).db
+        .from("member_special_dates").select("member_id").eq("id", id).maybeSingle();
+      if (!existing || existing.member_id !== req.registeredProfile?.id) {
+        return res.status(403).json({ error: "You can only delete your own special dates" });
+      }
+    }
+
     await deleteSpecialDate(id, churchId);
 
-    persistAuditLog(req, "special_date.delete", "member_special_dates", id).catch(() => {});
+    persistAuditLog(req, "special_date.delete", "member_special_dates", id).catch((err) => { logger.warn({ err }, "Audit log failed for special_date.delete"); });
 
     return res.json({ success: true });
   } catch (err: any) {
@@ -191,10 +223,15 @@ router.get("/export", requireAuth, requireRegisteredUser, async (req: AuthReques
 
 function escapeCsvField(value: unknown): string {
   const str = value == null ? "" : String(value);
-  if (str.includes(",") || str.includes('"') || str.includes("\n")) {
-    return `"${str.replace(/"/g, '""')}"`;
+  // Neutralize CSV formula injection
+  let safe = str;
+  if (/^[=+\-@\t\r]/.test(safe)) {
+    safe = "'" + safe;
   }
-  return str;
+  if (safe.includes(",") || safe.includes('"') || safe.includes("\n")) {
+    return `"${safe.replace(/"/g, '""')}"`;
+  }
+  return safe;
 }
 
 // ── Super-admin: Manually trigger special-date greetings (for testing) ──

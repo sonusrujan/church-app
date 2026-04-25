@@ -1,4 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react";
+import { Link } from "react-router-dom";
+import { Settings, Crown } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import { apiRequest } from "../lib/api";
 import { useI18n } from "../i18n";
@@ -11,6 +13,7 @@ import {
   stripIndianPrefix,
   normalizeIndianPhone,
   type FamilyMemberRow,
+  type LinkedMemberProfile,
   type MemberDashboard,
 } from "../types";
 
@@ -70,12 +73,23 @@ export default function ProfilePage() {
   // ── Profile form state ──
   const [profileName, setProfileName] = useState("");
   const [profileAvatarUrl, setProfileAvatarUrl] = useState("");
+  const [avatarDirty, setAvatarDirty] = useState(false);
   const [profileAddress, setProfileAddress] = useState("");
   const [profilePhone, setProfilePhone] = useState("");
   const [profileAltPhone, setProfileAltPhone] = useState("");
   const [profileGender, setProfileGender] = useState("");
   const [profileDob, setProfileDob] = useState("");
+  const [profileOccupation, setProfileOccupation] = useState("");
+  const [profileConfirmationTaken, setProfileConfirmationTaken] = useState<boolean | null>(null);
+  const [profileAge, setProfileAge] = useState("");
   const [profileEditing, setProfileEditing] = useState(false);
+
+  const occupationOptions = [
+    t("profile.occupationFarmer"), t("profile.occupationTeacher"), t("profile.occupationBusiness"),
+    t("profile.occupationGovEmployee"), t("profile.occupationPrivEmployee"),
+    t("profile.occupationSelfEmployed"), t("profile.occupationStudent"), t("profile.occupationRetired"),
+    t("profile.occupationHomemaker"), t("profile.occupationPastor"), t("profile.occupationOther"),
+  ];
 
   // ── Phone change OTP state ──
   const [originalPhone, setOriginalPhone] = useState("");
@@ -107,6 +121,25 @@ export default function ProfilePage() {
   const [editFamilyAge, setEditFamilyAge] = useState("");
   const [editFamilyDob, setEditFamilyDob] = useState("");
 
+  // ── Expandable family member profile ──
+  const [expandedFamilyId, setExpandedFamilyId] = useState<string | null>(null);
+  const [expandedProfile, setExpandedProfile] = useState<LinkedMemberProfile | null>(null);
+  const [loadingProfile, setLoadingProfile] = useState(false);
+  // Editable linked profile fields
+  const [editLinkedAddress, setEditLinkedAddress] = useState("");
+  const [editLinkedPhone, setEditLinkedPhone] = useState("");
+  const [editLinkedAltPhone, setEditLinkedAltPhone] = useState("");
+  const [editLinkedOccupation, setEditLinkedOccupation] = useState("");
+  const [editLinkedConfirmation, setEditLinkedConfirmation] = useState<boolean | null>(null);
+  // Family member phone OTP state
+  const [origLinkedPhone, setOrigLinkedPhone] = useState("");
+  const [famPhoneOtpSent, setFamPhoneOtpSent] = useState(false);
+  const [famPhoneOtpCode, setFamPhoneOtpCode] = useState("");
+  const [famPhoneChangeToken, setFamPhoneChangeToken] = useState("");
+  const [famPhoneVerified, setFamPhoneVerified] = useState(false);
+  const [famPhoneOtpBusy, setFamPhoneOtpBusy] = useState(false);
+  const famPhoneChanged = editLinkedPhone !== origLinkedPhone;
+
   // ── Special Dates ──
   const [specialDates, setSpecialDates] = useState<SpecialDateRow[]>([]);
   const [sdOccasionType, setSdOccasionType] = useState<"birthday" | "anniversary">("birthday");
@@ -115,6 +148,9 @@ export default function ProfilePage() {
   const [sdSpouseName, setSdSpouseName] = useState("");
   const [sdNotes, setSdNotes] = useState("");
   const [sdAdding, setSdAdding] = useState(false);
+
+  // ── Tab state ──
+  const [activeProfileTab, setActiveProfileTab] = useState<"personal" | "family" | "dates">("personal");
 
   // ── Pagination ──
   const [familyPage, setFamilyPage] = useState(1);
@@ -155,14 +191,16 @@ export default function ProfilePage() {
           { method: "GET", token },
         );
         if (check?.isDuplicate) {
-          return new Promise<void>((resolve) => {
+          const confirmed = await new Promise<boolean>((resolve) => {
             openOperationConfirmDialog(
               t("profile.dobConflictTitle") || "Date Conflict",
               t("profile.dobConflictConfirm"),
               "CONFIRM",
-              () => { resolve(); },
+              () => { resolve(true); },
+              () => { resolve(false); },
             );
           });
+          if (!confirmed) return;
         }
       } catch { /* ignore check errors, proceed */ }
     }
@@ -222,6 +260,9 @@ export default function ProfilePage() {
     setProfileAltPhone(stripIndianPrefix(memberDashboard?.member?.alt_phone_number || ""));
     setProfileGender(memberDashboard?.member?.gender || "");
     setProfileDob(memberDashboard?.member?.dob || "");
+    setProfileOccupation(memberDashboard?.member?.occupation || "");
+    setProfileConfirmationTaken(memberDashboard?.member?.confirmation_taken ?? null);
+    setProfileAge(memberDashboard?.member?.age != null ? String(memberDashboard.member.age) : "");
     setProfileEditing(false);
     setPhoneOtpSent(false);
     setPhoneOtpCode("");
@@ -234,6 +275,9 @@ export default function ProfilePage() {
     memberDashboard?.member?.alt_phone_number,
     memberDashboard?.member?.gender,
     memberDashboard?.member?.dob,
+    memberDashboard?.member?.occupation,
+    memberDashboard?.member?.confirmation_taken,
+    memberDashboard?.member?.age,
   ]);
 
   // ── Handlers ──
@@ -246,6 +290,9 @@ export default function ProfilePage() {
     setProfileAltPhone(stripIndianPrefix(memberDashboard?.member?.alt_phone_number || ""));
     setProfileGender(memberDashboard?.member?.gender || "");
     setProfileDob(memberDashboard?.member?.dob || "");
+    setProfileOccupation(memberDashboard?.member?.occupation || "");
+    setProfileConfirmationTaken(memberDashboard?.member?.confirmation_taken ?? null);
+    setProfileAge(memberDashboard?.member?.age != null ? String(memberDashboard.member.age) : "");
     setProfileEditing(false);
     setPhoneOtpSent(false);
     setPhoneOtpCode("");
@@ -262,7 +309,7 @@ export default function ProfilePage() {
     try {
       await apiRequest("/api/otp/send", { method: "POST", body: { phone: normalizedPhone } });
       setPhoneOtpSent(true);
-      setNotice({ tone: "success", text: "OTP sent to new phone number" });
+      setNotice({ tone: "success", text: t("profile.otpSentNewPhone") });
     } catch (err: any) {
       setNotice({ tone: "error", text: err?.message || t("profile.errorSendOtpFailed") });
     } finally {
@@ -287,7 +334,7 @@ export default function ProfilePage() {
         setNotice({ tone: "success", text: t("profile.successPhoneVerified") });
       }
     } catch (err: any) {
-      setNotice({ tone: "error", text: err?.message || "OTP verification failed" });
+      setNotice({ tone: "error", text: err?.message || t("profile.otpVerificationFailed") });
     } finally {
       setPhoneOtpBusy(false);
     }
@@ -319,6 +366,9 @@ export default function ProfilePage() {
             alt_phone_number: normalizedAltPhone,
             gender: profileGender || undefined,
             dob: profileDob || undefined,
+            occupation: profileOccupation || undefined,
+            confirmation_taken: profileConfirmationTaken !== null ? profileConfirmationTaken : undefined,
+            age: profileAge.trim() ? Number(profileAge) : undefined,
             ...(phoneChanged && phoneChangeToken ? { phone_change_token: phoneChangeToken } : {}),
           },
         }),
@@ -329,6 +379,7 @@ export default function ProfilePage() {
     setMemberDashboard(result);
     setAuthContext({ ...authContext, profile: result.profile });
     setProfileEditing(false);
+    setAvatarDirty(false);
   }
 
   // ── Debounced member search ──
@@ -418,6 +469,20 @@ export default function ProfilePage() {
     setEditFamilyRelation(fm.relation || "");
     setEditFamilyAge(fm.age != null ? String(fm.age) : "");
     setEditFamilyDob(fm.dob || "");
+    // Pre-fill linked profile fields if expanded
+    if (expandedFamilyId === fm.id && expandedProfile) {
+      setEditLinkedAddress(expandedProfile.address || "");
+      setEditLinkedPhone(expandedProfile.phone_number || "");
+      setOrigLinkedPhone(expandedProfile.phone_number || "");
+      setEditLinkedAltPhone(expandedProfile.alt_phone_number || "");
+      setEditLinkedOccupation(expandedProfile.occupation || "");
+      setEditLinkedConfirmation(expandedProfile.confirmation_taken);
+    }
+    // Reset family phone OTP state
+    setFamPhoneOtpSent(false);
+    setFamPhoneOtpCode("");
+    setFamPhoneChangeToken("");
+    setFamPhoneVerified(false);
   }
 
   function cancelEditFamilyMember() {
@@ -427,29 +492,137 @@ export default function ProfilePage() {
     setEditFamilyRelation("");
     setEditFamilyAge("");
     setEditFamilyDob("");
+    setEditLinkedAddress("");
+    setEditLinkedPhone("");
+    setOrigLinkedPhone("");
+    setEditLinkedAltPhone("");
+    setEditLinkedOccupation("");
+    setEditLinkedConfirmation(null);
+    setFamPhoneOtpSent(false);
+    setFamPhoneOtpCode("");
+    setFamPhoneChangeToken("");
+    setFamPhoneVerified(false);
+  }
+
+  async function toggleExpandFamily(fm: FamilyMemberRow) {
+    if (expandedFamilyId === fm.id) {
+      setExpandedFamilyId(null);
+      setExpandedProfile(null);
+      return;
+    }
+    setExpandedFamilyId(fm.id);
+    setExpandedProfile(null);
+    setLoadingProfile(true);
+    try {
+      const resp = await apiRequest<{ family_member: FamilyMemberRow; linked_profile: LinkedMemberProfile | null }>(
+        `/api/auth/family-members/${fm.id}/profile`,
+        { method: "GET", token },
+      );
+      setExpandedProfile(resp?.linked_profile || null);
+      // Pre-fill edit fields if we're already editing
+      if (editingFamilyMemberId === fm.id && resp?.linked_profile) {
+        setEditLinkedAddress(resp.linked_profile.address || "");
+        setEditLinkedPhone(resp.linked_profile.phone_number || "");
+        setOrigLinkedPhone(resp.linked_profile.phone_number || "");
+        setEditLinkedAltPhone(resp.linked_profile.alt_phone_number || "");
+        setEditLinkedOccupation(resp.linked_profile.occupation || "");
+        setEditLinkedConfirmation(resp.linked_profile.confirmation_taken);
+      }
+    } catch {
+      setExpandedProfile(null);
+    } finally {
+      setLoadingProfile(false);
+    }
+  }
+
+  // ── Family member phone OTP send / verify ──
+  async function sendFamPhoneOtp() {
+    const normalizedPhone = editLinkedPhone.trim() ? normalizeIndianPhone(editLinkedPhone) : "";
+    if (!normalizedPhone || !isValidIndianPhone(normalizedPhone)) {
+      setNotice({ tone: "error", text: t("profile.errorInvalidPhone10Digit") });
+      return;
+    }
+    setFamPhoneOtpBusy(true);
+    try {
+      await apiRequest("/api/otp/send", { method: "POST", body: { phone: normalizedPhone } });
+      setFamPhoneOtpSent(true);
+      setNotice({ tone: "success", text: t("profile.otpSentNewPhone") });
+    } catch (err: any) {
+      setNotice({ tone: "error", text: err?.message || t("profile.errorSendOtpFailed") });
+    } finally {
+      setFamPhoneOtpBusy(false);
+    }
+  }
+
+  async function verifyFamPhoneOtp() {
+    if (!famPhoneOtpCode.trim()) {
+      setNotice({ tone: "error", text: t("profile.errorOtpRequired") });
+      return;
+    }
+    const normalizedPhone = normalizeIndianPhone(editLinkedPhone);
+    setFamPhoneOtpBusy(true);
+    try {
+      const resp = await apiRequest<{ success: boolean; phone_change_token: string }>(
+        "/api/otp/verify-phone-change",
+        { method: "POST", token, body: { phone: normalizedPhone, otp: famPhoneOtpCode.trim() } },
+      );
+      if (resp?.phone_change_token) {
+        setFamPhoneChangeToken(resp.phone_change_token);
+        setFamPhoneVerified(true);
+        setNotice({ tone: "success", text: t("profile.successPhoneVerified") });
+      }
+    } catch (err: any) {
+      setNotice({ tone: "error", text: err?.message || t("profile.otpVerificationFailed") });
+    } finally {
+      setFamPhoneOtpBusy(false);
+    }
   }
 
   async function saveEditFamilyMember() {
     if (!editingFamilyMemberId) return;
+    const fm = memberDashboard?.family_members?.find((f) => f.id === editingFamilyMemberId);
+    const body: Record<string, unknown> = {
+      full_name: editFamilyName.trim() || undefined,
+      gender: editFamilyGender.trim() || undefined,
+      relation: editFamilyRelation.trim() || undefined,
+      age: editFamilyAge.trim() ? Number(editFamilyAge) : undefined,
+      dob: editFamilyDob || undefined,
+    };
+    // Include linked-profile-only fields if this member is linked
+    if (fm?.linked_to_member_id) {
+      body.address = editLinkedAddress;
+      body.alt_phone_number = editLinkedAltPhone;
+      body.occupation = editLinkedOccupation;
+      if (editLinkedConfirmation !== null) body.confirmation_taken = editLinkedConfirmation;
+      // Phone change requires OTP verification
+      if (famPhoneChanged) {
+        if (!famPhoneVerified || !famPhoneChangeToken) {
+          setNotice({ tone: "error", text: t("profile.verifyPhoneBeforeSave") });
+          return;
+        }
+        body.phone_number = editLinkedPhone;
+        body.phone_change_token = famPhoneChangeToken;
+      } else {
+        body.phone_number = editLinkedPhone;
+      }
+    }
     const result = await withAuthRequest(
       "edit-family-member",
       () =>
         apiRequest<FamilyMemberRow>(`/api/auth/family-members/${editingFamilyMemberId}`, {
           method: "PATCH",
           token,
-          body: {
-            full_name: editFamilyName.trim() || undefined,
-            gender: editFamilyGender.trim() || undefined,
-            relation: editFamilyRelation.trim() || undefined,
-            age: editFamilyAge.trim() ? Number(editFamilyAge) : undefined,
-            dob: editFamilyDob || undefined,
-          },
+          body,
         }),
       t("profile.familyMemberUpdated"),
     );
 
     if (result) {
       setEditingFamilyMemberId(null);
+      // Re-fetch the expanded profile if it was open
+      if (expandedFamilyId === editingFamilyMemberId && fm) {
+        toggleExpandFamily(fm);
+      }
       await refreshMemberDashboard();
     }
   }
@@ -499,37 +672,23 @@ export default function ProfilePage() {
       {/* ── Profile Header Card ── */}
       <article className="panel panel-wide profile-header-card">
         <div className="profile-header">
-          <div className="profile-avatar-lg">
+          <div className="profile-avatar-lg" style={{ position: "relative" }}>
+            {avatarDirty && (
+              <span style={{ position: "absolute", top: -4, right: -4, zIndex: 1, fontSize: "0.65rem", fontWeight: 600, background: "var(--warning, #f59e0b)", color: "#fff", borderRadius: "8px", padding: "0.1rem 0.4rem" }}>
+                {t("profile.unsaved")}
+              </span>
+            )}
             <PhotoUpload
               currentUrl={profileAvatarUrl}
               onUploaded={(url) => {
                 setProfileAvatarUrl(url);
-                // Auto-save avatar immediately
-                apiRequest<MemberDashboard>("/api/auth/update-profile", {
-                  method: "POST",
-                  token,
-                  body: { avatar_url: url },
-                }).then((result) => {
-                  if (result && authContext) {
-                    setMemberDashboard(result);
-                    setAuthContext({ ...authContext, profile: { ...authContext.profile, avatar_url: url } });
-                    setNotice({ tone: "success", text: t("profile.successPhotoUpdated") });
-                  }
-                }).catch(() => setNotice({ tone: "error", text: t("profile.errorPhotoUploadedProfileSaveFailed") }));
+                setAvatarDirty(true);
+                setNotice({ tone: "info", text: t("profile.photoSelectedSaveProfile") });
               }}
               onDeleted={() => {
                 setProfileAvatarUrl("");
-                apiRequest<MemberDashboard>("/api/auth/update-profile", {
-                  method: "POST",
-                  token,
-                  body: { avatar_url: "" },
-                }).then((result) => {
-                  if (result && authContext) {
-                    setMemberDashboard(result);
-                    setAuthContext({ ...authContext, profile: { ...authContext.profile, avatar_url: "" } });
-                    setNotice({ tone: "success", text: t("profile.successPhotoRemoved") });
-                  }
-                }).catch(() => setNotice({ tone: "error", text: t("profile.errorPhotoDeletedProfileSaveFailed") }));
+                setAvatarDirty(true);
+                setNotice({ tone: "info", text: t("profile.photoRemovedSaveProfile") });
               }}
               token={token || ""}
               folder="avatars"
@@ -549,10 +708,21 @@ export default function ProfilePage() {
             <p className="muted">{userPhone || authContext?.profile.email}</p>
 
           </div>
+          <Link to="/settings" className="btn btn-ghost" style={{ marginLeft: "auto", alignSelf: "flex-start" }} title={t("nav.settings")}>
+            <Settings size={20} strokeWidth={1.5} />
+          </Link>
         </div>
       </article>
 
+      {/* ── Profile Tab Bar ── */}
+      <div className="profile-tabs panel-wide">
+        <button className={`profile-tab${activeProfileTab === "personal" ? " active" : ""}`} onClick={() => setActiveProfileTab("personal")}>{t("profile.tabPersonal")}</button>
+        {!isSuperAdmin && <button className={`profile-tab${activeProfileTab === "family" ? " active" : ""}`} onClick={() => setActiveProfileTab("family")}>{t("profile.tabFamily")}</button>}
+        <button className={`profile-tab${activeProfileTab === "dates" ? " active" : ""}`} onClick={() => setActiveProfileTab("dates")}>{t("profile.tabDates")}</button>
+      </div>
+
       {/* ── Personal Details ── */}
+      {activeProfileTab === "personal" && (
       <article className="panel">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <h3>{t("profile.personalDetails")}</h3>
@@ -566,29 +736,45 @@ export default function ProfilePage() {
         {!profileEditing ? (
           /* ── Read-only view ── */
           <div className="detail-list" style={{ display: "grid", gap: "0.75rem", marginTop: "0.5rem" }}>
-            <div className="detail-row" style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
-              <span className="detail-label" style={{ fontSize: "0.8rem", color: "var(--on-surface-variant, #64748b)", fontWeight: 500 }}>{t("profile.fullName")}</span>
+            <div className="detail-row">
+              <span className="detail-label">{t("profile.fullName")}</span>
               <span style={{ fontWeight: 600 }}>{profileName || "—"}</span>
             </div>
-            <div className="detail-row" style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
-              <span className="detail-label" style={{ fontSize: "0.8rem", color: "var(--on-surface-variant, #64748b)", fontWeight: 500 }}>{t("profile.phoneNumber")}</span>
+            <div className="detail-row">
+              <span className="detail-label">{t("profile.phoneNumber")}</span>
               <span style={{ fontWeight: 600 }}>{profilePhone ? `+91 ${profilePhone}` : "—"}</span>
             </div>
-            <div className="detail-row" style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
-              <span className="detail-label" style={{ fontSize: "0.8rem", color: "var(--on-surface-variant, #64748b)", fontWeight: 500 }}>{t("profile.altPhone")}</span>
+            <div className="detail-row">
+              <span className="detail-label">{t("profile.altPhone")}</span>
               <span style={{ fontWeight: 600 }}>{profileAltPhone ? `+91 ${profileAltPhone}` : "—"}</span>
             </div>
-            <div className="detail-row" style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
-              <span className="detail-label" style={{ fontSize: "0.8rem", color: "var(--on-surface-variant, #64748b)", fontWeight: 500 }}>{t("profile.address")}</span>
+            <div className="detail-row">
+              <span className="detail-label">{t("profile.address")}</span>
               <span style={{ fontWeight: 600, whiteSpace: "pre-wrap" }}>{profileAddress || "—"}</span>
             </div>
-            <div className="detail-row" style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
-              <span className="detail-label" style={{ fontSize: "0.8rem", color: "var(--on-surface-variant, #64748b)", fontWeight: 500 }}>Gender</span>
+            <div className="detail-row">
+              <span className="detail-label">{t("profile.gender")}</span>
               <span style={{ fontWeight: 600 }}>{profileGender || "—"}</span>
             </div>
-            <div className="detail-row" style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
-              <span className="detail-label" style={{ fontSize: "0.8rem", color: "var(--on-surface-variant, #64748b)", fontWeight: 500 }}>Date of Birth</span>
+            <div className="detail-row">
+              <span className="detail-label">{t("profile.dateOfBirth")}</span>
               <span style={{ fontWeight: 600 }}>{profileDob ? formatDate(profileDob, false) : "—"}</span>
+            </div>
+            <div className="detail-row">
+              <span className="detail-label">{t("profile.occupation")}</span>
+              <span style={{ fontWeight: 600 }}>{profileOccupation || "—"}</span>
+            </div>
+            <div className="detail-row">
+              <span className="detail-label">{t("profile.confirmationTaken")}</span>
+              <span style={{ fontWeight: 600 }}>{profileConfirmationTaken === true ? t("common.yes") : profileConfirmationTaken === false ? t("common.no") : "—"}</span>
+            </div>
+            <div className="detail-row">
+              <span className="detail-label">{t("profile.age")}</span>
+              <span style={{ fontWeight: 600 }}>{profileAge || "—"}</span>
+            </div>
+            <div className="detail-row">
+              <span className="detail-label">{t("profile.membershipId")}</span>
+              <span style={{ fontWeight: 600 }}>{memberDashboard?.member?.membership_id || "—"}</span>
             </div>
           </div>
         ) : (
@@ -647,7 +833,7 @@ export default function ProfilePage() {
                   <div style={{ marginTop: "0.5rem" }}>
                     {phoneVerified ? (
                       <span style={{ color: "var(--success, #16a34a)", fontWeight: 600, fontSize: "0.875rem" }}>
-                        ✓ New phone number verified
+                        {t("profile.newPhoneVerified")}
                       </span>
                     ) : !phoneOtpSent ? (
                       <button
@@ -666,7 +852,7 @@ export default function ProfilePage() {
                           inputMode="numeric"
                           value={phoneOtpCode}
                           onChange={(e) => setPhoneOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                          placeholder="Enter OTP"
+                          placeholder={t("auth.otpPlaceholder")}
                           maxLength={6}
                           style={{ width: "120px" }}
                         />
@@ -686,7 +872,7 @@ export default function ProfilePage() {
                           onClick={sendPhoneOtp}
                           disabled={phoneOtpBusy}
                         >
-                          Resend
+                          {t("profile.resend")}
                         </button>
                       </div>
                     )}
@@ -745,11 +931,43 @@ export default function ProfilePage() {
                 />
               </label>
             </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
+              <label>
+                {t("profile.occupation")}
+                <select
+                  value={profileOccupation}
+                  onChange={(e) => setProfileOccupation(e.target.value)}
+                >
+                  <option value="">{t("profile.selectOccupation")}</option>
+                  {occupationOptions.map((o) => <option key={o} value={o}>{o}</option>)}
+                </select>
+              </label>
+              <label>
+                {t("profile.age")}
+                <input
+                  type="number"
+                  min="1"
+                  max="150"
+                  value={profileAge}
+                  onChange={(e) => setProfileAge(e.target.value)}
+                />
+              </label>
+            </div>
+            <label>
+              {t("profile.confirmationTaken")}
+              <div style={{ display: "flex", gap: "1rem", marginTop: "0.25rem" }}>
+                <button type="button" className={`btn btn-sm ${profileConfirmationTaken === true ? "btn-primary" : "btn-outline"}`} onClick={() => setProfileConfirmationTaken(true)}>{t("common.yes")}</button>
+                <button type="button" className={`btn btn-sm ${profileConfirmationTaken === false ? "btn-primary" : "btn-outline"}`} onClick={() => setProfileConfirmationTaken(false)}>{t("common.no")}</button>
+              </div>
+            </label>
             <div className="actions-row" style={{ marginTop: "0.75rem" }}>
+              {phoneChanged && !phoneVerified ? (
+                <p className="muted" style={{ fontSize: "0.85rem", color: "var(--error, #c0392b)" }}>{t("profile.phoneChangeVerifyFirst")}</p>
+              ) : null}
               <button
                 className="btn btn-primary"
                 onClick={updateProfile}
-                disabled={busyKey === "update-profile"}
+                disabled={busyKey === "update-profile" || (phoneChanged && !phoneVerified)}
               >
                 {busyKey === "update-profile" ? t("common.saving") : t("profile.saveProfile")}
               </button>
@@ -765,108 +983,236 @@ export default function ProfilePage() {
           </>
         )}
       </article>
+      )}
 
       {/* ── Family Members ── */}
-      {!isSuperAdmin ? (
+      {activeProfileTab === "family" && !isSuperAdmin ? (
         <article className="panel panel-wide">
           <h3>{t("profile.familyMembers")}</h3>
-          <div className="list-stack">
+
+          {/* Head of household */}
+          {memberDashboard?.member && (
+            <div className="list-item" style={{ borderLeft: "3px solid var(--primary)", marginBottom: "0.5rem" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                <Crown size={16} style={{ color: "var(--primary)" }} />
+                <div>
+                  <strong>{memberDashboard.member.full_name}</strong>
+                  <span style={{ fontSize: "0.75rem", fontWeight: 600, padding: "0.1rem 0.4rem", borderRadius: "4px", background: "var(--badge-success-bg, #e6f4ea)", color: "var(--badge-success-text, #1b5e20)", marginLeft: 6 }}>{t("profile.head")}</span>
+                  <span style={{ display: "block", fontSize: "0.85rem", color: "var(--text-muted)" }}>
+                    {memberDashboard.member.gender || ""}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="list-stack" style={{ paddingLeft: "1rem" }}>
             {memberDashboard?.family_members?.length ? (
               <>
-              {paginate(memberDashboard.family_members, familyPage, ITEMS_PER_PAGE).map((fm) => (
-                <div key={fm.id} className="list-item">
-                  {editingFamilyMemberId === fm.id ? (
-                    <>
-                      <div className="field-stack" style={{ gap: "0.5rem" }}>
-                        <label>
-                          {t("profile.name")}
-                          <input
-                            value={editFamilyName}
-                            onChange={(e) => setEditFamilyName(e.target.value)}
-                          />
-                        </label>
-                        <label>
-                          {t("profile.gender")}
-                          <select
-                            value={editFamilyGender}
-                            onChange={(e) => setEditFamilyGender(e.target.value)}
-                          >
-                            <option value="">{t("profile.selectGender")}</option>
-                            <option value="Male">{t("profile.male")}</option>
-                            <option value="Female">{t("profile.female")}</option>
-                          </select>
-                        </label>
-                        <label>
-                          {t("profile.relation")}
-                          <select
-                            value={editFamilyRelation}
-                            onChange={(e) => setEditFamilyRelation(e.target.value)}
-                          >
-                            <option value="">{t("profile.selectRelation")}</option>
-                            {relationOptions.map((r) => (
-                              <option key={r.value} value={r.value}>
-                                {r.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label>
-                          {t("profile.dateOfBirth")}
-                          <input
-                            type="date"
-                            value={editFamilyDob}
-                            onChange={(e) => setEditFamilyDob(e.target.value)}
-                          />
-                        </label>
-                      </div>
-                      <div className="actions-row" style={{ marginTop: "0.5rem" }}>
-                        <button
-                          className="btn btn-primary"
-                          onClick={saveEditFamilyMember}
-                          disabled={busyKey === "edit-family-member"}
-                        >
-                          {busyKey === "edit-family-member" ? t("common.saving") : t("common.save")}
-                        </button>
-                        <button className="btn" onClick={cancelEditFamilyMember}>
-                          {t("common.cancel")}
-                        </button>
-                      </div>
-                    </>
-                  ) : (
-                    <>
+              {paginate(memberDashboard.family_members, familyPage, ITEMS_PER_PAGE).map((fm) => {
+                const isExpanded = expandedFamilyId === fm.id;
+                const isEditing = editingFamilyMemberId === fm.id;
+                return (
+                <div key={fm.id} className="list-item" style={{ cursor: "pointer", transition: "all 0.2s" }}>
+                  {/* ── Collapsed header (always visible, clickable to toggle) ── */}
+                  <div
+                    onClick={() => !isEditing && toggleExpandFamily(fm)}
+                    style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}
+                  >
+                    <div>
                       <strong>{fm.full_name}</strong>
                       {fm.linked_to_member_id && (
-                        <span style={{ fontSize: "0.75rem", fontWeight: 600, padding: "0.1rem 0.4rem", borderRadius: "4px", background: "#e0f2fe", color: "#0369a1" }}>{t("profile.linked")}</span>
+                        <span style={{ fontSize: "0.75rem", fontWeight: 600, padding: "0.1rem 0.4rem", borderRadius: "4px", background: "#e0f2fe", color: "#0369a1", marginLeft: 6 }}>{t("profile.linked")}</span>
                       )}
-                      <span>
+                      <span style={{ display: "block", fontSize: "0.85rem", color: "var(--text-muted)" }}>
                         {fm.relation || t("profile.relationNotSet")}
-                        {fm.gender ? ` | ${fm.gender}` : ""}
-                        {fm.age != null ? ` | ${t("profile.age")} ${fm.age}` : ""}
+                        {fm.gender ? ` · ${fm.gender}` : ""}
                       </span>
-                      <span>{t("profile.dob")} {fm.dob ? formatDate(fm.dob, false) : t("common.notSet")}</span>
-                      <span>
-                        {t("profile.subscription")} {fm.has_subscription ? t("profile.enabled") : t("profile.notEnabled")}
-                      </span>
-                      <div className="actions-row" style={{ marginTop: "0.25rem" }}>
-                        <button
-                          className="btn"
-                          onClick={() => startEditFamilyMember(fm)}
-                          disabled={!!busyKey}
-                        >
-                          {t("common.edit")}
-                        </button>
-                        <button
-                          className="btn btn-danger"
-                          onClick={() => removeFamilyMember(fm.id, fm.full_name)}
-                          disabled={!!busyKey}
-                        >
-                          {t("common.remove")}
-                        </button>
-                      </div>
-                    </>
+                    </div>
+                    <span style={{ fontSize: "1.1rem", transform: isExpanded ? "rotate(180deg)" : "rotate(0)", transition: "transform 0.2s" }}>▼</span>
+                  </div>
+
+                  {/* ── Expanded profile details ── */}
+                  {isExpanded && (
+                    <div style={{ marginTop: "0.75rem", borderTop: "1px solid var(--border)", paddingTop: "0.75rem" }}>
+                      {isEditing ? (
+                        <>
+                          <div className="field-stack" style={{ gap: "0.5rem" }}>
+                            <label>
+                              {t("profile.name")}
+                              <input value={editFamilyName} onChange={(e) => setEditFamilyName(e.target.value)} />
+                            </label>
+                            <label>
+                              {t("profile.gender")}
+                              <select value={editFamilyGender} onChange={(e) => setEditFamilyGender(e.target.value)}>
+                                <option value="">{t("profile.selectGender")}</option>
+                                <option value="Male">{t("profile.male")}</option>
+                                <option value="Female">{t("profile.female")}</option>
+                              </select>
+                            </label>
+                            <label>
+                              {t("profile.relation")}
+                              <select value={editFamilyRelation} onChange={(e) => setEditFamilyRelation(e.target.value)}>
+                                <option value="">{t("profile.selectRelation")}</option>
+                                {relationOptions.map((r) => (
+                                  <option key={r.value} value={r.value}>{r.label}</option>
+                                ))}
+                              </select>
+                            </label>
+                            <label>
+                              {t("profile.dateOfBirth")}
+                              <input type="date" value={editFamilyDob} onChange={(e) => setEditFamilyDob(e.target.value)} />
+                            </label>
+                            {/* Linked-profile-only fields */}
+                            {fm.linked_to_member_id && (
+                              <>
+                                <label>
+                                  {t("profile.address")}
+                                  <input value={editLinkedAddress} onChange={(e) => setEditLinkedAddress(e.target.value)} />
+                                </label>
+                                <label>
+                                  {t("profile.phoneNumber")}
+                                  <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
+                                    <span style={{ padding: "0.5rem 0.5rem", background: "var(--surface-variant, #f0f0f0)", borderRadius: "6px 0 0 6px", border: "1px solid var(--border)", borderRight: "none", fontSize: "0.9rem", fontWeight: 600 }}>+91</span>
+                                    <input style={{ borderRadius: "0 6px 6px 0" }} value={editLinkedPhone} onChange={(e) => {
+                                    setEditLinkedPhone(e.target.value);
+                                    // Reset OTP state when phone changes
+                                    if (e.target.value !== origLinkedPhone) {
+                                      setFamPhoneOtpSent(false);
+                                      setFamPhoneOtpCode("");
+                                      setFamPhoneChangeToken("");
+                                      setFamPhoneVerified(false);
+                                    }
+                                  }} placeholder="XXXXXXXXXX" />
+                                  </div>
+                                </label>
+                                {/* Family phone OTP verification */}
+                                {famPhoneChanged && editLinkedPhone.length === 10 && isValidIndianPhone(normalizeIndianPhone(editLinkedPhone)) && (
+                                  <div style={{ marginTop: "0.25rem", marginBottom: "0.25rem" }}>
+                                    {famPhoneVerified ? (
+                                      <span style={{ color: "var(--success, #16a34a)", fontWeight: 600, fontSize: "0.875rem" }}>
+                                        {t("profile.newPhoneVerified")}
+                                      </span>
+                                    ) : !famPhoneOtpSent ? (
+                                      <button
+                                        type="button"
+                                        className="btn btn-primary"
+                                        style={{ fontSize: "0.85rem", padding: "0.4rem 1rem" }}
+                                        onClick={sendFamPhoneOtp}
+                                        disabled={famPhoneOtpBusy}
+                                      >
+                                        {famPhoneOtpBusy ? t("profile.sendingOtp") : t("profile.sendOtpButton")}
+                                      </button>
+                                    ) : (
+                                      <div style={{ display: "flex", gap: "0.5rem", alignItems: "stretch" }}>
+                                        <input
+                                          type="text"
+                                          inputMode="numeric"
+                                          value={famPhoneOtpCode}
+                                          onChange={(e) => setFamPhoneOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                                          placeholder={t("auth.otpPlaceholder")}
+                                          maxLength={6}
+                                          style={{ width: "120px" }}
+                                        />
+                                        <button
+                                          type="button"
+                                          className="btn btn-primary"
+                                          style={{ fontSize: "0.85rem", padding: "0.4rem 1rem" }}
+                                          onClick={verifyFamPhoneOtp}
+                                          disabled={famPhoneOtpBusy || famPhoneOtpCode.length < 4}
+                                        >
+                                          {famPhoneOtpBusy ? t("profile.verifyingOtp") : t("profile.verifyButton")}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="btn"
+                                          style={{ fontSize: "0.8rem", padding: "0.4rem 0.75rem" }}
+                                          onClick={sendFamPhoneOtp}
+                                          disabled={famPhoneOtpBusy}
+                                        >
+                                          {t("profile.resend")}
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                                <label>
+                                  {t("profile.altPhone")}
+                                  <input value={editLinkedAltPhone} onChange={(e) => setEditLinkedAltPhone(e.target.value)} />
+                                </label>
+                                <label>
+                                  {t("profile.occupation")}
+                                  <select value={editLinkedOccupation} onChange={(e) => setEditLinkedOccupation(e.target.value)}>
+                                    <option value="">{t("profile.selectOccupation")}</option>
+                                    {occupationOptions.map((o) => <option key={o} value={o}>{o}</option>)}
+                                  </select>
+                                </label>
+                                <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={!!editLinkedConfirmation}
+                                    onChange={(e) => setEditLinkedConfirmation(e.target.checked)}
+                                    style={{ width: "auto" }}
+                                  />
+                                  {t("profile.confirmationTaken")}
+                                </label>
+                              </>
+                            )}
+                          </div>
+                          <div className="actions-row" style={{ marginTop: "0.5rem" }}>
+                            <button className="btn btn-primary" onClick={saveEditFamilyMember} disabled={busyKey === "edit-family-member"}>
+                              {busyKey === "edit-family-member" ? t("common.saving") : t("common.save")}
+                            </button>
+                            <button className="btn" onClick={cancelEditFamilyMember}>{t("common.cancel")}</button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          {loadingProfile && expandedFamilyId === fm.id ? (
+                            <p className="muted">{t("common.loading")}</p>
+                          ) : (
+                            <div className="field-stack" style={{ gap: "0.35rem", fontSize: "0.9rem" }}>
+                              <div><strong>{t("profile.dob")}:</strong> {fm.dob ? formatDate(fm.dob, false) : t("common.notSet")}</div>
+                              <div><strong>{t("profile.age")}:</strong> {fm.age != null ? fm.age : t("common.notSet")}</div>
+                              <div><strong>{t("profile.subscription")}:</strong> {fm.has_subscription ? t("profile.enabled") : t("profile.notEnabled")}</div>
+                              {/* Linked profile details */}
+                              {expandedProfile && fm.linked_to_member_id && (
+                                <>
+                                  <div style={{ borderTop: "1px dashed var(--border)", margin: "0.5rem 0", paddingTop: "0.5rem" }}>
+                                    <strong style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>{t("profile.memberDetails")}</strong>
+                                  </div>
+                                  {expandedProfile.email && <div><strong>{t("profile.email")}:</strong> {expandedProfile.email}</div>}
+                                  {expandedProfile.phone_number && <div><strong>{t("profile.phoneNumber")}:</strong> {expandedProfile.phone_number}</div>}
+                                  {expandedProfile.alt_phone_number && <div><strong>{t("profile.altPhone")}:</strong> {expandedProfile.alt_phone_number}</div>}
+                                  {expandedProfile.address && <div><strong>{t("profile.address")}:</strong> {expandedProfile.address}</div>}
+                                  {expandedProfile.membership_id && <div><strong>{t("profile.membershipId")}:</strong> {expandedProfile.membership_id}</div>}
+                                  {expandedProfile.occupation && <div><strong>{t("profile.occupation")}:</strong> {expandedProfile.occupation}</div>}
+                                  <div><strong>{t("profile.confirmationTaken")}:</strong> {expandedProfile.confirmation_taken ? t("common.yes") : t("common.no")}</div>
+                                  {expandedProfile.subscription_amount != null && <div><strong>{t("profile.subscriptionAmount")}:</strong> ₹{Number(expandedProfile.subscription_amount).toFixed(2)}</div>}
+                                </>
+                              )}
+                              {!fm.linked_to_member_id && !expandedProfile && (
+                                <div className="muted" style={{ fontSize: "0.82rem", fontStyle: "italic" }}>
+                                  {t("profile.manualFamilyMember")}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          <div className="actions-row" style={{ marginTop: "0.5rem" }}>
+                            <button className="btn" onClick={() => startEditFamilyMember(fm)} disabled={!!busyKey}>
+                              {t("common.edit")}
+                            </button>
+                            <button className="btn btn-danger" onClick={() => removeFamilyMember(fm.id, fm.full_name)} disabled={!!busyKey}>
+                              {t("common.remove")}
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
                   )}
                 </div>
-              ))}
+                );
+              })}
               <Pagination page={familyPage} total={totalPages(memberDashboard.family_members.length, ITEMS_PER_PAGE)} onPageChange={setFamilyPage} />
               </>
             ) : (
@@ -1016,7 +1362,7 @@ export default function ProfilePage() {
               <h4>{t("profile.yourRequests")}</h4>
               <div className="list-stack">
                 {familyRequests.map((fr) => (
-                  <div key={fr.id} className="list-item" style={{ padding: "0.5rem 0" }}>
+                  <div key={fr.id} className="list-item">
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <div>
                         <strong>{fr.target_name}</strong>
@@ -1067,13 +1413,13 @@ export default function ProfilePage() {
       ) : null}
 
       {/* ── Special Dates Section ── */}
-      {memberDashboard?.member && (
+      {activeProfileTab === "dates" && memberDashboard?.member && (
         <article className="panel">
           <h3>{t("profile.specialDates")}</h3>
           <p className="muted" style={{ fontSize: "0.85rem", marginBottom: "1rem" }}>
             {t("profile.specialDatesDescription")}
             {memberDashboard.member.dob && (
-              <> {t("profile.dobAutoIncluded", { dob: formatDate(memberDashboard.member.dob) })}</>
+              <> {t("profile.dobAutoIncluded", { dob: formatDate(memberDashboard.member.dob, false) })}</>
             )}
           </p>
 
@@ -1081,7 +1427,7 @@ export default function ProfilePage() {
           {specialDates.length > 0 && (
             <div className="list-stack" style={{ marginBottom: "1.5rem" }}>
               {paginate(specialDates, specialDatesPage, ITEMS_PER_PAGE).map((sd) => (
-                <div key={sd.id} className="list-item" style={{ padding: "0.6rem 0", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.5rem" }}>
+                <div key={sd.id} className="list-item" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.5rem" }}>
                   <div style={{ minWidth: 0 }}>
                     <strong>{sd.person_name}</strong>
                     {sd.spouse_name && <span> &amp; {sd.spouse_name}</span>}
@@ -1090,7 +1436,7 @@ export default function ProfilePage() {
                     </span>
                     <br />
                     <span className="muted" style={{ fontSize: "0.8rem" }}>
-                      {formatDate(sd.occasion_date)}
+                      {formatDate(sd.occasion_date, false)}
                       {sd.is_from_profile && ` ${t("profile.fromProfile")}`}
                     </span>
                     {sd.notes && (
@@ -1119,26 +1465,26 @@ export default function ProfilePage() {
             <h4 style={{ marginBottom: "0.75rem", fontSize: "0.95rem" }}>{t("profile.addSpecialDate")}</h4>
             <div className="profile-sd-form-grid">
               <label>
-                Type
+                {t("profile.type")}
                 <select
                   value={sdOccasionType}
                   onChange={(e) => setSdOccasionType(e.target.value as "birthday" | "anniversary")}
                 >
-                  <option value="birthday">Birthday</option>
-                  <option value="anniversary">Anniversary</option>
+                  <option value="birthday">{t("profile.birthday")}</option>
+                  <option value="anniversary">{t("profile.anniversary")}</option>
                 </select>
               </label>
               <label>
-                Date
+                {t("profile.date")}
                 <input type="date" value={sdDate} onChange={(e) => setSdDate(e.target.value)} />
               </label>
               <label>
-                {sdOccasionType === "anniversary" ? "Male Name" : "Name"}
+                {sdOccasionType === "anniversary" ? t("profile.maleName") : t("profile.personName")}
                 <input
                   type="text"
                   value={sdPersonName}
                   onChange={(e) => setSdPersonName(e.target.value)}
-                  placeholder={sdOccasionType === "anniversary" ? "Husband's name" : "Person's name"}
+                  placeholder={sdOccasionType === "anniversary" ? t("profile.husbandsNamePlaceholder") : t("profile.personsNamePlaceholder")}
                 />
               </label>
               {sdOccasionType === "anniversary" && (
@@ -1176,7 +1522,7 @@ export default function ProfilePage() {
       )}
 
       {/* ── IDs & Subscriptions Table ── */}
-      {memberDashboard?.member && (
+      {activeProfileTab === "personal" && memberDashboard?.member && (
         <article className="panel">
           <h3>{t("profile.membershipDetails")}</h3>
           <div className="profile-details-cards">
@@ -1193,7 +1539,7 @@ export default function ProfilePage() {
             {paginate(memberDashboard.subscriptions || [], subsPage, ITEMS_PER_PAGE).map((sub) => (
               <div key={sub.id} className="profile-detail-card">
                 <span className="profile-detail-label">
-                  Subscription — {sub.plan_name || t("profile.defaultPlan")}
+                  {t("profile.subscriptionLabel", { plan: sub.plan_name || t("profile.defaultPlan") })}
                   {" "}
                   <span style={{
                     fontSize: "0.7rem", fontWeight: 600, padding: "0.1rem 0.35rem", borderRadius: "4px",

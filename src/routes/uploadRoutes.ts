@@ -5,6 +5,7 @@ import { requireRegisteredUser } from "../middleware/requireRegisteredUser";
 import { isSuperAdminEmail } from "../middleware/requireSuperAdmin";
 import { uploadToS3, deleteFromS3, validateMediaUpload } from "../services/uploadService";
 import { logger } from "../utils/logger";
+import { persistAuditLog } from "../utils/auditLog";
 
 const router = Router();
 
@@ -22,9 +23,12 @@ function isOwnedUpload(url: string, churchId: string): boolean {
     if (segments.length >= 4 && ["avatars", "leaders", "logos", "banners", "events", "notifications"].includes(segments[2])) {
       return segments[1] === churchId;
     }
-    // Legacy format: ["uploads", subfolder, file] — 3 segments (no churchId in path)
+    // Legacy format: ["uploads", subfolder, file] — 3 segments, no church prefix.
+    // Deny ownership — we cannot verify which church this file belongs to.
+    // These files persist in S3; admins must manage them via AWS Console if removal is needed.
     if (segments.length === 3 && ["avatars", "leaders", "logos", "banners", "events", "notifications"].includes(segments[1])) {
-      return true; // legacy uploads are allowed
+      logger.warn({ url, churchId }, "Denied operation on legacy upload path — no church prefix to verify ownership");
+      return false;
     }
     return false;
   } catch {
@@ -54,6 +58,13 @@ router.post(
         return res.status(400).json({ error: "No file provided." });
       }
 
+      // Only admins and super admins can upload files
+      const role = req.user?.role;
+      const isAdmin = role === "admin" || role === "super_admin" || isSuperAdminEmail(req.user?.email, req.user?.phone);
+      if (!isAdmin) {
+        return res.status(403).json({ error: "Only admins can upload files." });
+      }
+
       // Church-scoped folder: uploads are namespaced by church_id
       // SuperAdmin may not have a church_id — allow specifying target_church_id
       let churchId = req.user?.church_id;
@@ -79,6 +90,8 @@ router.post(
         );
       }
 
+      persistAuditLog(req, "upload.image", "file", undefined, { subfolder, church_id: churchId, replaced: !!oldUrl }).catch((e) => logger.warn({ err: e }, "Audit log failed for upload.image"));
+
       return res.json({ url });
     } catch (err: any) {
       const message = err?.message || "Upload failed.";
@@ -98,6 +111,13 @@ router.post(
       const file = req.file;
       if (!file) {
         return res.status(400).json({ error: "No file provided." });
+      }
+
+      // Only admins and super admins can upload media
+      const role = req.user?.role;
+      const isAdmin = role === "admin" || role === "super_admin" || isSuperAdminEmail(req.user?.email, req.user?.phone);
+      if (!isAdmin) {
+        return res.status(403).json({ error: "Only admins can upload files." });
       }
 
       let churchId = req.user?.church_id;
@@ -122,6 +142,8 @@ router.post(
         );
       }
 
+      persistAuditLog(req, "upload.media", "file", undefined, { subfolder, church_id: churchId, replaced: !!oldUrl }).catch((e) => logger.warn({ err: e }, "Audit log failed for upload.media"));
+
       return res.json({ url });
     } catch (err: any) {
       const message = err?.message || "Upload failed.";
@@ -136,6 +158,13 @@ router.delete(
   requireRegisteredUser,
   async (req: AuthRequest, res) => {
     try {
+      // Only admins and super admins can delete uploads
+      const role = req.user?.role;
+      const isAdmin = role === "admin" || role === "super_admin" || isSuperAdminEmail(req.user?.email, req.user?.phone);
+      if (!isAdmin) {
+        return res.status(403).json({ error: "Only admins can delete files." });
+      }
+
       const url = typeof req.body.url === "string" ? req.body.url : "";
       if (!url) {
         return res.status(400).json({ error: "No URL provided." });
@@ -155,6 +184,9 @@ router.delete(
       }
 
       await deleteFromS3(url);
+
+      persistAuditLog(req, "upload.delete", "file", undefined, { url, church_id: churchId }).catch((e) => logger.warn({ err: e }, "Audit log failed for upload.delete"));
+
       return res.json({ ok: true });
     } catch (err: any) {
       logger.warn({ err }, "Failed to delete image");

@@ -3,6 +3,7 @@ import { logger } from "../utils/logger";
 import { createReceiptNumber } from "./receiptService";
 import { recordSubscriptionEvent } from "./subscriptionTrackingService";
 import { computeNextDueDate } from "../utils/subscriptionHelpers";
+import { allocateOldestPendingMonthsAtomic, reversePaymentAllocations } from "./subscriptionMonthlyDuesService";
 
 // ── Manual Payment Recording ──
 
@@ -40,13 +41,18 @@ export async function recordManualPayment(input: ManualPaymentInput) {
   // Verify member exists and belongs to the caller's church
   const { data: member, error: memberErr } = await db
     .from("members")
-    .select("id, church_id")
+    .select("id, church_id, verification_status")
     .eq("id", input.member_id)
     .eq("church_id", input.church_id)
     .is("deleted_at", null)
     .maybeSingle();
   if (memberErr) throw memberErr;
   if (!member) throw new Error("Member not found or does not belong to your church");
+
+  // Prevent payments for rejected or suspended members
+  if (member.verification_status === "rejected" || member.verification_status === "suspended") {
+    throw new Error(`Cannot record payment for a ${member.verification_status} member. Update their status first.`);
+  }
 
   // Enforce church minimum subscription amount if linked to a subscription
   if (input.subscription_id && member.church_id) {
@@ -62,14 +68,22 @@ export async function recordManualPayment(input: ManualPaymentInput) {
     }
   }
 
+  let subscriptionMonthlyAmount = 0;
+  let subscriptionPersonName = "Member";
+
   // If subscription_id provided, verify it belongs to the member (directly or via family link)
   if (input.subscription_id) {
     const { data: sub } = await db
       .from("subscriptions")
-      .select("id, member_id, family_member_id")
+      .select("id, member_id, family_member_id, amount")
       .eq("id", input.subscription_id)
-      .maybeSingle<{ id: string; member_id: string; family_member_id: string | null }>();
+      .maybeSingle<{ id: string; member_id: string; family_member_id: string | null; amount: number | string }>();
     if (!sub) throw new Error("Subscription not found");
+
+    subscriptionMonthlyAmount = Number(sub.amount || 0);
+    if (!Number.isFinite(subscriptionMonthlyAmount) || subscriptionMonthlyAmount <= 0) {
+      throw new Error("Subscription has invalid monthly amount");
+    }
 
     // Allow if subscription belongs directly to this member
     let subscriptionOk = sub.member_id === input.member_id;
@@ -86,6 +100,22 @@ export async function recordManualPayment(input: ManualPaymentInput) {
     }
 
     if (!subscriptionOk) throw new Error("Subscription not found or does not belong to this member");
+
+    if (sub.member_id === input.member_id) {
+      const { data: memberNameRow } = await db.from("members").select("full_name").eq("id", input.member_id).maybeSingle();
+      subscriptionPersonName = memberNameRow?.full_name || "Member";
+    } else if (sub.family_member_id) {
+      const { data: familyRow } = await db.from("family_members").select("full_name").eq("id", sub.family_member_id).maybeSingle();
+      subscriptionPersonName = familyRow?.full_name || "Family Member";
+    }
+
+    const isSubscriptionPayment = (input.payment_category || "") === "subscription" || !input.payment_category;
+    if (isSubscriptionPayment) {
+      const multiple = input.amount / subscriptionMonthlyAmount;
+      if (!Number.isInteger(multiple) || multiple <= 0) {
+        throw new Error(`Subscription payment amount must be an exact multiple of monthly amount ₹${subscriptionMonthlyAmount}`);
+      }
+    }
   }
 
   // Auto-match: if no subscription_id provided but category is "subscription", try to find a matching one
@@ -220,48 +250,44 @@ export async function recordManualPayment(input: ManualPaymentInput) {
     );
     const data = insertResult.rows[0] as { id: string; receipt_number: string };
 
-    // If linked to a subscription, update its status + next_payment_date
+    // Allocate months within the SAME transaction (no early COMMIT)
     if (input.subscription_id) {
-      const subResult = await client.query(
-        `SELECT "billing_cycle", "next_payment_date", "status" FROM "subscriptions" WHERE "id" = $1`,
-        [input.subscription_id],
-      );
-      const sub = subResult.rows[0] as { billing_cycle: string; next_payment_date: string; status: string } | undefined;
+      const monthsToAllocate = Math.max(1, Math.floor(input.amount / subscriptionMonthlyAmount));
+      await allocateOldestPendingMonthsAtomic({
+        payment_id: data.id,
+        subscription_id: input.subscription_id,
+        member_id: input.member_id,
+        church_id: input.church_id,
+        monthly_amount: subscriptionMonthlyAmount,
+        months_to_allocate: monthsToAllocate,
+        person_name: subscriptionPersonName,
+        existingClient: client,
+      });
 
-      if (sub) {
-        const nextDue = computeNextDueDate(sub.next_payment_date, sub.billing_cycle);
-
-        await client.query(
-          `UPDATE "subscriptions" SET "status" = 'active', "next_payment_date" = $1 WHERE "id" = $2`,
-          [nextDue, input.subscription_id],
-        );
-
-        // Record subscription event (best-effort, inside transaction)
-        try {
-          await client.query(
-            `INSERT INTO "subscription_events" ("member_id", "subscription_id", "event_type", "status_after", "amount", "source", "metadata")
-             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-            [
-              input.member_id,
-              input.subscription_id,
-              "payment_recorded",
-              "success",
-              input.amount,
-              "admin_manual",
-              JSON.stringify({
-                payment_method: `manual_${input.payment_method}`,
-                recorded_by: input.recorded_by,
-                note: input.note || null,
-                receipt_number: data.receipt_number,
-              }),
-            ],
-          );
-        } catch (e) {
-          logger.warn({ err: e }, "manual payment event insert failed");
-        }
+      try {
+        await recordSubscriptionEvent({
+          member_id: input.member_id,
+          subscription_id: input.subscription_id,
+          church_id: input.church_id,
+          event_type: "payment_recorded",
+          status_before: null,
+          status_after: "active",
+          amount: input.amount,
+          source: "admin_manual",
+          metadata: {
+            payment_method: `manual_${input.payment_method}`,
+            recorded_by: input.recorded_by,
+            note: input.note || null,
+            receipt_number: data.receipt_number,
+            months_allocated: monthsToAllocate,
+          },
+        });
+      } catch (e) {
+        logger.warn({ err: e, subscriptionId: input.subscription_id }, "recordSubscriptionEvent failed for manual payment");
       }
     }
 
+    // COMMIT only after both payment + allocation succeed
     await client.query("COMMIT");
 
     return { payment_id: data.id, receipt_number: data.receipt_number, church_id: member.church_id };
@@ -321,7 +347,7 @@ export async function recordRefund(input: RecordRefundInput) {
     }
   }
 
-  // PAY-11: Platform fee is non-refundable — cap refundable amount at (total - platform_fee)
+  // PAY-11: Platform fee is non-refundable — cap refundable amount at (total - platform_fee - prior_refunds)
   let platformFee = 0;
   const { data: feeRow } = await db
     .from("platform_fee_collections")
@@ -330,7 +356,16 @@ export async function recordRefund(input: RecordRefundInput) {
     .maybeSingle<{ fee_amount: number }>();
   if (feeRow) platformFee = Number(feeRow.fee_amount) || 0;
 
-  const maxRefundable = Number(payment.amount) - platformFee;
+  // Deduct already-issued refunds to prevent refund replay
+  const { data: priorRefunds } = await db
+    .from("payment_refunds")
+    .select("refund_amount")
+    .eq("payment_id", input.payment_id);
+  const totalPriorRefunds = (priorRefunds || []).reduce(
+    (sum: number, r: { refund_amount: number }) => sum + (Number(r.refund_amount) || 0), 0
+  );
+
+  const maxRefundable = Number(payment.amount) - platformFee - totalPriorRefunds;
   if (input.refund_amount > maxRefundable) {
     throw new Error(
       platformFee > 0
@@ -370,6 +405,16 @@ export async function recordRefund(input: RecordRefundInput) {
     await client.query("COMMIT");
 
     const refundId = refundResult.rows[0]?.id;
+
+    // Issue #7: Reverse monthly dues allocations on full refund
+    if (newStatus === "refunded") {
+      try {
+        const reversed = await reversePaymentAllocations(input.payment_id);
+        logger.info({ paymentId: input.payment_id, reversed }, "Reversed payment allocations on full refund");
+      } catch (revErr) {
+        logger.warn({ err: revErr, paymentId: input.payment_id }, "Failed to reverse allocations on refund");
+      }
+    }
 
     try {
       await recordSubscriptionEvent({

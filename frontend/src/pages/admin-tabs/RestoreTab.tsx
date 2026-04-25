@@ -26,19 +26,19 @@ export default function RestoreTab() {
   }, [token, isSuperAdmin, churches, authContext]);
 
   async function handleRestore() {
-    if (!restoreId.trim() || !isUuid(restoreId.trim())) { setNotice({ tone: "error", text: "Valid ID is required." }); return; }
+    if (!restoreId.trim() || !isUuid(restoreId.trim())) { setNotice({ tone: "error", text: t("adminTabs.restore.errorValidIdRequired") }); return; }
     const endpoint = restoreType === "member"
       ? `/api/ops/members/${encodeURIComponent(restoreId.trim())}/restore`
       : `/api/ops/churches/${encodeURIComponent(restoreId.trim())}/restore`;
     await withAuthRequest("restore-entity", async () => {
       await apiRequest(endpoint, { method: "POST", token });
       setRestoreId("");
-    }, `${restoreType === "member" ? "Member" : "Church"} restored.`);
+    }, t("adminTabs.restore.successRestored"));
   }
 
   async function handleRelink() {
-    if (!relinkMemberId.trim() || !isUuid(relinkMemberId.trim())) { setNotice({ tone: "error", text: "Valid Member ID is required." }); return; }
-    if (!relinkIdentifier.trim()) { setNotice({ tone: "error", text: "Phone or email is required." }); return; }
+    if (!relinkMemberId.trim() || !isUuid(relinkMemberId.trim())) { setNotice({ tone: "error", text: t("adminTabs.restore.errorValidMemberId") }); return; }
+    if (!relinkIdentifier.trim()) { setNotice({ tone: "error", text: t("adminTabs.restore.errorPhoneOrEmailRequired") }); return; }
     const trimmed = relinkIdentifier.trim();
     const isPhone = /^\+?\d[\d\s-]{6,14}$/.test(trimmed.replace(/[\s-]/g, ""));
     await withAuthRequest("relink-auth", async () => {
@@ -46,7 +46,7 @@ export default function RestoreTab() {
         method: "POST", token, body: isPhone ? { new_phone: trimmed } : { new_email: trimmed },
       });
       setRelinkMemberId(""); setRelinkIdentifier("");
-    }, "Auth re-linked successfully.");
+    }, t("adminTabs.restore.successRelinked"));
   }
 
   return (
@@ -76,12 +76,12 @@ export default function RestoreTab() {
       <p className="muted">{t("adminTabs.restore.descriptionRelink")}</p>
       <div className="field-stack">
         <label>
-          Member
+          {t("adminTabs.restore.entityTypeMember")}
           <SearchSelect placeholder={t("adminTabs.restore.memberSearchPlaceholder")} onSearch={searchMembers} value={relinkMemberId} onSelect={(opt) => setRelinkMemberId(opt.id)} onClear={() => setRelinkMemberId("")} />
         </label>
         <label>
           {t("adminTabs.restore.newEmailLabel")}
-          <input value={relinkIdentifier} onChange={(e) => setRelinkIdentifier(e.target.value)} placeholder="Phone or email" />
+          <input value={relinkIdentifier} onChange={(e) => setRelinkIdentifier(e.target.value)} placeholder={t("adminTabs.restore.relinkPlaceholder")} />
         </label>
         <button className="btn btn-primary" onClick={() => void handleRelink()} disabled={busyKey === "relink-auth"}>
           {busyKey === "relink-auth" ? t("adminTabs.restore.relinking") : t("adminTabs.restore.relinkButton")}

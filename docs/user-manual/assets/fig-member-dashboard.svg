@@ -1,0 +1,49 @@
+<svg width="1200" height="760" viewBox="0 0 1200 760" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="760" rx="36" fill="#F6F1FA"/>
+  <rect x="44" y="44" width="236" height="672" rx="28" fill="#2E2A5A"/>
+  <text x="88" y="106" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="800">Shalom</text>
+  <g fill="#DCD0FF" font-family="Arial, Helvetica, sans-serif" font-size="20">
+    <text x="88" y="170">Home</text>
+    <text x="88" y="214">Dashboard</text>
+    <text x="88" y="258">Profile</text>
+    <text x="88" y="302">History</text>
+    <text x="88" y="346">Events</text>
+    <text x="88" y="390">Donate</text>
+    <text x="88" y="434">Prayer Request</text>
+    <text x="88" y="478">Settings</text>
+  </g>
+  <rect x="312" y="44" width="844" height="100" rx="28" fill="#FFFFFF" stroke="#DCD0FF" stroke-width="3"/>
+  <text x="356" y="103" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="34" font-weight="800">Member Dashboard</text>
+  <text x="356" y="128" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="18">Dues, giving, announcements, events, prayer access, and church information</text>
+  <rect x="312" y="170" width="392" height="220" rx="28" fill="#FFFFFF" stroke="#DCD0FF" stroke-width="3"/>
+  <text x="344" y="212" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="800">Dues &amp; Contributions</text>
+  <text x="344" y="250" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="18">Outstanding Balance</text>
+  <text x="344" y="294" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="44" font-weight="800">Rs 2,400</text>
+  <rect x="344" y="318" width="328" height="40" rx="16" fill="#F7F2F7"/>
+  <text x="364" y="344" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="16">Monthly Offering  Rs 800  Next Due: 20 Apr</text>
+  <rect x="344" y="370" width="168" height="42" rx="18" fill="#2E2A5A"/>
+  <text x="428" y="397" text-anchor="middle" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="700">Pay Now</text>
+  <rect x="732" y="170" width="424" height="220" rx="28" fill="#FFFFFF" stroke="#DCD0FF" stroke-width="3"/>
+  <text x="764" y="212" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="800">Quick Actions</text>
+  <rect x="764" y="238" width="168" height="64" rx="20" fill="#EDE8FF"/>
+  <rect x="956" y="238" width="168" height="64" rx="20" fill="#EDE8FF"/>
+  <text x="848" y="278" text-anchor="middle" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="20" font-weight="700">Prayer Request</text>
+  <text x="1040" y="278" text-anchor="middle" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="20" font-weight="700">Donate</text>
+  <rect x="764" y="322" width="360" height="48" rx="18" fill="#F7F2F7"/>
+  <text x="786" y="352" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="16">Live Subscription Status  Active  Monthly  Rs 800</text>
+  <rect x="312" y="418" width="392" height="258" rx="28" fill="#FFFFFF" stroke="#DCD0FF" stroke-width="3"/>
+  <text x="344" y="460" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="800">Announcements</text>
+  <rect x="344" y="486" width="328" height="54" rx="18" fill="#F7F2F7"/>
+  <rect x="344" y="552" width="328" height="54" rx="18" fill="#F7F2F7"/>
+  <text x="364" y="518" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="16">Youth fellowship this Saturday at 6 PM.</text>
+  <text x="364" y="584" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="16">Building fund update posted by church admin.</text>
+  <rect x="732" y="418" width="424" height="258" rx="28" fill="#FFFFFF" stroke="#DCD0FF" stroke-width="3"/>
+  <text x="764" y="460" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="800">Upcoming Events</text>
+  <rect x="764" y="486" width="360" height="62" rx="18" fill="#F7F2F7"/>
+  <rect x="764" y="560" width="360" height="62" rx="18" fill="#F7F2F7"/>
+  <text x="786" y="514" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700">25 APR  Choir Practice</text>
+  <text x="786" y="535" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="15">Main sanctuary, 5:30 PM</text>
+  <text x="786" y="588" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700">28 APR  Family Prayer Night</text>
+  <text x="786" y="609" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="15">Community hall, 7:00 PM</text>
+  <text x="600" y="722" text-anchor="middle" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="700">Reference Screen: Member Dashboard Overview</text>
+</svg>

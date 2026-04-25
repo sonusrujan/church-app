@@ -1,8 +1,10 @@
+import { UUID_REGEX } from "../utils/validation";
 import { Router } from "express";
 import { AuthRequest, requireAuth } from "../middleware/requireAuth";
 import { requireRegisteredUser } from "../middleware/requireRegisteredUser";
 import { isSuperAdminEmail } from "../middleware/requireSuperAdmin";
 import { safeErrorMessage } from "../utils/safeError";
+import { validate, createPastorSchema, updatePastorSchema, transferPastorSchema } from "../utils/zodSchemas";
 import {
   createPastor,
   deletePastor,
@@ -15,7 +17,6 @@ import { logSuperAdminAudit } from "../utils/superAdminAudit";
 import { persistAuditLog } from "../utils/auditLog";
 
 const router = Router();
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function resolveScopedChurchId(req: AuthRequest, requestedChurchId?: string) {
   if (!req.user) {
@@ -57,7 +58,7 @@ router.get("/list", requireAuth, requireRegisteredUser, async (req: AuthRequest,
   }
 });
 
-router.post("/create", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+router.post("/create", requireAuth, requireRegisteredUser, validate(createPastorSchema), async (req: AuthRequest, res) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: "Unauthenticated" });
@@ -100,7 +101,7 @@ router.post("/create", requireAuth, requireRegisteredUser, async (req: AuthReque
   }
 });
 
-router.patch("/:id", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+router.patch("/:id", requireAuth, requireRegisteredUser, validate(updatePastorSchema), async (req: AuthRequest, res) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: "Unauthenticated" });
@@ -115,7 +116,7 @@ router.patch("/:id", requireAuth, requireRegisteredUser, async (req: AuthRequest
       return res.status(400).json({ error: "church_id is required" });
     }
 
-    const pastorId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const pastorId = String(req.params.id || "").trim();
     if (!pastorId || !UUID_REGEX.test(pastorId)) {
       return res.status(400).json({ error: "Invalid pastor ID format" });
     }
@@ -149,7 +150,7 @@ router.get("/:id", requireAuth, requireRegisteredUser, async (req: AuthRequest, 
       return res.status(403).json({ error: "Only admin can fetch pastor details" });
     }
 
-    const pastorId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const pastorId = String(req.params.id || "").trim();
     if (!pastorId || !UUID_REGEX.test(pastorId)) {
       return res.status(400).json({ error: "Invalid pastor ID format" });
     }
@@ -179,7 +180,7 @@ router.delete("/:id", requireAuth, requireRegisteredUser, async (req: AuthReques
       return res.status(403).json({ error: "Only admin can delete pastors" });
     }
 
-    const pastorId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const pastorId = String(req.params.id || "").trim();
     if (!pastorId || !UUID_REGEX.test(pastorId)) {
       return res.status(400).json({ error: "Invalid pastor ID format" });
     }
@@ -200,7 +201,7 @@ router.delete("/:id", requireAuth, requireRegisteredUser, async (req: AuthReques
   }
 });
 
-router.post("/:id/transfer", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+router.post("/:id/transfer", requireAuth, requireRegisteredUser, validate(transferPastorSchema), async (req: AuthRequest, res) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: "Unauthenticated" });
@@ -210,7 +211,7 @@ router.post("/:id/transfer", requireAuth, requireRegisteredUser, async (req: Aut
       return res.status(403).json({ error: "Only super admin can transfer pastors across churches" });
     }
 
-    const pastorId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const pastorId = String(req.params.id || "").trim();
     if (!pastorId || !UUID_REGEX.test(pastorId)) {
       return res.status(400).json({ error: "Invalid pastor ID format" });
     }

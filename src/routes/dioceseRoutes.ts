@@ -1,9 +1,12 @@
+import { UUID_REGEX } from "../utils/validation";
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import { AuthRequest, requireAuth } from "../middleware/requireAuth";
 import { requireRegisteredUser } from "../middleware/requireRegisteredUser";
 import { isSuperAdminEmail } from "../middleware/requireSuperAdmin";
 import { safeErrorMessage } from "../utils/safeError";
 import { persistAuditLog } from "../utils/auditLog";
+import { validate, createDioceseSchema, updateDioceseSchema, dioceseMediaSchema, dioceseLogoSchema, dioceseChurchesSchema, createDioceseLeaderSchema, updateDioceseLeaderSchema } from "../utils/zodSchemas";
 import {
   DIOCESE_ROLES,
   listDioceses,
@@ -22,14 +25,67 @@ import {
   updateDioceseLeader,
   deleteDioceseLeader,
 } from "../services/dioceseService";
+import { db } from "../services/dbClient";
 
 const router = Router();
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** All diocese routes are SuperAdmin only */
 function requireSuperAdmin(req: AuthRequest): boolean {
   return Boolean(req.user && isSuperAdminEmail(req.user.email, req.user.phone));
 }
+
+// ═══════════════════════════════════════════════════
+// PUBLIC ENDPOINTS (no auth required)
+// ═══════════════════════════════════════════════════
+
+const publicBrowseLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests, please try again later" },
+});
+
+// Public: list all dioceses (name + id only)
+router.get("/public-list", publicBrowseLimiter, async (_req, res) => {
+  try {
+    const { data, error } = await db
+      .from("dioceses")
+      .select("id, name")
+      .order("name", { ascending: true });
+    if (error) throw error;
+    return res.json(data || []);
+  } catch (err: any) {
+    return res.status(500).json({ error: safeErrorMessage(err, "Failed to list dioceses") });
+  }
+});
+
+// Public: list churches in a diocese (name + id only)
+router.get("/public-churches", publicBrowseLimiter, async (req, res) => {
+  try {
+    const dioceseId = String(req.query.diocese_id || "").trim();
+    if (!dioceseId || !UUID_REGEX.test(dioceseId)) {
+      return res.status(400).json({ error: "diocese_id query parameter is required" });
+    }
+    const { data: junctions, error: jErr } = await db
+      .from("diocese_churches")
+      .select("church_id")
+      .eq("diocese_id", dioceseId);
+    if (jErr) throw jErr;
+    const churchIds = (junctions || []).map((j: any) => j.church_id);
+    if (!churchIds.length) return res.json([]);
+
+    const { data: churches, error: cErr } = await db
+      .from("churches")
+      .select("id, name, location")
+      .in("id", churchIds)
+      .order("name", { ascending: true });
+    if (cErr) throw cErr;
+    return res.json(churches || []);
+  } catch (err: any) {
+    return res.status(500).json({ error: safeErrorMessage(err, "Failed to list churches") });
+  }
+});
 
 // Get available diocese roles (must be before /:id routes)
 router.get("/roles", requireAuth, requireRegisteredUser, async (_req: AuthRequest, res) => {
@@ -64,7 +120,7 @@ router.get("/", requireAuth, requireRegisteredUser, async (req: AuthRequest, res
 });
 
 // Create diocese
-router.post("/", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+router.post("/", requireAuth, requireRegisteredUser, validate(createDioceseSchema), async (req: AuthRequest, res) => {
   try {
     if (!requireSuperAdmin(req)) return res.status(403).json({ error: "SuperAdmin access required" });
 
@@ -82,7 +138,7 @@ router.post("/", requireAuth, requireRegisteredUser, async (req: AuthRequest, re
 });
 
 // Update diocese
-router.patch("/:id", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+router.patch("/:id", requireAuth, requireRegisteredUser, validate(updateDioceseSchema), async (req: AuthRequest, res) => {
   try {
     if (!requireSuperAdmin(req)) return res.status(403).json({ error: "SuperAdmin access required" });
 
@@ -119,7 +175,7 @@ router.delete("/:id", requireAuth, requireRegisteredUser, async (req: AuthReques
 });
 
 // Update diocese media (logo/banner)
-router.patch("/:id/media", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+router.patch("/:id/media", requireAuth, requireRegisteredUser, validate(dioceseMediaSchema), async (req: AuthRequest, res) => {
   try {
     if (!requireSuperAdmin(req)) return res.status(403).json({ error: "SuperAdmin access required" });
 
@@ -139,7 +195,7 @@ router.patch("/:id/media", requireAuth, requireRegisteredUser, async (req: AuthR
 });
 
 // Add a logo to diocese (max 3)
-router.post("/:id/logos", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+router.post("/:id/logos", requireAuth, requireRegisteredUser, validate(dioceseLogoSchema), async (req: AuthRequest, res) => {
   try {
     if (!requireSuperAdmin(req)) return res.status(403).json({ error: "SuperAdmin access required" });
 
@@ -160,7 +216,7 @@ router.post("/:id/logos", requireAuth, requireRegisteredUser, async (req: AuthRe
 });
 
 // Remove a logo from diocese
-router.delete("/:id/logos", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+router.delete("/:id/logos", requireAuth, requireRegisteredUser, validate(dioceseLogoSchema), async (req: AuthRequest, res) => {
   try {
     if (!requireSuperAdmin(req)) return res.status(403).json({ error: "SuperAdmin access required" });
 
@@ -200,7 +256,7 @@ router.get("/:id/churches", requireAuth, requireRegisteredUser, async (req: Auth
 });
 
 // Add churches to a diocese
-router.post("/:id/churches", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+router.post("/:id/churches", requireAuth, requireRegisteredUser, validate(dioceseChurchesSchema), async (req: AuthRequest, res) => {
   try {
     if (!requireSuperAdmin(req)) return res.status(403).json({ error: "SuperAdmin access required" });
 
@@ -246,9 +302,11 @@ router.delete("/:id/churches/:churchId", requireAuth, requireRegisteredUser, asy
 // Diocese Leadership
 // ══════════════════════════════════════════════════════════════════════
 
-// List leaders for a diocese (any authenticated member can view)
+// List leaders for a diocese (LOW-010: require super admin to prevent cross-tenant leakage)
 router.get("/:id/leaders", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
   try {
+    if (!requireSuperAdmin(req)) return res.status(403).json({ error: "SuperAdmin access required" });
+
     const id = String(req.params.id || "").trim();
     if (!UUID_REGEX.test(id)) return res.status(400).json({ error: "Invalid diocese ID" });
 
@@ -260,7 +318,7 @@ router.get("/:id/leaders", requireAuth, requireRegisteredUser, async (req: AuthR
 });
 
 // Assign a diocese leader
-router.post("/:id/leaders", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+router.post("/:id/leaders", requireAuth, requireRegisteredUser, validate(createDioceseLeaderSchema), async (req: AuthRequest, res) => {
   try {
     if (!requireSuperAdmin(req)) return res.status(403).json({ error: "SuperAdmin access required" });
 
@@ -295,7 +353,7 @@ router.post("/:id/leaders", requireAuth, requireRegisteredUser, async (req: Auth
 });
 
 // Update a diocese leader
-router.patch("/:id/leaders/:leaderId", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+router.patch("/:id/leaders/:leaderId", requireAuth, requireRegisteredUser, validate(updateDioceseLeaderSchema), async (req: AuthRequest, res) => {
   try {
     if (!requireSuperAdmin(req)) return res.status(403).json({ error: "SuperAdmin access required" });
 

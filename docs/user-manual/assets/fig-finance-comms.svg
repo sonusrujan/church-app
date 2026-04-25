@@ -1,0 +1,29 @@
+<svg width="1200" height="760" viewBox="0 0 1200 760" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="760" rx="36" fill="#F6F1FA"/>
+  <rect x="54" y="50" width="512" height="660" rx="28" fill="#FFFFFF" stroke="#DCD0FF" stroke-width="3"/>
+  <rect x="634" y="50" width="512" height="660" rx="28" fill="#FFFFFF" stroke="#DCD0FF" stroke-width="3"/>
+  <text x="94" y="102" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="30" font-weight="800">Finance Controls</text>
+  <text x="674" y="102" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="30" font-weight="800">Communications</text>
+  <rect x="94" y="134" width="432" height="116" rx="24" fill="#2E2A5A"/>
+  <text x="124" y="182" fill="#DCD0FF" font-family="Arial, Helvetica, sans-serif" font-size="16">Income Dashboard</text>
+  <text x="124" y="224" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="36" font-weight="800">Rs 7,84,560</text>
+  <rect x="94" y="280" width="432" height="170" rx="24" fill="#F7F2F7"/>
+  <text x="124" y="322" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="800">Manual Payment</text>
+  <text x="124" y="358" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="16">Search member  Choose plan  Enter amount  Set method  Save receipt</text>
+  <rect x="124" y="384" width="164" height="44" rx="16" fill="#EDE8FF"/>
+  <text x="206" y="412" text-anchor="middle" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="700">Record Payment</text>
+  <rect x="94" y="476" width="432" height="178" rx="24" fill="#F7F2F7"/>
+  <text x="124" y="518" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="800">Reports &amp; Exports</text>
+  <text x="124" y="556" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="16">Members CSV  Payments CSV  Donations CSV  Scheduled reports</text>
+  <text x="674" y="150" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="800">Push / SMS Notifications</text>
+  <rect x="674" y="176" width="432" height="174" rx="24" fill="#F7F2F7"/>
+  <text x="704" y="216" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="16">Select channel, audience, title, message, and landing page</text>
+  <rect x="704" y="248" width="372" height="42" rx="14" fill="#FFFFFF" stroke="#DCD0FF"/>
+  <rect x="704" y="302" width="372" height="42" rx="14" fill="#FFFFFF" stroke="#DCD0FF"/>
+  <rect x="704" y="368" width="432" height="286" rx="24" fill="#F7F2F7"/>
+  <text x="704" y="410" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="800">Events, Announcements, and Ad Banners</text>
+  <text x="704" y="450" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="16">Post church updates, schedule banners, upload event posters, manage publishing windows</text>
+  <rect x="704" y="486" width="372" height="50" rx="16" fill="#FFFFFF" stroke="#DCD0FF"/>
+  <rect x="704" y="552" width="372" height="50" rx="16" fill="#FFFFFF" stroke="#DCD0FF"/>
+  <text x="600" y="722" text-anchor="middle" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="700">Reference Screen: Finance, Reporting, and Communication Workflows</text>
+</svg>

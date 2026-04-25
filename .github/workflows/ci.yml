@@ -17,6 +17,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - run: npm audit --audit-level=high --omit=dev
       - run: npx tsc --noEmit
       - run: npm test -- --reporter=verbose
 
@@ -34,7 +35,35 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
+      - run: npm audit --audit-level=high --omit=dev
       - run: npx tsc --noEmit
       - run: npm run lint
       - run: npm test
       - run: npm run build
+
+  security:
+    name: Security — Secret Scan & SAST
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history required by gitleaks
+
+      # Detect secrets committed to the repo (blocks merge if any found)
+      - name: Gitleaks secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Trivy scans the built Docker image for OS-level CVEs
+      - name: Build Docker image for scanning
+        run: docker build -t shalom-scan:ci .
+
+      - name: Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: shalom-scan:ci
+          format: table
+          exit-code: '1'
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true

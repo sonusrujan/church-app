@@ -14,6 +14,7 @@ export type ReceiptDocumentInput = {
   church_name: string | null;
   subscription_id: string | null;
   subscription_name: string | null;
+  months_covered: string | null;
 };
 
 type ReceiptNumberInput = {
@@ -106,6 +107,11 @@ export function generateReceiptPdfBuffer(input: ReceiptDocumentInput): Promise<B
 
     doc.text(`Subscription ID: ${input.subscription_id || "-"}`);
     doc.text(`Subscription Name: ${input.subscription_name || "-"}`);
+
+    if (input.months_covered) {
+      doc.moveDown();
+      doc.text(`Months Covered: ${input.months_covered}`);
+    }
 
     doc.moveDown(2);
     doc.fontSize(10).fillColor("#444444");

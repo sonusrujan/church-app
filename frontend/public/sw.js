@@ -1,4 +1,5 @@
-const CACHE_VERSION = "5";
+// __BUILD_TIMESTAMP__ is replaced during build (see vite.config.ts sw-version plugin)
+const CACHE_VERSION = "__BUILD_TIMESTAMP__";
 const CACHE_NAME = `shalom-v${CACHE_VERSION}`;
 const PRECACHE_URLS = ["/", "/index.html", "/offline.html"];
 

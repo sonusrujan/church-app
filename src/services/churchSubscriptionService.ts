@@ -108,10 +108,10 @@ export async function updateChurchSaaSSettings(churchId: string, settings: Parti
   if (typeof settings.platform_fee_enabled === "boolean") {
     patch.platform_fee_enabled = settings.platform_fee_enabled;
   }
-  if (typeof settings.platform_fee_percentage === "number" && settings.platform_fee_percentage >= 0 && settings.platform_fee_percentage <= 25) {
+  if (typeof settings.platform_fee_percentage === "number" && settings.platform_fee_percentage >= 0 && settings.platform_fee_percentage <= 10) {
     patch.platform_fee_percentage = settings.platform_fee_percentage;
   } else if (typeof settings.platform_fee_percentage === "number") {
-    throw new Error("Platform fee percentage must be between 0 and 25");
+    throw new Error("Platform fee percentage must be between 0 and 10");
   }
   if (typeof settings.service_enabled === "boolean") {
     patch.service_enabled = settings.service_enabled;

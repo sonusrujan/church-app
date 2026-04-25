@@ -1,3 +1,4 @@
+import { UUID_REGEX } from "../utils/validation";
 import { Router } from "express";
 import { AuthRequest, requireAuth } from "../middleware/requireAuth";
 import { requireRegisteredUser } from "../middleware/requireRegisteredUser";
@@ -19,27 +20,69 @@ import {
 } from "../services/churchPaymentService";
 import { logSuperAdminAudit } from "../utils/superAdminAudit";
 import { persistAuditLog } from "../utils/auditLog";
+import { pool } from "../services/dbClient";
+
+import rateLimit from "express-rate-limit";
 
 const router = Router();
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// MED-012: Dedicated rate limit for unauthenticated public search
+const publicSearchLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many search requests, please try again later" },
+});
 
 // ── Public: search churches (no auth required, limited fields) ──
-router.get("/public-search", async (req, res) => {
+router.get("/public-search", publicSearchLimiter, async (req, res) => {
   try {
     const query = typeof req.query.query === "string" ? req.query.query.trim() : "";
     if (!query || query.length < 2) {
       return res.json([]);
     }
     const rows = await searchChurches(query, 20);
-    // Return only safe public fields
+    // Get member counts for all matched churches
+    const churchIds = rows.map((r: any) => r.id);
+    const countMap: Record<string, number> = {};
+    if (churchIds.length) {
+      const { rows: countRows } = await pool.query(
+        `SELECT church_id, COUNT(*)::int AS cnt FROM members WHERE church_id = ANY($1) AND deleted_at IS NULL GROUP BY church_id`,
+        [churchIds],
+      );
+      for (const c of countRows) countMap[c.church_id] = c.cnt;
+    }
     const publicRows = rows.map((r: any) => ({
       name: r.name,
+      church_code: r.church_code || null,
       address: r.address || null,
       location: r.location || null,
+      member_count: countMap[r.id] || 0,
     }));
     return res.json(publicRows);
   } catch (err: any) {
     return res.status(500).json({ error: "Search failed" });
+  }
+});
+
+// ── Public: preview church by code (for JoinPage confirmation) ──
+router.get("/preview/:code", publicSearchLimiter, async (req, res) => {
+  try {
+    const code = String(req.params.code || "").trim();
+    if (!/^\d{8}$/.test(code)) {
+      return res.status(400).json({ error: "Invalid church code format" });
+    }
+    const { rows } = await pool.query(
+      `SELECT name, address, logo_url FROM churches WHERE church_code = $1 LIMIT 1`,
+      [code],
+    );
+    if (!rows.length) {
+      return res.status(404).json({ error: "Church not found" });
+    }
+    return res.json({ name: rows[0].name, address: rows[0].address || null, logo_url: rows[0].logo_url || null });
+  } catch (err: any) {
+    return res.status(500).json({ error: "Preview failed" });
   }
 });
 
@@ -125,7 +168,7 @@ router.get("/search", requireAuth, requireRegisteredUser, requireSuperAdmin, asy
 
 router.get("/id/:id", requireAuth, requireRegisteredUser, requireSuperAdmin, async (req: AuthRequest, res) => {
   try {
-    const churchId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const churchId = String(req.params.id || "").trim();
     if (!churchId || !UUID_REGEX.test(churchId)) {
       return res.status(400).json({ error: "Invalid church ID format" });
     }
@@ -153,7 +196,7 @@ router.post(
         contact_phone:
           typeof req.body?.contact_phone === "string" ? req.body.contact_phone : undefined,
         logo_url: typeof req.body?.logo_url === "string" ? req.body.logo_url : undefined,
-        admin_emails: Array.isArray(req.body?.admin_emails) ? req.body.admin_emails : undefined,
+        admin_phones: Array.isArray(req.body?.admin_phones) ? req.body.admin_phones : undefined,
         member_subscription_enabled: typeof req.body?.member_subscription_enabled === "boolean" ? req.body.member_subscription_enabled : undefined,
         church_subscription_enabled: typeof req.body?.church_subscription_enabled === "boolean" ? req.body.church_subscription_enabled : undefined,
         church_subscription_amount: typeof req.body?.church_subscription_amount === "number" ? req.body.church_subscription_amount : undefined,
@@ -177,7 +220,7 @@ router.post(
 
 router.patch("/id/:id", requireAuth, requireRegisteredUser, requireSuperAdmin, async (req: AuthRequest, res) => {
   try {
-    const churchId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const churchId = String(req.params.id || "").trim();
     if (!churchId || !UUID_REGEX.test(churchId)) {
       return res.status(400).json({ error: "Invalid church ID format" });
     }
@@ -203,7 +246,7 @@ router.patch("/id/:id", requireAuth, requireRegisteredUser, requireSuperAdmin, a
 
 router.get("/id/:id/delete-impact", requireAuth, requireRegisteredUser, requireSuperAdmin, async (req: AuthRequest, res) => {
   try {
-    const churchId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const churchId = String(req.params.id || "").trim();
     if (!churchId || !UUID_REGEX.test(churchId)) {
       return res.status(400).json({ error: "Invalid church ID format" });
     }
@@ -216,7 +259,7 @@ router.get("/id/:id/delete-impact", requireAuth, requireRegisteredUser, requireS
 
 router.delete("/id/:id", requireAuth, requireRegisteredUser, requireSuperAdmin, async (req: AuthRequest, res) => {
   try {
-    const churchId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const churchId = String(req.params.id || "").trim();
     if (!churchId || !UUID_REGEX.test(churchId)) {
       return res.status(400).json({ error: "Invalid church ID format" });
     }

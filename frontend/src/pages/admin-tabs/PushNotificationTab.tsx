@@ -55,7 +55,7 @@ export default function PushNotificationTab() {
 
   // Load dioceses on mount
   useEffect(() => {
-    apiRequest<DioceseOption[]>("/api/push/dioceses", { token }).then(setDioceses).catch(() => {});
+    apiRequest<DioceseOption[]>("/api/push/dioceses", { token }).then(setDioceses).catch((e) => console.warn("Failed to load dioceses", e));
   }, [token]);
 
   // Load churches when diocese changes
@@ -63,7 +63,7 @@ export default function PushNotificationTab() {
     const url = selectedDiocese
       ? `/api/push/churches?diocese_id=${selectedDiocese}`
       : "/api/push/churches";
-    apiRequest<ChurchOption[]>(url, { token }).then(setChurches).catch(() => {});
+    apiRequest<ChurchOption[]>(url, { token }).then(setChurches).catch((e) => console.warn("Failed to load churches", e));
     setSelectedChurch("");
     setSelectedMember("");
   }, [selectedDiocese, token]);
@@ -77,7 +77,7 @@ export default function PushNotificationTab() {
     }
     apiRequest<MemberOption[]>(`/api/push/members?church_id=${selectedChurch}`, { token })
       .then(setMembers)
-      .catch(() => {});
+      .catch((e) => console.warn("Failed to load members", e));
     setSelectedMember("");
   }, [selectedChurch, token]);
 
@@ -94,7 +94,7 @@ export default function PushNotificationTab() {
     setLoadingBatches(true);
     apiRequest<NotificationBatch[]>("/api/push/notification-batches?limit=20", { token })
       .then(setBatches)
-      .catch(() => {})
+      .catch((e) => console.warn("Failed to load batches", e))
       .finally(() => setLoadingBatches(false));
   }, [token]);
 
@@ -117,7 +117,7 @@ export default function PushNotificationTab() {
     const load = () => {
       apiRequest<NotificationBatch>(`/api/push/notification-batches/${expandedBatch}`, { token })
         .then((d) => { if (!cancelled) setBatchDetail(d); })
-        .catch(() => {});
+        .catch((e) => console.warn("Failed to load batch detail", e));
     };
     load();
     const timer = setInterval(load, 4000);
@@ -133,6 +133,10 @@ export default function PushNotificationTab() {
       setNotice({ tone: "error", text: t("adminTabs.pushNotification.titleRequiredForPush") });
       return;
     }
+
+    // Confirmation before sending mass notification
+    const target = selectedMember ? t("adminTabs.pushNotification.confirmTargetMember") : selectedChurch ? t("adminTabs.pushNotification.confirmTargetChurch") : selectedDiocese ? t("adminTabs.pushNotification.confirmTargetDiocese") : t("adminTabs.pushNotification.confirmTargetAll");
+    if (!window.confirm(t("adminTabs.pushNotification.confirmSend", { target }))) return;
 
     setBusyKey("send-notif");
     try {
@@ -176,7 +180,7 @@ export default function PushNotificationTab() {
       if (expandedBatch === batchId) {
         // Refresh detail
         apiRequest<NotificationBatch>(`/api/push/notification-batches/${batchId}`, { token })
-          .then(setBatchDetail).catch(() => {});
+          .then(setBatchDetail).catch((e) => console.warn("Failed to refresh batch detail", e));
       }
     } catch (err: any) {
       setNotice({ tone: "error", text: err?.message || t("adminTabs.pushNotification.cancelFailed") });

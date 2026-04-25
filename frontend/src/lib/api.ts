@@ -1,6 +1,28 @@
 export const API_BASE_URL =
   import.meta.env.VITE_API_URL || "http://localhost:4000";
 
+// ── Active church context ──
+let _activeChurchId: string | null = null;
+
+/** Set the active church ID — sent as X-Church-Id header on all API requests */
+export function setActiveChurchId(churchId: string | null) {
+  _activeChurchId = churchId;
+  if (churchId) {
+    localStorage.setItem("active_church_id", churchId);
+  } else {
+    localStorage.removeItem("active_church_id");
+  }
+}
+
+/** Get the current active church ID */
+export function getActiveChurchId(): string | null {
+  if (_activeChurchId) return _activeChurchId;
+  // 7.3: Use localStorage so church context is shared across tabs
+  const stored = localStorage.getItem("active_church_id");
+  if (stored) _activeChurchId = stored;
+  return _activeChurchId;
+}
+
 // ── Token refresh plumbing ──
 let _onTokenRefreshed: ((newToken: string) => void) | null = null;
 let _refreshPromise: Promise<string | null> | null = null;
@@ -15,9 +37,15 @@ export async function tryRefreshToken(): Promise<string | null> {
   if (_refreshPromise) return _refreshPromise;
   _refreshPromise = (async () => {
     try {
+      const refreshHeaders: Record<string, string> = {
+        "Content-Type": "application/json",
+        "X-Requested-With": "XMLHttpRequest",
+      };
+      const cid = getActiveChurchId();
+      if (cid) refreshHeaders["X-Church-Id"] = cid;
       const res = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: refreshHeaders,
         credentials: "include",
       });
       if (!res.ok) return null;
@@ -52,6 +80,12 @@ export async function apiRequest<T>(
 
   if (token) {
     requestHeaders.set("Authorization", `Bearer ${token}`);
+  }
+
+  // Send active church context on every authenticated request
+  const churchId = getActiveChurchId();
+  if (churchId) {
+    requestHeaders.set("X-Church-Id", churchId);
   }
 
   let requestBody: BodyInit | undefined;
@@ -139,4 +173,125 @@ export async function apiRequest<T>(
   }
 
   return payload as T;
+}
+
+// ── Blob request (PDF receipts, CSV exports) ──
+
+type ApiBlobOptions = {
+  token?: string;
+  accept?: string;
+  timeout?: number;
+  headers?: HeadersInit;
+};
+
+export async function apiBlobRequest(
+  path: string,
+  options: ApiBlobOptions = {},
+): Promise<Blob> {
+  const { token, accept = "application/pdf", timeout = 30_000, headers } = options;
+
+  const requestHeaders = new Headers(headers);
+  requestHeaders.set("Accept", accept);
+  if (token) requestHeaders.set("Authorization", `Bearer ${token}`);
+  const churchId = getActiveChurchId();
+  if (churchId) requestHeaders.set("X-Church-Id", churchId);
+
+  const controller = new AbortController();
+  const timer = timeout > 0 ? setTimeout(() => controller.abort(), timeout) : null;
+
+  try {
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+      method: "GET",
+      headers: requestHeaders,
+      signal: controller.signal,
+      credentials: "include",
+    });
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        const newToken = await tryRefreshToken();
+        if (newToken) {
+          const retryHeaders = new Headers(requestHeaders);
+          retryHeaders.set("Authorization", `Bearer ${newToken}`);
+          const retryRes = await fetch(`${API_BASE_URL}${path}`, {
+            method: "GET",
+            headers: retryHeaders,
+            credentials: "include",
+          });
+          if (retryRes.ok) return retryRes.blob();
+        }
+        throw new Error("Session expired. Please sign in again.");
+      }
+      throw new Error(`Request failed (HTTP ${response.status})`);
+    }
+    return response.blob();
+  } catch (err: unknown) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error("Request timed out.");
+    }
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+// ── FormData upload (images, media) ──
+
+type ApiUploadOptions = {
+  token?: string;
+  timeout?: number;
+};
+
+export async function apiUploadRequest<T = Record<string, unknown>>(
+  path: string,
+  formData: FormData,
+  options: ApiUploadOptions = {},
+): Promise<T> {
+  const { token, timeout = 60_000 } = options;
+
+  const requestHeaders = new Headers();
+  if (token) requestHeaders.set("Authorization", `Bearer ${token}`);
+  const churchId = getActiveChurchId();
+  if (churchId) requestHeaders.set("X-Church-Id", churchId);
+  // Do NOT set Content-Type — browser sets multipart boundary automatically
+
+  const controller = new AbortController();
+  const timer = timeout > 0 ? setTimeout(() => controller.abort(), timeout) : null;
+
+  try {
+    let response = await fetch(`${API_BASE_URL}${path}`, {
+      method: "POST",
+      headers: requestHeaders,
+      body: formData,
+      signal: controller.signal,
+      credentials: "include",
+    });
+
+    if (response.status === 401) {
+      const newToken = await tryRefreshToken();
+      if (newToken) {
+        const retryHeaders = new Headers(requestHeaders);
+        retryHeaders.set("Authorization", `Bearer ${newToken}`);
+        response = await fetch(`${API_BASE_URL}${path}`, {
+          method: "POST",
+          headers: retryHeaders,
+          body: formData,
+          credentials: "include",
+        });
+      }
+    }
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data?.error || `Upload failed (HTTP ${response.status})`);
+    }
+    return data as T;
+  } catch (err: unknown) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error("Upload timed out.");
+    }
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }

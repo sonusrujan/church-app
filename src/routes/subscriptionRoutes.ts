@@ -9,6 +9,7 @@ import { isSuperAdminEmail } from "../middleware/requireSuperAdmin";
 import { db } from "../services/dbClient";
 import { getChurchSaaSSettings } from "../services/churchSubscriptionService";
 import { persistAuditLog } from "../utils/auditLog";
+import { validate, createSubscriptionSchema } from "../utils/zodSchemas";
 
 const router = Router();
 
@@ -20,14 +21,10 @@ const subscriptionWriteLimiter = rateLimit({
   message: { error: "Too many requests, please try again later" },
 });
 
-router.post("/create", requireAuth, requireRegisteredUser, subscriptionWriteLimiter, async (req: AuthRequest, res) => {
+router.post("/create", requireAuth, requireRegisteredUser, subscriptionWriteLimiter, validate(createSubscriptionSchema), async (req: AuthRequest, res) => {
   try {
     const { member_id, plan_name, amount, billing_cycle } = req.body;
     if (!req.user) return res.status(401).json({ error: "Unauthenticated" });
-
-    if (!amount || !Number.isFinite(Number(amount)) || Number(amount) < 200) {
-      return res.status(400).json({ error: "amount must be at least 200" });
-    }
 
     if (req.user.role !== "admin" && !isSuperAdminEmail(req.user.email, req.user.phone)) {
       return res.status(403).json({ error: "Only admin can create subscriptions" });
@@ -46,11 +43,14 @@ router.post("/create", requireAuth, requireRegisteredUser, subscriptionWriteLimi
     if (!isSuperAdminEmail(req.user.email, req.user.phone)) {
       const { data: targetMember } = await db
         .from("members")
-        .select("id, church_id")
+        .select("id, church_id, verification_status")
         .eq("id", member_id)
-        .single();
+        .maybeSingle();
       if (!targetMember || targetMember.church_id !== req.user.church_id) {
         return res.status(403).json({ error: "Member does not belong to your church" });
+      }
+      if (targetMember.verification_status === "rejected" || targetMember.verification_status === "suspended") {
+        return res.status(400).json({ error: `Cannot create subscription for a ${targetMember.verification_status} member. Update their status first.` });
       }
     }
 
@@ -62,6 +62,9 @@ router.post("/create", requireAuth, requireRegisteredUser, subscriptionWriteLimi
       ? new Date(year, month, 5)
       : new Date(year, month + 1, 5);
     const cycle = billing_cycle || "monthly";
+    if (!["monthly", "yearly"].includes(cycle)) {
+      return res.status(400).json({ error: "billing_cycle must be 'monthly' or 'yearly'" });
+    }
     const nextPaymentDate = cycle === "yearly"
       ? new Date(startDate.getFullYear() + 1, startDate.getMonth(), 5)
       : new Date(startDate.getFullYear(), startDate.getMonth() + 1, 5);
@@ -105,7 +108,7 @@ router.get("/my", requireAuth, requireRegisteredUser, async (req: AuthRequest, r
       .from("members")
       .select("id, user_id, church_id")
       .eq("id", member_id)
-      .single();
+      .maybeSingle();
     if (!targetMember) {
       return res.status(404).json({ error: "Member not found" });
     }

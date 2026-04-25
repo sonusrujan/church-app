@@ -1,8 +1,10 @@
+import { UUID_REGEX } from "../utils/validation";
 import { Router } from "express";
-import { AuthRequest, requireAuth } from "../middleware/requireAuth";
+import { AuthRequest, requireAuth, invalidateRoleCache } from "../middleware/requireAuth";
 import { requireRegisteredUser } from "../middleware/requireRegisteredUser";
 import { isSuperAdminEmail, requireSuperAdmin } from "../middleware/requireSuperAdmin";
 import { safeErrorMessage } from "../utils/safeError";
+import { validate, adminUpdateMemberSchema, preRegisterMemberSchema, adminGrantSchema, adminRevokeSchema } from "../utils/zodSchemas";
 import {
   grantAdminAccess,
   getAdminById,
@@ -18,8 +20,6 @@ import { logSuperAdminAudit } from "../utils/superAdminAudit";
 import { persistAuditLog } from "../utils/auditLog";
 
 const router = Router();
-const UUID_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 router.get(
   "/list",
@@ -29,7 +29,7 @@ router.get(
   async (req: AuthRequest, res) => {
   try {
     const churchId = (req.query.church_id as string) || req.user?.church_id || "";
-    const isSuperAdmin = isSuperAdminEmail(req.user?.email || "");
+    const isSuperAdmin = isSuperAdminEmail(req.user?.email || "", req.user?.phone);
     if (!churchId && !isSuperAdmin) {
       return res.status(400).json({ error: "church_id is required" });
     }
@@ -49,7 +49,7 @@ router.get(
   async (req: AuthRequest, res) => {
     try {
       const churchId = typeof req.query.church_id === "string" ? req.query.church_id : (req.user?.church_id || "");
-      const isSuperAdmin = isSuperAdminEmail(req.user?.email || "");
+      const isSuperAdmin = isSuperAdminEmail(req.user?.email || "", req.user?.phone);
       if (!churchId && !isSuperAdmin) {
         return res.status(400).json({ error: "church_id is required" });
       }
@@ -70,7 +70,7 @@ router.get(
   requireSuperAdmin,
   async (req: AuthRequest, res) => {
     try {
-      const adminId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      const adminId = String(req.params.id || "").trim();
       if (!adminId || !UUID_REGEX.test(adminId)) {
         return res.status(400).json({ error: "Invalid admin ID format" });
       }
@@ -90,9 +90,10 @@ router.patch(
   requireAuth,
   requireRegisteredUser,
   requireSuperAdmin,
+  validate(adminUpdateMemberSchema),
   async (req: AuthRequest, res) => {
     try {
-      const adminId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      const adminId = String(req.params.id || "").trim();
       if (!adminId || !UUID_REGEX.test(adminId)) {
         return res.status(400).json({ error: "Invalid admin ID format" });
       }
@@ -121,7 +122,7 @@ router.delete(
   requireSuperAdmin,
   async (req: AuthRequest, res) => {
     try {
-      const adminId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      const adminId = String(req.params.id || "").trim();
       if (!adminId || !UUID_REGEX.test(adminId)) {
         return res.status(400).json({ error: "Invalid admin ID format" });
       }
@@ -294,7 +295,8 @@ router.get(
       );
 
       res.setHeader("Content-Type", "text/csv; charset=utf-8");
-      res.setHeader("Content-Disposition", `attachment; filename="${report.filename}"`);
+      const safeFilename = report.filename.replace(/[^a-zA-Z0-9._-]/g, "_");
+      res.setHeader("Content-Disposition", `attachment; filename="${safeFilename}"`);
       return res.send(report.csv);
     } catch (err: any) {
       return res.status(400).json({ error: safeErrorMessage(err, "Failed to generate report") });
@@ -306,6 +308,7 @@ router.post(
   "/pre-register-member",
   requireAuth,
   requireRegisteredUser,
+  validate(preRegisterMemberSchema),
   async (req: AuthRequest, res) => {
     try {
       if (!req.user) {
@@ -316,7 +319,20 @@ router.post(
         return res.status(403).json({ error: "Only admin can pre-register members" });
       }
 
-      const { email, phone_number, full_name, membership_id, address, subscription_amount, church_id } = req.body;
+      const {
+        email,
+        phone_number,
+        full_name,
+        membership_id,
+        address,
+        subscription_amount,
+        church_id,
+        occupation,
+        confirmation_taken,
+        age,
+        pending_months,
+        no_pending_payments,
+      } = req.body;
       if (!email && !phone_number) {
         return res.status(400).json({ error: "email or phone_number is required" });
       }
@@ -358,6 +374,13 @@ router.post(
         membership_id: typeof membership_id === "string" ? membership_id : undefined,
         address: typeof address === "string" ? address : undefined,
         subscription_amount: normalizedSubscriptionAmount,
+        occupation: typeof occupation === "string" ? occupation : undefined,
+        confirmation_taken: typeof confirmation_taken === "boolean" ? confirmation_taken : undefined,
+        age: typeof age === "number" ? age : undefined,
+        pending_months: Array.isArray(pending_months)
+          ? pending_months.filter((m: unknown) => typeof m === "string")
+          : undefined,
+        no_pending_payments: typeof no_pending_payments === "boolean" ? no_pending_payments : undefined,
       });
 
       logSuperAdminAudit(req, "member.pre_register", {
@@ -378,13 +401,14 @@ router.post(
   requireAuth,
   requireRegisteredUser,
   requireSuperAdmin,
+  validate(adminGrantSchema),
   async (req: AuthRequest, res) => {
   try {
-    const { email, phone_number, church_id } = req.body;
-    const identifier = email || phone_number;
-    if (!identifier) {
-      return res.status(400).json({ error: "email or phone_number is required" });
+    const { phone_number, church_id } = req.body;
+    if (!phone_number) {
+      return res.status(400).json({ error: "phone_number is required" });
     }
+    const identifier = String(phone_number);
 
     const normalizedChurchId =
       typeof church_id === "string" && church_id.trim() ? church_id.trim() : undefined;
@@ -394,7 +418,8 @@ router.post(
 
     const updatedUser = await grantAdminAccess(
       String(identifier),
-      normalizedChurchId || req.user?.church_id || undefined
+      normalizedChurchId || req.user?.church_id || undefined,
+      undefined, // super-admin caller — no church restriction
     );
 
     logSuperAdminAudit(req, "admin.role.grant", {
@@ -404,6 +429,7 @@ router.post(
     });
     await persistAuditLog(req, "admin.role.grant", "admin", updatedUser.id, { identifier: String(identifier) });
 
+    invalidateRoleCache(updatedUser.id);
     return res.json(updatedUser);
   } catch (err: any) {
     return res.status(400).json({ error: safeErrorMessage(err, "Failed to grant admin access") });
@@ -416,15 +442,16 @@ router.post(
   requireAuth,
   requireRegisteredUser,
   requireSuperAdmin,
+  validate(adminRevokeSchema),
   async (req: AuthRequest, res) => {
   try {
-    const { email, phone_number } = req.body;
-    const identifier = email || phone_number;
-    if (!identifier) {
-      return res.status(400).json({ error: "email or phone_number is required" });
+    const { phone_number } = req.body;
+    if (!phone_number) {
+      return res.status(400).json({ error: "phone_number is required" });
     }
+    const identifier = String(phone_number);
 
-    if (isSuperAdminEmail(String(identifier))) {
+    if (isSuperAdminEmail(String(identifier), String(identifier))) {
       return res.status(400).json({ error: "Super admin cannot be revoked" });
     }
 
@@ -434,6 +461,7 @@ router.post(
       user_id: updatedUser.id,
     });
     await persistAuditLog(req, "admin.role.revoke", "admin", updatedUser.id, { identifier: String(identifier) });
+    invalidateRoleCache(updatedUser.id);
     return res.json(updatedUser);
   } catch (err: any) {
     return res.status(400).json({ error: safeErrorMessage(err, "Failed to revoke admin access") });

@@ -1,15 +1,15 @@
 import crypto from "crypto";
-import { JWT_SECRET } from "../config";
 
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 12;
 const AUTH_TAG_LENGTH = 16;
 const ENCRYPTED_PREFIX = "enc:";
 
-// Derive a 256-bit encryption key from the JWT_SECRET
+// Use a dedicated encryption key if provided; fall back to JWT_SECRET derivation for backward compatibility
+const ENCRYPTION_KEY_SOURCE = process.env.ENCRYPTION_KEY || process.env.JWT_SECRET || "";
 const encryptionKey = crypto
   .createHash("sha256")
-  .update(`razorpay-encryption:${JWT_SECRET}`)
+  .update(`razorpay-encryption:${ENCRYPTION_KEY_SOURCE}`)
   .digest();
 
 export function encryptSecret(plaintext: string): string {

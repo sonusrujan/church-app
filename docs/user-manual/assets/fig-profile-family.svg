@@ -1,0 +1,31 @@
+<svg width="1200" height="760" viewBox="0 0 1200 760" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="760" rx="36" fill="#F6F1FA"/>
+  <rect x="60" y="48" width="1080" height="664" rx="28" fill="#FFFFFF" stroke="#DCD0FF" stroke-width="3"/>
+  <text x="102" y="102" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="34" font-weight="800">Profile &amp; Family Management</text>
+  <rect x="102" y="138" width="306" height="196" rx="24" fill="#F7F2F7"/>
+  <circle cx="178" cy="220" r="42" fill="#EDE8FF"/>
+  <text x="240" y="210" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="800">Personal Details</text>
+  <text x="240" y="242" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="17">Name, phones, address, DOB,</text>
+  <text x="240" y="265" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="17">gender, occupation, age</text>
+  <rect x="102" y="362" width="474" height="290" rx="24" fill="#FFFFFF" stroke="#DCD0FF" stroke-width="3"/>
+  <text x="132" y="404" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="800">Family Members</text>
+  <rect x="132" y="428" width="414" height="54" rx="18" fill="#F7F2F7"/>
+  <rect x="132" y="496" width="414" height="54" rx="18" fill="#F7F2F7"/>
+  <text x="154" y="460" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="700">Rachel Daniel</text>
+  <text x="154" y="480" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="15">Spouse  Linked member  Active dues</text>
+  <text x="154" y="528" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="700">Samuel Daniel</text>
+  <text x="154" y="548" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="15">Son  Linked member  No current dues</text>
+  <rect x="628" y="138" width="410" height="248" rx="24" fill="#FFFFFF" stroke="#DCD0FF" stroke-width="3"/>
+  <text x="660" y="180" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="800">Membership Details</text>
+  <text x="660" y="224" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="17">Membership ID</text>
+  <text x="660" y="252" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="800">CSI-KNL-1024</text>
+  <text x="660" y="298" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="17">Subscription Status</text>
+  <text x="660" y="326" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="800">Active  Monthly  Rs 800</text>
+  <rect x="628" y="418" width="410" height="234" rx="24" fill="#FFFFFF" stroke="#DCD0FF" stroke-width="3"/>
+  <text x="660" y="460" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="800">Special Dates</text>
+  <rect x="660" y="488" width="346" height="48" rx="18" fill="#F7F2F7"/>
+  <rect x="660" y="548" width="346" height="48" rx="18" fill="#F7F2F7"/>
+  <text x="684" y="518" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="16">15 May  Personal Birthday</text>
+  <text x="684" y="578" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="16">22 Aug  Wedding Anniversary</text>
+  <text x="600" y="722" text-anchor="middle" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="700">Reference Screen: Profile, Family, and Special Dates</text>
+</svg>

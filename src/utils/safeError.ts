@@ -1,9 +1,34 @@
 /**
  * Returns a safe error message for API responses.
- * Business-logic errors (thrown with `new Error(...)` in our code) are safe.
- * External/database errors may contain internal details (table names, column names)
- * and must be replaced with the generic fallback.
+ * Only messages matching known safe business-logic prefixes are forwarded.
+ * All other errors (DB, network, runtime) are replaced with the generic fallback.
  */
+
+const SAFE_MESSAGE_PATTERNS = [
+  /^(amount|donation|payment|subscription|member|church|family|otp|phone|email|name|address|gender|date|event|prayer|notification|banner|plan|category|receipt|refund|role|token|request|access|file|image|upload)/i,
+  /must be/i,
+  /already exists/i,
+  /not found/i,
+  /not allowed/i,
+  /not permitted/i,
+  /not configured/i,
+  /not enabled/i,
+  /is required/i,
+  /is invalid/i,
+  /cannot be/i,
+  /does not belong/i,
+  /does not match/i,
+  /exceeds the maximum/i,
+  /too many/i,
+  /no subscriptions/i,
+  /no active/i,
+  /disabled/i,
+  /unauthorized/i,
+  /unauthenticated/i,
+  /forbidden/i,
+  /expired/i,
+  /failed to (send|create|update|delete|verify|upload|process)/i,
+];
 
 const INTERNAL_ERROR_PATTERNS = [
   /column .* does not exist/i,
@@ -36,9 +61,15 @@ export function safeErrorMessage(err: unknown, fallback: string): string {
 
   if (!message) return fallback;
 
+  // Block known internal error patterns first
   for (const pattern of INTERNAL_ERROR_PATTERNS) {
     if (pattern.test(message)) return fallback;
   }
 
-  return message;
+  // Only allow messages matching known safe business-logic patterns
+  for (const pattern of SAFE_MESSAGE_PATTERNS) {
+    if (pattern.test(message)) return message;
+  }
+
+  return fallback;
 }

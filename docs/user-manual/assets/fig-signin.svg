@@ -1,0 +1,18 @@
+<svg width="1200" height="760" viewBox="0 0 1200 760" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="760" rx="36" fill="#F6F1FA"/>
+  <rect x="90" y="70" width="1020" height="620" rx="34" fill="#FFFFFF" stroke="#DCD0FF" stroke-width="4"/>
+  <text x="600" y="136" text-anchor="middle" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700" letter-spacing="6">CHURCH MANAGEMENT</text>
+  <circle cx="600" cy="230" r="58" fill="#EDE8FF"/>
+  <path d="M575 235C596 210 604 182 600 166C616 184 620 206 619 220C632 211 645 211 653 216C638 219 629 229 623 240C614 234 604 231 593 230C587 232 581 234 575 235Z" fill="#6D63C7"/>
+  <text x="600" y="353" text-anchor="middle" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="58" font-weight="800">Welcome to Shalom</text>
+  <text x="600" y="414" text-anchor="middle" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="30">Enter your registered phone number to receive an OTP.</text>
+  <text x="600" y="468" text-anchor="middle" fill="#5A5280" font-family="Arial, Helvetica, sans-serif" font-size="26" font-weight="700" letter-spacing="2">PHONE NUMBER</text>
+  <rect x="214" y="492" width="772" height="88" rx="30" fill="#FFFFFF" stroke="#DCD0FF" stroke-width="5"/>
+  <path d="M382 497H987V575H382V497Z" fill="#FFFFFF"/>
+  <rect x="214" y="492" width="166" height="88" rx="30" fill="#E9E2E9"/>
+  <text x="297" y="548" text-anchor="middle" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700">+91</text>
+  <text x="430" y="548" fill="#9B93C4" font-family="Arial, Helvetica, sans-serif" font-size="28">9876543210</text>
+  <rect x="440" y="600" width="320" height="74" rx="30" fill="#B8B0E8"/>
+  <text x="600" y="646" text-anchor="middle" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700">Send OTP</text>
+  <text x="600" y="714" text-anchor="middle" fill="#2E2A5A" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="700">Reference Screen: Member Sign-In</text>
+</svg>

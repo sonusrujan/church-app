@@ -208,6 +208,7 @@ export async function reviewMembershipRequest(
         );
         if (phoneUserResult.rows.length > 0) {
           userId = phoneUserResult.rows[0].id;
+          // Only set church_id on users table if user has NO church yet (don't overwrite!)
           if (!phoneUserResult.rows[0].church_id) {
             await client.query(
               `UPDATE "users" SET "church_id" = $1 WHERE "id" = $2`,
@@ -255,7 +256,7 @@ export async function reviewMembershipRequest(
         if (!userId) throw new Error("User creation returned no id");
       }
 
-      // Check if member already exists by phone or email
+      // Check if member already exists by phone or email (scoped to THIS church)
       let existingMemberId: string | null = null;
       if (request.phone_number) {
         const memByPhone = await client.query(
@@ -272,13 +273,29 @@ export async function reviewMembershipRequest(
         if (memByEmail.rows.length > 0) existingMemberId = memByEmail.rows[0].id;
       }
 
+      let memberId = existingMemberId;
       if (!existingMemberId) {
-        await client.query(
+        const memberResult = await client.query(
           `INSERT INTO "members" ("user_id", "full_name", "email", "phone_number", "address", "membership_id", "church_id", "verification_status")
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING "id"`,
           [userId, request.full_name, request.email || "", request.phone_number || null, request.address, request.membership_id, request.church_id, "verified"],
         );
+        memberId = memberResult.rows[0]?.id || null;
+      } else {
+        // Link existing member to this user if not already linked
+        await client.query(
+          `UPDATE "members" SET "user_id" = $1 WHERE "id" = $2 AND ("user_id" IS NULL OR "user_id" = $1)`,
+          [userId, existingMemberId],
+        );
       }
+
+      // Create junction table row (additive — does NOT overwrite other church memberships)
+      await client.query(
+        `INSERT INTO "user_church_memberships" ("user_id", "church_id", "member_id", "role", "is_active")
+         VALUES ($1, $2, $3, 'member', true)
+         ON CONFLICT ("user_id", "church_id") DO UPDATE SET "member_id" = COALESCE(EXCLUDED."member_id", "user_church_memberships"."member_id"), "is_active" = true`,
+        [userId, request.church_id, memberId],
+      );
     }
 
     await client.query("COMMIT");

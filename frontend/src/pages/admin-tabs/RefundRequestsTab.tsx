@@ -11,19 +11,19 @@ import { useI18n } from "../../i18n";
 
 export default function RefundRequestsTab() {
   const { t } = useI18n();
-  const { token, isSuperAdmin, isChurchAdmin, busyKey, setNotice, withAuthRequest } = useApp();
+  const { token, isSuperAdmin, isChurchAdmin, busyKey, setNotice, withAuthRequest, refreshAdminCounts } = useApp();
 
   const [requests, setRequests] = useState<RefundRequestRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState<"pending" | "forwarded" | "all">("pending");
   const [page, setPage] = useState(1);
-  const [reviewNote, setReviewNote] = useState("");
+  const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
 
   async function loadRequests() {
     setLoading(true);
     try {
       const filterParam = filter !== "all" ? `?status=${filter}` : "";
-      const data = await apiRequest<RefundRequestRow[]>(`/api/operations/refund-requests${filterParam}`, { token });
+      const data = await apiRequest<RefundRequestRow[]>(`/api/ops/refund-requests${filterParam}`, { token });
       setRequests(data);
     } catch {
       setNotice({ tone: "error", text: t("adminTabs.refundRequests.loadFailed") });
@@ -35,22 +35,25 @@ export default function RefundRequestsTab() {
   async function forward(id: string) {
     await withAuthRequest(
       "forward-refund",
-      () => apiRequest<{ message: string }>(`/api/operations/refund-requests/${id}/forward`, { method: "POST", token }),
+      () => apiRequest<{ message: string }>(`/api/ops/refund-requests/${id}/forward`, { method: "POST", token }),
       t("adminTabs.refundRequests.forwardedSuccess"),
     );
     await loadRequests();
+    void refreshAdminCounts();
   }
 
   async function review(id: string, action: "approved" | "denied") {
+    const note = reviewNotes[id] || "";
     await withAuthRequest(
       "review-refund",
-      () => apiRequest<{ message: string }>(`/api/operations/refund-requests/${id}/review`, {
-        method: "POST", token, body: { action, note: reviewNote.trim() || undefined },
+      () => apiRequest<{ message: string }>(`/api/ops/refund-requests/${id}/review`, {
+        method: "POST", token, body: { decision: action, review_note: note.trim() || undefined },
       }),
       action === "approved" ? t("adminTabs.refundRequests.requestApproved") : t("adminTabs.refundRequests.requestDenied"),
     );
-    setReviewNote("");
+    setReviewNotes((prev) => { const next = { ...prev }; delete next[id]; return next; });
     await loadRequests();
+    void refreshAdminCounts();
   }
 
   return (
@@ -106,8 +109,8 @@ export default function RefundRequestsTab() {
                 {isSuperAdmin && rr.status === "forwarded" ? (
                   <>
                     <input
-                      value={reviewNote}
-                      onChange={(e) => setReviewNote(e.target.value)}
+                      value={reviewNotes[rr.id] || ""}
+                      onChange={(e) => setReviewNotes((prev) => ({ ...prev, [rr.id]: e.target.value }))}
                       placeholder={t("adminTabs.refundRequests.reviewNotePlaceholder")}
                       style={{ flex: 1, padding: "6px 10px", borderRadius: 8, border: "1px solid var(--border-color, #ddd)", fontSize: "0.85rem" }}
                     />

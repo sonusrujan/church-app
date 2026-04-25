@@ -1,6 +1,6 @@
 import { db } from "../services/dbClient";
 import { sendEmail } from "../services/mailerService";
-import { exportMembersCsv, exportPaymentsCsv, exportDonationSummaryCsv } from "../services/exportService";
+import { exportMembersCsv, exportPaymentsCsv, exportDonationSummaryCsv, exportMonthlyDuesCsv } from "../services/exportService";
 import { logger } from "../utils/logger";
 import { APP_NAME } from "../config";
 
@@ -27,7 +27,7 @@ export async function createScheduledReport(input: {
   recipient_emails?: string[];
   recipient_phones?: string[];
 }) {
-  const validTypes = ["members", "payments", "donations"];
+  const validTypes = ["members", "payments", "donations", "monthly_dues"];
   const validFrequencies = ["daily", "weekly", "monthly"];
 
   if (!validTypes.includes(input.report_type)) {
@@ -126,6 +126,15 @@ export async function toggleScheduledReport(id: string, enabled: boolean, church
 
 // ── Cron execution: find due reports and send them ──
 
+// SCHED-001: HTML-escape content before embedding in email
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 function isDue(frequency: string, lastSent: string | null): boolean {
   if (!lastSent) return true;
   const last = new Date(lastSent).getTime();
@@ -146,6 +155,7 @@ async function generateReportCsv(churchId: string, reportType: string): Promise<
     case "members": return exportMembersCsv(churchId);
     case "payments": return exportPaymentsCsv(churchId);
     case "donations": return exportDonationSummaryCsv(churchId);
+    case "monthly_dues": return exportMonthlyDuesCsv(churchId);
     default: throw new Error(`Unknown report type: ${reportType}`);
   }
 }
@@ -195,7 +205,7 @@ export async function processScheduledReports() {
           to: email,
           subject,
           text: `Please find the attached ${report.report_type} report for ${churchName} (${date}).`,
-          html: `<p>${report.report_type.charAt(0).toUpperCase() + report.report_type.slice(1)} report for <strong>${churchName}</strong> generated on ${date}.</p><p>Report data:</p><pre style="font-size:12px;overflow-x:auto;">${csv.slice(0, 50000)}</pre>`,
+          html: `<p>${report.report_type.charAt(0).toUpperCase() + report.report_type.slice(1)} report for <strong>${escapeHtml(churchName)}</strong> generated on ${date}.</p><p>Report data:</p><pre style="font-size:12px;overflow-x:auto;">${escapeHtml(csv.slice(0, 50000))}</pre>`,
         })
       ));
 

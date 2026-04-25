@@ -4,8 +4,11 @@ import { BrowserRouter } from 'react-router-dom'
 import { ErrorBoundary } from './ErrorBoundary'
 import { I18nProvider } from './i18n'
 import { DarkModeProvider } from './context/DarkModeContext'
+import { initSentry } from './sentry'
 import './index.css'
 import App from './App.tsx'
+
+initSentry();
 
 // Catch unhandled async errors globally
 window.addEventListener('unhandledrejection', (event) => {

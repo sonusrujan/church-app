@@ -37,7 +37,7 @@ export async function persistAuditLog(
 export async function listAuditLogs(churchId: string | undefined, limit = 100, offset = 0, isSuperAdmin = false) {
   let query = db
     .from("admin_audit_log")
-    .select("*")
+    .select("id, church_id, actor_user_id, actor_role, action, target_type, target_id, ip_address, details, created_at")
     .order("created_at", { ascending: false })
     .range(offset, offset + limit - 1);
 

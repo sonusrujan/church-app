@@ -3,6 +3,8 @@ import { logger } from "../utils/logger";
 import { enqueueEmailJob } from "./jobQueueService";
 import { APP_NAME } from "../config";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 type MemberLookupRow = {
   id: string;
   full_name: string;
@@ -16,6 +18,8 @@ export async function createChurchEvent(input: {
   title: string;
   message: string;
   event_date?: string;
+  end_time?: string;
+  location?: string;
   image_url?: string;
   created_by?: string;
 }) {
@@ -26,10 +30,14 @@ export async function createChurchEvent(input: {
     throw new Error("title and message are required");
   }
 
-  const eventDate =
-    typeof input.event_date === "string" && input.event_date.trim()
-      ? new Date(input.event_date).toISOString()
-      : null;
+  let eventDate: string | null = null;
+  if (typeof input.event_date === "string" && input.event_date.trim()) {
+    const parsed = new Date(input.event_date);
+    if (isNaN(parsed.getTime())) {
+      throw new Error("Invalid event_date format");
+    }
+    eventDate = parsed.toISOString();
+  }
 
   if (eventDate) {
     const eventDay = new Date(eventDate);
@@ -45,6 +53,14 @@ export async function createChurchEvent(input: {
     ? input.image_url.trim()
     : null;
 
+  let endTime: string | null = null;
+  if (typeof input.end_time === "string" && input.end_time.trim()) {
+    const parsed = new Date(input.end_time);
+    if (!isNaN(parsed.getTime())) endTime = parsed.toISOString();
+  }
+
+  const location = typeof input.location === "string" ? input.location.trim().replace(/<[^>]*>/g, "").slice(0, 500) : null;
+
   const { data, error } = await db
     .from("church_events")
     .insert([
@@ -53,11 +69,13 @@ export async function createChurchEvent(input: {
         title,
         message,
         event_date: eventDate,
+        end_time: endTime,
+        location,
         image_url: imageUrl,
         created_by: input.created_by || null,
       },
     ])
-    .select("id, church_id, title, message, event_date, image_url, created_by, created_at")
+    .select("id, church_id, title, message, event_date, end_time, location, image_url, created_by, created_at")
     .single();
 
   if (error) {
@@ -71,7 +89,7 @@ export async function createChurchEvent(input: {
 export async function listChurchEvents(churchId: string) {
   const { data, error } = await db
     .from("church_events")
-    .select("id, church_id, title, message, event_date, image_url, created_by, created_at")
+    .select("id, church_id, title, message, event_date, end_time, location, image_url, created_by, created_at")
     .eq("church_id", churchId)
     .order("created_at", { ascending: false })
     .limit(200);
@@ -152,7 +170,7 @@ export async function listChurchNotifications(churchId: string, limit = 100, off
 export async function updateChurchEvent(
   eventId: string,
   churchId: string,
-  input: { title?: string; message?: string; event_date?: string | null; image_url?: string | null },
+  input: { title?: string; message?: string; event_date?: string | null; end_time?: string | null; location?: string | null; image_url?: string | null },
 ) {
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
 
@@ -178,13 +196,24 @@ export async function updateChurchEvent(
   if (input.image_url !== undefined) {
     updates.image_url = typeof input.image_url === "string" && input.image_url.trim() ? input.image_url.trim() : null;
   }
+  if (input.end_time !== undefined) {
+    if (input.end_time === null || input.end_time === "") {
+      updates.end_time = null;
+    } else {
+      const et = new Date(input.end_time);
+      if (!isNaN(et.getTime())) updates.end_time = et.toISOString();
+    }
+  }
+  if (input.location !== undefined) {
+    updates.location = typeof input.location === "string" ? input.location.trim().replace(/<[^>]*>/g, "").slice(0, 500) : null;
+  }
 
   const { data, error } = await db
     .from("church_events")
     .update(updates)
     .eq("id", eventId)
     .eq("church_id", churchId)
-    .select("id, church_id, title, message, event_date, image_url, created_by, created_at")
+    .select("id, church_id, title, message, event_date, end_time, location, image_url, created_by, created_at")
     .single();
 
   if (error) {
@@ -240,7 +269,7 @@ export async function listAllEvents(limit = 100, offset = 0) {
 
   const { data, error } = await db
     .from("church_events")
-    .select("id, church_id, title, message, event_date, created_by, created_at")
+    .select("id, church_id, title, message, event_date, end_time, location, created_by, created_at")
     .order("created_at", { ascending: false })
     .range(safeOffset, safeOffset + safeLimit - 1);
 
@@ -341,22 +370,6 @@ export async function createPrayerRequest(input: {
       .limit(1)
       .maybeSingle<MemberLookupRow>();
     if (byUserId) member = byUserId;
-  }
-
-  if (!member && normalizedEmail && normalizedEmail.includes("@")) {
-    const { data: byEmail, error: memberError } = await db
-      .from("members")
-      .select("id, full_name, email, user_id, church_id")
-      .ilike("email", normalizedEmail)
-      .eq("church_id", input.church_id)
-      .order("created_at", { ascending: true })
-      .limit(1)
-      .maybeSingle<MemberLookupRow>();
-    if (memberError) {
-      logger.error({ err: memberError, email: normalizedEmail }, "createPrayerRequest member lookup by email failed");
-      throw memberError;
-    }
-    if (byEmail) member = byEmail;
   }
 
   if (!member && normalizedPhone) {
@@ -544,18 +557,6 @@ export async function listPrayerRequests(churchId: string, memberIdentifier?: { 
       if (byUserId) memberId = byUserId.id;
     }
 
-    // Fallback to email
-    if (!memberId && memberIdentifier.email && memberIdentifier.email.includes("@")) {
-      const { data: byEmail } = await db
-        .from("members")
-        .select("id")
-        .ilike("email", memberIdentifier.email.trim().toLowerCase())
-        .eq("church_id", churchId)
-        .limit(1)
-        .maybeSingle();
-      if (byEmail) memberId = byEmail.id;
-    }
-
     // Fallback to phone
     if (!memberId && memberIdentifier.phone) {
       const { data: byPhone } = await db
@@ -629,6 +630,47 @@ export async function deleteChurchNotification(notificationId: string, churchId:
   return { deleted: true, id: notificationId };
 }
 
+export async function updatePrayerRequest(requestId: string, memberId: string, details: string) {
+  const sanitized = String(details || "").trim().replace(/<[^>]*>/g, "");
+  if (!sanitized) throw new Error("Prayer request details are required");
+
+  const { data, error } = await db
+    .from("prayer_requests")
+    .update({ details: sanitized })
+    .eq("id", requestId)
+    .eq("member_id", memberId)
+    .select("id, details, status, created_at")
+    .single();
+
+  if (error) {
+    logger.error({ err: error, requestId, memberId }, "updatePrayerRequest failed");
+    throw error;
+  }
+  if (!data) throw new Error("Prayer request not found or you are not the author");
+  return data;
+}
+
+export async function deletePrayerRequestByMember(requestId: string, memberId: string) {
+  // Verify ownership
+  const { data: pr } = await db
+    .from("prayer_requests")
+    .select("id, church_id")
+    .eq("id", requestId)
+    .eq("member_id", memberId)
+    .single();
+
+  if (!pr) throw new Error("Prayer request not found or you are not the author");
+
+  // Delete recipients first (FK constraint)
+  await db.from("prayer_request_recipients").delete().eq("prayer_request_id", requestId);
+  const { error } = await db.from("prayer_requests").delete().eq("id", requestId);
+  if (error) {
+    logger.error({ err: error, requestId, memberId }, "deletePrayerRequestByMember failed");
+    throw error;
+  }
+  return { deleted: true, id: requestId };
+}
+
 export async function deletePrayerRequest(requestId: string, churchId: string) {
   // Delete recipients first (FK constraint)
   await db
@@ -679,12 +721,16 @@ export async function cleanupExpiredEvents(): Promise<{ deleted: number }> {
 /**
  * Get pending admin counts for badge indicators.
  * Returns counts of pending membership requests, family requests,
- * cancellation requests, and upcoming events for the given church.
+ * cancellation requests, account deletion requests, refund requests,
+ * prayer requests, and upcoming events for the given church.
  */
 export async function getAdminPendingCounts(churchId: string): Promise<{
   membership_requests: number;
   family_requests: number;
   cancellation_requests: number;
+  account_deletion_requests: number;
+  refund_requests: number;
+  prayer_requests: number;
   events: number;
   notifications: number;
 }> {
@@ -693,9 +739,133 @@ export async function getAdminPendingCounts(churchId: string): Promise<{
        (SELECT COUNT(*)::int FROM membership_requests WHERE church_id = $1 AND status = 'pending') AS membership_requests,
        (SELECT COUNT(*)::int FROM family_member_create_requests WHERE church_id = $1 AND status = 'pending') AS family_requests,
        (SELECT COUNT(*)::int FROM cancellation_requests WHERE church_id = $1 AND status = 'pending') AS cancellation_requests,
-       (SELECT COUNT(*)::int FROM church_events WHERE church_id = $1) AS events,
-       (SELECT COUNT(*)::int FROM church_notifications WHERE church_id = $1) AS notifications`,
+       (SELECT COUNT(*)::int FROM account_deletion_requests WHERE church_id = $1 AND status = 'pending') AS account_deletion_requests,
+       (SELECT COUNT(*)::int FROM refund_requests WHERE church_id = $1 AND status = 'pending') AS refund_requests,
+       (SELECT COUNT(*)::int FROM prayer_requests WHERE church_id = $1 AND status = 'sent' AND created_at >= NOW() - INTERVAL '7 days') AS prayer_requests,
+       (SELECT COUNT(*)::int FROM church_events WHERE church_id = $1 AND starts_at >= NOW()) AS events,
+       (SELECT COUNT(*)::int FROM church_notifications WHERE church_id = $1 AND created_at >= NOW() - INTERVAL '7 days') AS notifications`,
     [churchId],
   );
   return rows[0];
+}
+
+// ── RSVP ──────────────────────────────────────────────────────
+
+export async function toggleEventRsvp(eventId: string, userId: string, status: "going" | "interested" = "going") {
+  const { rows: existing } = await pool.query(
+    `SELECT id, status FROM event_rsvps WHERE event_id = $1 AND user_id = $2`,
+    [eventId, userId],
+  );
+
+  if (existing.length > 0) {
+    // If same status, remove (toggle off)
+    if (existing[0].status === status) {
+      await pool.query(`DELETE FROM event_rsvps WHERE id = $1`, [existing[0].id]);
+      return null;
+    }
+    // Update status
+    const { rows } = await pool.query(
+      `UPDATE event_rsvps SET status = $1 WHERE id = $2 RETURNING *`,
+      [status, existing[0].id],
+    );
+    return rows[0];
+  }
+
+  // Create new RSVP
+  const { rows } = await pool.query(
+    `INSERT INTO event_rsvps (event_id, user_id, status) VALUES ($1, $2, $3) RETURNING *`,
+    [eventId, userId, status],
+  );
+  return rows[0];
+}
+
+export async function getEventRsvpCounts(eventId: string) {
+  const { rows } = await pool.query(
+    `SELECT status, COUNT(*)::int AS count FROM event_rsvps WHERE event_id = $1 GROUP BY status`,
+    [eventId],
+  );
+  const counts: Record<string, number> = { going: 0, interested: 0 };
+  for (const r of rows) counts[r.status] = r.count;
+  return counts;
+}
+
+export async function getUserRsvp(eventId: string, userId: string) {
+  const { rows } = await pool.query(
+    `SELECT status FROM event_rsvps WHERE event_id = $1 AND user_id = $2`,
+    [eventId, userId],
+  );
+  return rows[0]?.status || null;
+}
+
+export async function getEventRsvpSummaries(eventIds: string[], userId: string) {
+  if (!eventIds.length) return {};
+  const { rows: countRows } = await pool.query(
+    `SELECT event_id, status, COUNT(*)::int AS count FROM event_rsvps WHERE event_id = ANY($1) GROUP BY event_id, status`,
+    [eventIds],
+  );
+  const { rows: userRows } = await pool.query(
+    `SELECT event_id, status FROM event_rsvps WHERE event_id = ANY($1) AND user_id = $2`,
+    [eventIds, userId],
+  );
+  const result: Record<string, { going: number; interested: number; myStatus: string | null }> = {};
+  for (const id of eventIds) result[id] = { going: 0, interested: 0, myStatus: null };
+  for (const r of countRows) {
+    if (result[r.event_id]) result[r.event_id][r.status as "going" | "interested"] = r.count;
+  }
+  for (const r of userRows) {
+    if (result[r.event_id]) result[r.event_id].myStatus = r.status;
+  }
+  return result;
+}
+
+// ── Notification Reads ────────────────────────────────────────
+
+export async function markNotificationsRead(userId: string, notificationIds: string[]) {
+  if (!notificationIds.length) return;
+  const safeIds = notificationIds.filter((id) => UUID_RE.test(id)).slice(0, 500);
+  if (!safeIds.length) return;
+  const values = safeIds.map((id, i) => `($${i * 2 + 1}, $${i * 2 + 2})`).join(", ");
+  const params = safeIds.flatMap((id) => [id, userId]);
+  await pool.query(
+    `INSERT INTO notification_reads (notification_id, user_id) VALUES ${values} ON CONFLICT DO NOTHING`,
+    params,
+  );
+}
+
+export async function getReadNotificationIds(userId: string): Promise<string[]> {
+  const { rows } = await pool.query(
+    `SELECT notification_id FROM notification_reads WHERE user_id = $1`,
+    [userId],
+  );
+  return rows.map((r) => r.notification_id);
+}
+
+// ── Notification Preferences ──────────────────────────────────
+
+const NOTIFICATION_CATEGORIES = ["events", "payments", "prayer", "family", "announcements"] as const;
+export type NotificationCategory = (typeof NOTIFICATION_CATEGORIES)[number];
+
+export async function getNotificationPreferences(userId: string): Promise<Record<string, boolean>> {
+  const defaults: Record<string, boolean> = {};
+  for (const c of NOTIFICATION_CATEGORIES) defaults[c] = true;
+
+  const { rows } = await pool.query(
+    `SELECT category, enabled FROM notification_preferences WHERE user_id = $1`,
+    [userId],
+  );
+  for (const r of rows) defaults[r.category] = r.enabled;
+  return defaults;
+}
+
+export async function updateNotificationPreference(userId: string, category: string, enabled: boolean) {
+  if (!NOTIFICATION_CATEGORIES.includes(category as NotificationCategory)) {
+    throw new Error("Invalid notification category");
+  }
+  await pool.query(
+    `INSERT INTO notification_preferences (user_id, category, enabled, updated_at)
+     VALUES ($1, $2, $3, NOW())
+     ON CONFLICT (user_id, category)
+     DO UPDATE SET enabled = $3, updated_at = NOW()`,
+    [userId, category, enabled],
+  );
 }

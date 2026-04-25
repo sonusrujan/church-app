@@ -275,7 +275,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS pastors_email_unique
 -- ─── 4c. Announcements ────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS announcements (
   id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
-  church_id uuid REFERENCES churches(id) ON DELETE CASCADE,
+  church_id uuid NOT NULL REFERENCES churches(id) ON DELETE CASCADE,
   title text NOT NULL,
   message text NOT NULL,
   created_by uuid,
@@ -542,7 +542,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
   member_id uuid REFERENCES members(id) ON DELETE SET NULL,
   family_member_id uuid REFERENCES family_members(id) ON DELETE SET NULL,
-  church_id uuid REFERENCES churches(id) ON DELETE CASCADE,
+  church_id uuid NOT NULL REFERENCES churches(id) ON DELETE CASCADE,
   plan_name text NOT NULL,
   amount numeric NOT NULL,
   billing_cycle text NOT NULL,
@@ -608,7 +608,7 @@ CREATE TABLE IF NOT EXISTS subscription_events (
   id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
   member_id uuid REFERENCES members(id) ON DELETE SET NULL,
   subscription_id uuid REFERENCES subscriptions(id) ON DELETE SET NULL,
-  church_id uuid REFERENCES churches(id) ON DELETE CASCADE,
+  church_id uuid NOT NULL REFERENCES churches(id) ON DELETE CASCADE,
   event_type text NOT NULL,
   status_before text,
   status_after text,

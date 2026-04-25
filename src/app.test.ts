@@ -45,12 +45,13 @@ vi.mock("./routes/otpRoutes", () => ({ default: vi.fn() }));
 vi.mock("./routes/leadershipRoutes", () => ({ default: vi.fn() }));
 vi.mock("./routes/webhookRoutes", () => ({ default: vi.fn() }));
 vi.mock("./routes/saasRoutes", () => ({ default: vi.fn() }));
-vi.mock("./routes/googleAuthRoutes", () => ({ default: vi.fn() }));
 vi.mock("./routes/uploadRoutes", () => ({ default: vi.fn() }));
 vi.mock("./routes/dioceseRoutes", () => ({ default: vi.fn() }));
 vi.mock("./routes/adBannerRoutes", () => ({ default: vi.fn() }));
 vi.mock("./routes/specialDateRoutes", () => ({ default: vi.fn() }));
 vi.mock("./routes/pushRoutes", () => ({ default: vi.fn() }));
+vi.mock("./routes/donationFundRoutes", () => ({ default: vi.fn() }));
+vi.mock("./routes/razorpayRoutesRoutes", () => ({ default: vi.fn() }));
 vi.mock("./middleware/rlsContext", () => ({
   rlsStorage: {
     run: vi.fn((_store: any, cb: () => void) => cb()),
@@ -108,8 +109,6 @@ describe("Health check endpoint", () => {
           const body = await resp.json();
           expect(resp.status).toBe(200);
           expect(body.status).toBe("ok");
-          expect(body.db).toBe("connected");
-          expect(body.pool).toEqual({ total: 5, idle: 3, waiting: 0 });
         } finally {
           server.close();
           resolve();
@@ -133,6 +132,32 @@ describe("Health check endpoint", () => {
           const body = await resp.json();
           expect(resp.status).toBe(503);
           expect(body.status).toBe("unhealthy");
+        } finally {
+          server.close();
+          resolve();
+        }
+      });
+    });
+  });
+
+  it("health check returns minimal status (MED-003)", async () => {
+    mockConnect.mockResolvedValue({
+      query: mockQuery.mockResolvedValue(undefined),
+      release: mockRelease,
+    });
+
+    const { default: app } = await import("./app");
+    const http = await import("http");
+    const server = http.createServer(app);
+
+    await new Promise<void>((resolve) => {
+      server.listen(0, async () => {
+        const addr = server.address() as { port: number };
+        try {
+          const resp = await fetch(`http://localhost:${addr.port}/health`);
+          const body = await resp.json();
+          expect(resp.status).toBe(200);
+          expect(body.status).toBe("ok");
         } finally {
           server.close();
           resolve();

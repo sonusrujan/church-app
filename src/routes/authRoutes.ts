@@ -1,3 +1,14 @@
+import { UUID_REGEX } from "../utils/validation";
+import {
+  validate,
+  syncProfileSchema,
+  updateProfileSchema,
+  joinChurchSchema,
+  addFamilyMemberSchema,
+  updateFamilyMemberSchema,
+  createFamilyRequestSchema,
+  reviewDecisionSchema,
+} from "../utils/zodSchemas";
 import { Router } from "express";
 import jwt from "jsonwebtoken";
 import { AuthRequest, requireAuth } from "../middleware/requireAuth";
@@ -8,6 +19,7 @@ import { safeErrorMessage } from "../utils/safeError";
 import { persistAuditLog } from "../utils/auditLog";
 import { JWT_SECRET } from "../config";
 import { logger } from "../utils/logger";
+import { normalizeIndianPhone } from "../utils/phone";
 import { rotateRefreshToken, revokeRefreshToken, revokeAllRefreshTokens } from "../services/refreshTokenService";
 import { getChurchSaaSSettings } from "../services/churchSubscriptionService";
 import {
@@ -30,10 +42,8 @@ import {
 } from "../services/familyRequestService";
 
 const router = Router();
-const UUID_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-router.post("/sync-profile", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+router.post("/sync-profile", requireAuth, requireRegisteredUser, validate(syncProfileSchema), async (req: AuthRequest, res) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: "Unauthenticated" });
@@ -98,29 +108,22 @@ router.get("/me", requireAuth, async (req: AuthRequest, res) => {
     // Block login for members who are added as someone's family dependent
     if (!isSuperAdminEmail(req.user.email, req.user.phone)) {
       // Find if this user's member record is linked_to_member_id in family_members
-      // Use two separate queries instead of .or() to avoid PostgREST filter escaping issues
+      // SH-003: Scope member lookup to user's church to prevent cross-tenant false positives
       let memberRow: { id: string } | null = null;
       const { data: byUserId } = await db
         .from("members")
         .select("id")
         .eq("user_id", profile.id)
+        .eq("church_id", profile.church_id || req.user.church_id)
         .limit(1)
         .maybeSingle();
       memberRow = byUserId;
-      if (!memberRow && profile.email) {
-        const { data: byEmail } = await db
-          .from("members")
-          .select("id")
-          .ilike("email", profile.email)
-          .limit(1)
-          .maybeSingle();
-        memberRow = byEmail;
-      }
-      if (!memberRow && profile.phone_number) {
+      if (!memberRow && profile.phone_number && (profile.church_id || req.user.church_id)) {
         const { data: byPhone } = await db
           .from("members")
           .select("id")
           .eq("phone_number", profile.phone_number)
+          .eq("church_id", profile.church_id || req.user.church_id)
           .limit(1)
           .maybeSingle();
         memberRow = byPhone;
@@ -181,13 +184,13 @@ router.get("/member-dashboard", requireAuth, async (req: AuthRequest, res) => {
   }
 });
 
-router.post("/update-profile", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+router.post("/update-profile", requireAuth, requireRegisteredUser, validate(updateProfileSchema), async (req: AuthRequest, res) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: "Unauthenticated" });
     }
 
-    const { full_name, avatar_url, address, phone_number, alt_phone_number, preferred_language, dark_mode, gender, dob, phone_change_token } = req.body;
+    const { full_name, avatar_url, address, phone_number, alt_phone_number, preferred_language, dark_mode, gender, dob, phone_change_token, occupation, confirmation_taken, age } = req.body;
 
     // If phone_number is being changed, require OTP verification proof
     if (typeof phone_number === "string" && phone_number.trim()) {
@@ -227,6 +230,9 @@ router.post("/update-profile", requireAuth, requireRegisteredUser, async (req: A
       dark_mode: typeof dark_mode === "boolean" ? dark_mode : undefined,
       gender: typeof gender === "string" ? gender : undefined,
       dob: typeof dob === "string" ? dob : undefined,
+      occupation: typeof occupation === "string" ? occupation : undefined,
+      confirmation_taken: typeof confirmation_taken === "boolean" ? confirmation_taken : undefined,
+      age: typeof age === "number" ? age : undefined,
     });
 
     // AUTH-13: Invalidate all sessions when sensitive fields change (phone)
@@ -243,7 +249,7 @@ router.post("/update-profile", requireAuth, requireRegisteredUser, async (req: A
   }
 });
 
-router.post("/family-members", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+router.post("/family-members", requireAuth, requireRegisteredUser, validate(addFamilyMemberSchema), async (req: AuthRequest, res) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: "Unauthenticated" });
@@ -331,7 +337,7 @@ router.post("/family-members", requireAuth, requireRegisteredUser, async (req: A
           subject: "Family Member Added",
           body: `${full_name.trim()}${relation ? ` (${relation})` : ""} has been added to your family.`,
           metadata: { url: "/profile" },
-        }).catch(() => {});
+        }).catch((err) => { logger.warn({ err }, "Failed to send family_member_added notification"); });
       } catch (_) {}
     }
 
@@ -341,7 +347,7 @@ router.post("/family-members", requireAuth, requireRegisteredUser, async (req: A
   }
 });
 
-router.patch("/family-members/:id", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+router.patch("/family-members/:id", requireAuth, requireRegisteredUser, validate(updateFamilyMemberSchema), async (req: AuthRequest, res) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: "Unauthenticated" });
@@ -352,7 +358,7 @@ router.patch("/family-members/:id", requireAuth, requireRegisteredUser, async (r
       return res.status(400).json({ error: "Invalid family member ID" });
     }
 
-    const { full_name, gender, relation, age, dob } = req.body;
+    const { full_name, gender, relation, age, dob, address, phone_number, alt_phone_number, occupation, confirmation_taken, phone_change_token } = req.body;
 
     const normalizedAge =
       age !== undefined && age !== null && `${age}`.trim() !== ""
@@ -372,14 +378,57 @@ router.patch("/family-members/:id", requireAuth, requireRegisteredUser, async (r
       }
     }
 
+    // If phone_number is being changed for a linked family member, require OTP verification
+    if (typeof phone_number === "string" && phone_number.trim()) {
+      let normalizedNew = phone_number.replace(/[\s\-()]/g, "");
+      if (normalizedNew.startsWith("+91")) normalizedNew = "+91" + normalizedNew.slice(3).replace(/\D/g, "");
+      else normalizedNew = "+91" + normalizedNew.replace(/\D/g, "");
+
+      // Fetch the family member's current linked phone to detect real change
+      const { data: fmData } = await db
+        .from("family_members")
+        .select("linked_to_member_id")
+        .eq("id", familyMemberId)
+        .single();
+
+      if (fmData?.linked_to_member_id) {
+        const { data: linkedMember } = await db
+          .from("members")
+          .select("phone_number")
+          .eq("id", fmData.linked_to_member_id)
+          .single();
+
+        const currentPhone = linkedMember?.phone_number || "";
+        if (normalizedNew !== currentPhone) {
+          if (!phone_change_token || typeof phone_change_token !== "string") {
+            return res.status(400).json({ error: "OTP verification required to change family member phone number" });
+          }
+          try {
+            const decoded = jwt.verify(phone_change_token, JWT_SECRET) as { sub: string; verified_phone: string; purpose: string };
+            if (decoded.purpose !== "phone_change" || decoded.sub !== req.user!.id || decoded.verified_phone !== normalizedNew) {
+              return res.status(403).json({ error: "Phone change token is invalid or does not match" });
+            }
+          } catch {
+            return res.status(403).json({ error: "Phone change token expired or invalid" });
+          }
+        }
+      }
+    }
+
     const updated = await updateFamilyMember({
       email: req.user.email,
+      phone: req.user.phone,
       family_member_id: familyMemberId,
       full_name: typeof full_name === "string" ? full_name : undefined,
       gender: typeof gender === "string" ? gender : undefined,
       relation: typeof relation === "string" ? relation : undefined,
       age: normalizedAge,
       dob: typeof dob === "string" ? dob : undefined,
+      address: typeof address === "string" ? address : undefined,
+      phone_number: typeof phone_number === "string" ? phone_number : undefined,
+      alt_phone_number: typeof alt_phone_number === "string" ? alt_phone_number : undefined,
+      occupation: typeof occupation === "string" ? occupation : undefined,
+      confirmation_taken: typeof confirmation_taken === "boolean" ? confirmation_taken : undefined,
     });
 
     persistAuditLog(req, "family_member.update", "family_member", familyMemberId, {});
@@ -408,15 +457,83 @@ router.delete("/family-members/:id", requireAuth, requireRegisteredUser, async (
   }
 });
 
-// ── Helper: resolve current user's member_id ──
-async function resolveCurrentMemberId(userId: string): Promise<string | null> {
+// ── Get family member profile (expanded details from linked members table) ──
+
+router.get("/family-members/:id/profile", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: "Unauthenticated" });
+
+    const familyMemberId = typeof req.params.id === "string" ? req.params.id.trim() : "";
+    if (!familyMemberId || !UUID_REGEX.test(familyMemberId)) {
+      return res.status(400).json({ error: "Invalid family member ID" });
+    }
+
+    const dashboard = await getMemberDashboardByEmail(req.user.email, req.user.phone);
+    if (!dashboard?.member) {
+      return res.status(400).json({ error: "Member profile not found" });
+    }
+
+    // Verify ownership: the family member must belong to this head
+    const { data: fm, error: fmErr } = await db
+      .from("family_members")
+      .select("id, member_id, full_name, gender, relation, age, dob, has_subscription, linked_to_member_id, created_at")
+      .eq("id", familyMemberId)
+      .eq("member_id", dashboard.member.id)
+      .maybeSingle();
+
+    if (fmErr || !fm) {
+      return res.status(404).json({ error: "Family member not found" });
+    }
+
+    // If linked to a real member, fetch their full profile from members table
+    let linkedProfile: Record<string, unknown> | null = null;
+    if (fm.linked_to_member_id) {
+      const { data: member } = await db
+        .from("members")
+        .select("id, full_name, email, phone_number, alt_phone_number, address, membership_id, verification_status, subscription_amount, gender, dob, occupation, confirmation_taken, age, created_at")
+        .eq("id", fm.linked_to_member_id)
+        .maybeSingle();
+      linkedProfile = member || null;
+    }
+
+    return res.json({
+      family_member: fm,
+      linked_profile: linkedProfile,
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to load family member profile") });
+  }
+});
+
+// ── Helper: resolve current user's member_id (with phone fallback + auto-link) ──
+async function resolveCurrentMemberId(userId: string, phone?: string, churchId?: string): Promise<string | null> {
+  // Primary: lookup by user_id
   const { data } = await db
     .from("members")
     .select("id")
     .eq("user_id", userId)
     .limit(1)
     .maybeSingle();
-  return data?.id || null;
+  if (data?.id) return data.id;
+
+  // Fallback: phone lookup (mirrors dashboard auto-link logic)
+  if (phone) {
+    const normalized = normalizeIndianPhone(phone);
+    if (normalized) {
+      let q = db.from("members").select("id, user_id").eq("phone_number", normalized);
+      if (churchId) q = q.eq("church_id", churchId);
+      const { data: byPhone } = await q.maybeSingle();
+      if (byPhone) {
+        // Auto-link if not yet linked
+        if (!byPhone.user_id) {
+          await db.from("members").update({ user_id: userId }).eq("id", byPhone.id).is("user_id", null);
+        }
+        return byPhone.id;
+      }
+    }
+  }
+
+  return null;
 }
 
 // ── Family member search (search within same church) ──
@@ -430,7 +547,7 @@ router.get("/family-search", requireAuth, requireRegisteredUser, async (req: Aut
       return res.json([]);
     }
 
-    const memberId = await resolveCurrentMemberId(req.registeredProfile!.id);
+    const memberId = await resolveCurrentMemberId(req.registeredProfile!.id, req.user.phone, req.user.church_id);
     if (!memberId || !req.user.church_id) {
       return res.status(400).json({ error: "You must be a registered church member to search" });
     }
@@ -444,7 +561,7 @@ router.get("/family-search", requireAuth, requireRegisteredUser, async (req: Aut
 
 // ── Create family member request ──
 
-router.post("/family-requests", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+router.post("/family-requests", requireAuth, requireRegisteredUser, validate(createFamilyRequestSchema), async (req: AuthRequest, res) => {
   try {
     if (!req.user) return res.status(401).json({ error: "Unauthenticated" });
     if (req.user.role !== "member" && req.user.role !== "admin") {
@@ -459,7 +576,7 @@ router.post("/family-requests", requireAuth, requireRegisteredUser, async (req: 
       return res.status(400).json({ error: "relation is required" });
     }
 
-    const memberId = await resolveCurrentMemberId(req.registeredProfile!.id);
+    const memberId = await resolveCurrentMemberId(req.registeredProfile!.id, req.user.phone, req.user.church_id);
     if (!memberId || !req.user.church_id) {
       return res.status(400).json({ error: "You must be a registered church member" });
     }
@@ -493,7 +610,7 @@ router.get("/family-requests", requireAuth, requireRegisteredUser, async (req: A
     }
 
     // Member view: own requests only
-    const memberId = await resolveCurrentMemberId(req.registeredProfile!.id);
+    const memberId = await resolveCurrentMemberId(req.registeredProfile!.id, req.user.phone, req.user.church_id);
     if (!memberId) {
       return res.json([]);
     }
@@ -507,7 +624,7 @@ router.get("/family-requests", requireAuth, requireRegisteredUser, async (req: A
 
 // ── Review (approve/reject) a family request (admin only) ──
 
-router.post("/family-requests/:id/review", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+router.post("/family-requests/:id/review", requireAuth, requireRegisteredUser, validate(reviewDecisionSchema), async (req: AuthRequest, res) => {
   try {
     if (!req.user) return res.status(401).json({ error: "Unauthenticated" });
 
@@ -544,6 +661,11 @@ router.post("/family-requests/:id/review", requireAuth, requireRegisteredUser, a
 // ═══ Refresh Token ═══
 router.post("/refresh", async (req: AuthRequest, res) => {
   try {
+    // CSRF: require custom header to prove this is a same-origin XHR, not a form POST
+    if (!req.headers["x-requested-with"]) {
+      return res.status(403).json({ error: "Missing X-Requested-With header" });
+    }
+
     const refreshToken = req.cookies?.refresh_token;
     if (!refreshToken || typeof refreshToken !== "string") {
       return res.status(401).json({ error: "No refresh token" });
@@ -551,7 +673,7 @@ router.post("/refresh", async (req: AuthRequest, res) => {
 
     // Clean up stale cookies that may exist at the wrong path from a prior deploy
     const isProduction = process.env.NODE_ENV === "production";
-    res.clearCookie("refresh_token", { path: "/api/auth", httpOnly: true, secure: isProduction, sameSite: "lax" });
+    res.clearCookie("refresh_token", { path: "/api/auth", httpOnly: true, secure: isProduction, sameSite: "strict" });
 
     const result = await rotateRefreshToken(refreshToken);
     if (!result) {
@@ -560,7 +682,7 @@ router.post("/refresh", async (req: AuthRequest, res) => {
         path: "/api/auth/refresh",
         httpOnly: true,
         secure: isProduction,
-        sameSite: "lax",
+        sameSite: "strict",
       });
       return res.status(401).json({ error: "Invalid or expired refresh token" });
     }
@@ -589,7 +711,7 @@ router.post("/refresh", async (req: AuthRequest, res) => {
           path: "/api/auth/refresh",
           httpOnly: true,
           secure: isProduction,
-          sameSite: "lax",
+          sameSite: "strict",
         });
         return res.status(403).json({ error: "Your church account has been deactivated" });
       }
@@ -601,18 +723,19 @@ router.post("/refresh", async (req: AuthRequest, res) => {
         email: user.email || "",
         phone: user.phone_number || "",
         role: user.role || "member",
-        church_id: user.church_id || "",
+        // SH-008: Use refresh token's stored church_id to prevent session tenant drift
+        church_id: result.churchId || user.church_id || "",
         aud: "authenticated",
         iss: "shalom-app",
       },
       JWT_SECRET,
-      { expiresIn: "7d" },
+      { expiresIn: "30m" },
     );
 
     res.cookie("refresh_token", result.newToken, {
       httpOnly: true,
       secure: isProduction,
-      sameSite: "lax",
+      sameSite: "strict",
       path: "/api/auth/refresh",
       expires: result.expiresAt,
     });
@@ -624,7 +747,7 @@ router.post("/refresh", async (req: AuthRequest, res) => {
 });
 
 // ═══ Join church by code — auto-link pre-registered member ═══
-router.post("/join-church", requireAuth, async (req: AuthRequest, res) => {
+router.post("/join-church", requireAuth, validate(joinChurchSchema), async (req: AuthRequest, res) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: "Unauthenticated" });
@@ -665,13 +788,150 @@ router.post("/refresh/revoke", async (req: AuthRequest, res) => {
       path: "/api/auth/refresh",
       httpOnly: true,
       secure: isProduction,
-      sameSite: "lax",
+      sameSite: "strict",
     });
     // Also clear any stale cookie at the old path
-    res.clearCookie("refresh_token", { path: "/api/auth", httpOnly: true, secure: isProduction, sameSite: "lax" });
+    res.clearCookie("refresh_token", { path: "/api/auth", httpOnly: true, secure: isProduction, sameSite: "strict" });
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: safeErrorMessage(err, "Logout failed") });
+  }
+});
+
+// ── GET /auth/my-churches — list all churches the user belongs to ──
+router.get("/my-churches", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const userId = req.user!.id;
+    const isSuperAdmin = req.user!.role === "super_admin";
+
+    if (isSuperAdmin) {
+      // Super admins see all churches
+      const { data: allChurches, error } = await db
+        .from("churches")
+        .select("id, name, church_code, logo_url")
+        .is("deleted_at", null)
+        .order("name", { ascending: true });
+      if (error) throw error;
+      return res.json({
+        churches: (allChurches || []).map((c: any) => ({
+          church_id: c.id,
+          church_name: c.name,
+          church_code: c.church_code,
+          logo_url: c.logo_url,
+          role: "super_admin",
+        })),
+      });
+    }
+
+    // Regular users: query junction table with church info
+    const { data: memberships, error } = await db
+      .from("user_church_memberships")
+      .select("church_id, role, churches(name, church_code, logo_url)")
+      .eq("user_id", userId)
+      .eq("is_active", true)
+      .order("joined_at", { ascending: true });
+
+    if (error) throw error;
+
+    return res.json({
+      churches: (memberships || []).map((m: any) => ({
+        church_id: m.church_id,
+        church_name: m.churches?.name || "",
+        church_code: m.churches?.church_code || "",
+        logo_url: m.churches?.logo_url || "",
+        role: m.role || "member",
+      })),
+    });
+  } catch (err: any) {
+    logger.error({ err: err?.message, userId: req.user?.id }, "my-churches error");
+    return res.status(500).json({ error: "Failed to load churches" });
+  }
+});
+
+// ── Personal Data Export (DPDP Act 2023 compliance — right to portability) ──
+router.get("/export-my-data", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: "Unauthenticated" });
+    }
+
+    const userEmail = req.user.email || "";
+    const userPhone = req.user.phone || "";
+    if (!userEmail && !userPhone) {
+      return res.status(403).json({ error: "No email or phone linked to your account." });
+    }
+
+    const dashboard = await getMemberDashboardByEmail(userEmail, userPhone);
+    if (!dashboard) {
+      return res.status(403).json({ error: "No member record found for this account." });
+    }
+
+    const exportData = {
+      exported_at: new Date().toISOString(),
+      format_version: "1.0",
+      profile: {
+        full_name: dashboard.profile?.full_name || null,
+        email: dashboard.profile?.email || null,
+        phone: dashboard.profile?.phone_number || null,
+        role: dashboard.profile?.role || null,
+      },
+      member: dashboard.member ? {
+        membership_id: dashboard.member.membership_id,
+        full_name: dashboard.member.full_name,
+        email: dashboard.member.email,
+        phone_number: dashboard.member.phone_number,
+        alt_phone_number: dashboard.member.alt_phone_number,
+        address: dashboard.member.address,
+        gender: dashboard.member.gender,
+        dob: dashboard.member.dob,
+        occupation: dashboard.member.occupation,
+        verification_status: dashboard.member.verification_status,
+        created_at: dashboard.member.created_at,
+      } : null,
+      church: dashboard.church ? {
+        name: dashboard.church.name,
+        church_code: (dashboard.church as any).church_code || null,
+        address: dashboard.church.address,
+        location: (dashboard.church as any).location || null,
+      } : null,
+      family_members: (dashboard.family_members || []).map((fm: any) => ({
+        full_name: fm.full_name,
+        relation: fm.relation,
+        gender: fm.gender,
+        age: fm.age,
+        dob: fm.dob,
+      })),
+      subscriptions: (dashboard.subscriptions || []).map((s: any) => ({
+        plan_name: s.plan_name,
+        amount: s.amount,
+        billing_cycle: s.billing_cycle,
+        status: s.status,
+        start_date: s.start_date,
+        next_payment_date: s.next_payment_date,
+        person_name: s.person_name,
+      })),
+      payments: (dashboard.receipts || []).map((p: any) => ({
+        amount: p.amount,
+        payment_method: p.payment_method,
+        payment_status: p.payment_status,
+        payment_date: p.payment_date,
+        transaction_id: p.transaction_id,
+        receipt_number: p.receipt_number,
+        person_name: p.person_name,
+      })),
+      donations_summary: dashboard.donations || null,
+    };
+
+    await persistAuditLog(req, "member.data_export", "member", dashboard.member?.id, {
+      format: "json",
+    });
+
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Content-Disposition", `attachment; filename="my-data-${new Date().toISOString().slice(0, 10)}.json"`);
+    return res.json(exportData);
+  } catch (err: any) {
+    logger.error({ err: err?.message, userId: req.user?.id }, "data export failed");
+    return res.status(500).json({ error: safeErrorMessage(err, "Failed to export data") });
   }
 });
 

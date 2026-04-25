@@ -265,4 +265,68 @@ export function startScheduledJobs() {
   });
 
   logger.info("Scheduled jobs initialized (expired event cleanup: daily 02:00 UTC)");
+
+  // 7.2: Webhook events table cleanup: weekly on Sundays at 03:00 UTC
+  // Deletes processed webhook events older than 90 days to prevent unbounded table growth
+  cron.schedule("0 3 * * 0", async () => {
+    const release = await tryAdvisoryLock("cron:webhook_events_cleanup").catch(() => null);
+    if (!release) {
+      logger.info("cron: webhook events cleanup already in progress, skipping");
+      return;
+    }
+    logger.info("cron: webhook events cleanup starting");
+    try {
+      const { rowCount } = await pool.query(
+        "DELETE FROM razorpay_webhook_events WHERE created_at < NOW() - INTERVAL '90 days'"
+      );
+      logger.info({ deleted: rowCount }, "cron: webhook events cleanup complete");
+      jobHealth["webhook_events_cleanup"] = { lastRun: new Date().toISOString(), status: "ok" };
+    } catch (err) {
+      logger.error({ err }, "cron: webhook events cleanup failed");
+      jobHealth["webhook_events_cleanup"] = { lastRun: new Date().toISOString(), status: "error" };
+    } finally {
+      await release();
+    }
+  });
+
+  logger.info("Scheduled jobs initialized (webhook events cleanup: weekly Sunday 03:00 UTC)");
+
+  // 1.4: Job queue + notification_deliveries cleanup: daily at 02:30 UTC
+  // Prevents unbounded table growth that degrades query performance over time
+  cron.schedule("30 2 * * *", async () => {
+    const release = await tryAdvisoryLock("cron:data_cleanup").catch(() => null);
+    if (!release) {
+      logger.info("cron: data cleanup already in progress, skipping");
+      return;
+    }
+    logger.info("cron: data cleanup starting");
+    try {
+      // Delete completed/failed jobs older than 7 days
+      const { rowCount: jobsDeleted } = await pool.query(
+        `DELETE FROM job_queue
+         WHERE status IN ('completed', 'failed')
+           AND created_at < NOW() - INTERVAL '7 days'`
+      );
+
+      // Delete old notification_deliveries older than 30 days (only terminal statuses)
+      const { rowCount: deliveriesDeleted } = await pool.query(
+        `DELETE FROM notification_deliveries
+         WHERE status IN ('sent', 'delivered', 'failed', 'cancelled')
+           AND created_at < NOW() - INTERVAL '30 days'`
+      );
+
+      logger.info(
+        { jobsDeleted, deliveriesDeleted },
+        "cron: data cleanup complete"
+      );
+      jobHealth["data_cleanup"] = { lastRun: new Date().toISOString(), status: "ok" };
+    } catch (err) {
+      logger.error({ err }, "cron: data cleanup failed");
+      jobHealth["data_cleanup"] = { lastRun: new Date().toISOString(), status: "error" };
+    } finally {
+      await release();
+    }
+  });
+
+  logger.info("Scheduled jobs initialized (data cleanup: daily 02:30 UTC)");
 }

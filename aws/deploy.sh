@@ -5,7 +5,7 @@ set -euo pipefail
 # Prerequisites: AWS CLI configured, Docker installed
 
 APP_NAME="${APP_NAME:-shalom}"
-REGION="${AWS_REGION:-us-east-1}"
+REGION="${AWS_REGION:-ap-south-1}"
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 ECR_URI="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/${APP_NAME}-backend"
 STACK_NAME="${APP_NAME}-stack"
@@ -25,6 +25,14 @@ if [[ -z "${JWT_SECRET:-}" ]]; then
   echo "❌ JWT_SECRET env var is required (min 32 chars)"
   exit 1
 fi
+# Warn about secrets that should be pre-stored in SSM before deploying
+for SECRET_KEY in RAZORPAY_KEY_ID RAZORPAY_KEY_SECRET RAZORPAY_WEBHOOK_SECRET \
+                  TWILIO_ACCOUNT_SID TWILIO_AUTH_TOKEN TWILIO_VERIFY_SERVICE_SID \
+                  VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY SENTRY_DSN; do
+  if ! aws ssm get-parameter --name "/${APP_NAME}/${SECRET_KEY}" --region "$REGION" &>/dev/null; then
+    echo "⚠️  WARNING: SSM parameter /${APP_NAME}/${SECRET_KEY} is not set — ECS task will fail to start"
+  fi
+done
 
 # ── Step 2: Deploy CloudFormation stack ──
 echo ""
@@ -78,6 +86,22 @@ aws ssm put-parameter \
   --overwrite \
   --region "$REGION"
 
+# Store additional secrets if provided as env vars (otherwise must be pre-loaded manually)
+for SECRET_KEY in RAZORPAY_KEY_ID RAZORPAY_KEY_SECRET RAZORPAY_WEBHOOK_SECRET \
+                  TWILIO_ACCOUNT_SID TWILIO_AUTH_TOKEN TWILIO_VERIFY_SERVICE_SID \
+                  TWILIO_MESSAGING_SERVICE_SID VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY SENTRY_DSN; do
+  SECRET_VAL="${!SECRET_KEY:-}"
+  if [[ -n "$SECRET_VAL" ]]; then
+    aws ssm put-parameter \
+      --name "/${APP_NAME}/${SECRET_KEY}" \
+      --value "$SECRET_VAL" \
+      --type SecureString \
+      --overwrite \
+      --region "$REGION"
+    echo "   ✅ Stored ${SECRET_KEY}"
+  fi
+done
+
 # ── Step 5: Run database migration ──
 echo ""
 echo "🗄️  Running database migration..."
@@ -89,6 +113,14 @@ echo "   psql \"$DATABASE_URL\" -f db/aws_rds_full_schema.sql"
 echo ""
 IMAGE_TAG=$(git rev-parse --short HEAD 2>/dev/null || echo "latest")
 echo "🐳 Building Docker image (tag: ${IMAGE_TAG})..."
+
+# Save previous image tag for rollback
+PREV_IMAGE_TAG=$(aws ecs describe-services \
+  --cluster "${APP_NAME}-cluster" \
+  --services "${APP_NAME}-service" \
+  --query "services[0].taskDefinition" \
+  --output text --region "$REGION" 2>/dev/null || echo "")
+
 docker build -t "${APP_NAME}-backend:${IMAGE_TAG}" .
 
 echo ""
@@ -116,7 +148,7 @@ echo "🏗️  Building frontend..."
 FRONTEND_BUCKET="${APP_NAME}-frontend-${ACCOUNT_ID}"
 
 cd frontend
-VITE_API_URL="$ALB_URL" npm run build
+VITE_API_URL="https://shalomapp.in" npm run build
 aws s3 sync dist/ "s3://${FRONTEND_BUCKET}/" --delete
 cd ..
 
@@ -140,3 +172,9 @@ echo "║   Frontend: ${CF_URL}"
 echo "║   Backend:  ${ALB_URL}"
 echo "║   Database: ${RDS_ENDPOINT}"
 echo "╚══════════════════════════════════════════╝"
+
+if [[ -n "$PREV_IMAGE_TAG" ]]; then
+  echo ""
+  echo "📋 Rollback info saved. To rollback backend:"
+  echo "   aws ecs update-service --cluster ${APP_NAME}-cluster --service ${APP_NAME}-service --task-definition ${PREV_IMAGE_TAG} --region ${REGION}"
+fi

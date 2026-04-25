@@ -1,3 +1,4 @@
+import { UUID_REGEX } from "../utils/validation";
 import { Router } from "express";
 import { AuthRequest, requireAuth } from "../middleware/requireAuth";
 import { requireRegisteredUser } from "../middleware/requireRegisteredUser";
@@ -10,11 +11,21 @@ import {
   updateAdBanner,
   deleteAdBanner,
 } from "../services/adBannerService";
+import { validate, createAdBannerSchema } from "../utils/zodSchemas";
 
 const router = Router();
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function requireSuperAdmin(req: AuthRequest): boolean {
+// BNR-001: Validate URLs are HTTP(S) to prevent javascript:/data: XSS
+function isValidHttpUrl(str: string): boolean {
+  try {
+    const url = new URL(str);
+    return url.protocol === "https:" || url.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
+function isSuperAdmin(req: AuthRequest): boolean {
   return Boolean(req.user && isSuperAdminEmail(req.user.email, req.user.phone));
 }
 
@@ -26,6 +37,14 @@ router.get("/", requireAuth, requireRegisteredUser, async (req: AuthRequest, res
     if (!["diocese", "church"].includes(scope) || !UUID_REGEX.test(scopeId)) {
       return res.status(400).json({ error: "scope (diocese|church) and scope_id are required" });
     }
+
+    // BNR-002: Non-super-admins can only view banners for their own church
+    if (!isSuperAdmin(req)) {
+      if (scope === "church" && scopeId !== req.user?.church_id) {
+        return res.status(403).json({ error: "Cannot view banners for other churches" });
+      }
+    }
+
     const banners = await listAdBanners(scope as "diocese" | "church", scopeId);
     return res.json(banners);
   } catch (err: any) {
@@ -34,14 +53,22 @@ router.get("/", requireAuth, requireRegisteredUser, async (req: AuthRequest, res
 });
 
 // Create banner (SuperAdmin only)
-router.post("/", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+router.post("/", requireAuth, requireRegisteredUser, validate(createAdBannerSchema), async (req: AuthRequest, res) => {
   try {
-    if (!requireSuperAdmin(req)) return res.status(403).json({ error: "SuperAdmin access required" });
+    if (!isSuperAdmin(req)) return res.status(403).json({ error: "SuperAdmin access required" });
 
     const { scope, scope_id, image_url, link_url, sort_order, media_type, position, start_date, end_date } = req.body;
     if (!["diocese", "church"].includes(scope)) return res.status(400).json({ error: "scope must be diocese or church" });
     if (!UUID_REGEX.test(scope_id)) return res.status(400).json({ error: "Invalid scope_id" });
     if (typeof image_url !== "string" || !image_url.trim()) return res.status(400).json({ error: "image_url is required" });
+
+    // BNR-001: Validate URL protocols
+    if (!isValidHttpUrl(image_url.trim())) {
+      return res.status(400).json({ error: "image_url must be a valid HTTP(S) URL" });
+    }
+    if (typeof link_url === "string" && link_url.trim() && !isValidHttpUrl(link_url.trim())) {
+      return res.status(400).json({ error: "link_url must be a valid HTTP(S) URL" });
+    }
 
     const banner = await createAdBanner({
       scope,
@@ -65,12 +92,21 @@ router.post("/", requireAuth, requireRegisteredUser, async (req: AuthRequest, re
 // Update banner
 router.patch("/:id", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
   try {
-    if (!requireSuperAdmin(req)) return res.status(403).json({ error: "SuperAdmin access required" });
+    if (!isSuperAdmin(req)) return res.status(403).json({ error: "SuperAdmin access required" });
 
     const id = String(req.params.id || "").trim();
     if (!UUID_REGEX.test(id)) return res.status(400).json({ error: "Invalid banner ID" });
 
     const { image_url, link_url, sort_order, is_active, media_type, position, start_date, end_date } = req.body;
+
+    // BNR-001: Validate URL protocols on update too
+    if (typeof image_url === "string" && image_url.trim() && !isValidHttpUrl(image_url.trim())) {
+      return res.status(400).json({ error: "image_url must be a valid HTTP(S) URL" });
+    }
+    if (typeof link_url === "string" && link_url.trim() && !isValidHttpUrl(link_url.trim())) {
+      return res.status(400).json({ error: "link_url must be a valid HTTP(S) URL" });
+    }
+
     const banner = await updateAdBanner(id, {
       image_url: typeof image_url === "string" ? image_url : undefined,
       media_type: ["image", "video", "gif"].includes(media_type) ? media_type : undefined,
@@ -91,7 +127,7 @@ router.patch("/:id", requireAuth, requireRegisteredUser, async (req: AuthRequest
 // Delete banner
 router.delete("/:id", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
   try {
-    if (!requireSuperAdmin(req)) return res.status(403).json({ error: "SuperAdmin access required" });
+    if (!isSuperAdmin(req)) return res.status(403).json({ error: "SuperAdmin access required" });
 
     const id = String(req.params.id || "").trim();
     if (!UUID_REGEX.test(id)) return res.status(400).json({ error: "Invalid banner ID" });

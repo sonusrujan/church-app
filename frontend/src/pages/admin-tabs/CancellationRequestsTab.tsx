@@ -11,12 +11,14 @@ import { useI18n } from "../../i18n";
 
 export default function CancellationRequestsTab() {
   const { t } = useI18n();
-  const { token, busyKey, setNotice, withAuthRequest, openOperationConfirmDialog } = useApp();
+  const { token, busyKey, setNotice, withAuthRequest, openOperationConfirmDialog, refreshAdminCounts } = useApp();
 
   const [requests, setRequests] = useState<CancellationRequestRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [filter, setFilter] = useState<"pending" | "all">("pending");
+  const [rejectReasons, setRejectReasons] = useState<Record<string, string>>({});
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
 
   const loadRequests = useCallback(async () => {
     if (!token) return;
@@ -35,11 +37,18 @@ export default function CancellationRequestsTab() {
   useEffect(() => { void loadRequests(); }, [loadRequests]);
 
   async function review(id: string, decision: "approved" | "rejected") {
+    const body: Record<string, string> = { decision };
+    if (decision === "rejected" && rejectReasons[id]?.trim()) {
+      body.review_note = rejectReasons[id].trim();
+    }
     await withAuthRequest("review-cancellation", async () => {
       await apiRequest(`/api/requests/cancellation-requests/${encodeURIComponent(id)}/review`, {
-        method: "POST", token, body: { decision },
+        method: "POST", token, body,
       });
+      setRejectingId(null);
+      setRejectReasons((prev) => { const next = { ...prev }; delete next[id]; return next; });
       void loadRequests();
+      void refreshAdminCounts();
     }, t("adminTabs.cancellationRequests.successReviewed", { decision }));
   }
 
@@ -71,7 +80,7 @@ export default function CancellationRequestsTab() {
               {req.subscription ? <span className="muted">{t("adminTabs.cancellationRequests.labelSubscription")} {req.subscription.plan_name} — {formatAmount(req.subscription.amount)}</span> : null}
               <span className="muted">{t("adminTabs.cancellationRequests.labelRequested")} {formatDate(req.created_at)}</span>
               {req.status === "pending" ? (
-                <div className="actions-row" style={{ marginTop: 4 }}>
+                <div className="actions-row" style={{ marginTop: 4, flexWrap: "wrap" }}>
                   <button className="btn btn-primary" onClick={() => {
                     openOperationConfirmDialog(
                       t("adminTabs.cancellationRequests.approveCancellation"),
@@ -80,7 +89,20 @@ export default function CancellationRequestsTab() {
                       () => review(req.id, "approved"),
                     );
                   }} disabled={busyKey === "review-cancellation"}>{t("adminTabs.cancellationRequests.approveCancellation")}</button>
-                  <button className="btn" onClick={() => review(req.id, "rejected")} disabled={busyKey === "review-cancellation"}>{t("adminTabs.cancellationRequests.reject")}</button>
+                  {rejectingId === req.id ? (
+                    <>
+                      <input
+                        value={rejectReasons[req.id] || ""}
+                        onChange={(e) => setRejectReasons((prev) => ({ ...prev, [req.id]: e.target.value }))}
+                        placeholder={t("adminTabs.cancellationRequests.rejectReasonPlaceholder")}
+                        style={{ flex: 1, padding: "6px 10px", borderRadius: 8, border: "1px solid var(--border-color, #ddd)", fontSize: "0.85rem", minWidth: 160 }}
+                      />
+                      <button className="btn btn-danger" onClick={() => review(req.id, "rejected")} disabled={busyKey === "review-cancellation"}>{t("adminTabs.cancellationRequests.confirmReject")}</button>
+                      <button className="btn" onClick={() => setRejectingId(null)}>{t("common.cancel")}</button>
+                    </>
+                  ) : (
+                    <button className="btn" onClick={() => setRejectingId(req.id)} disabled={busyKey === "review-cancellation"}>{t("adminTabs.cancellationRequests.reject")}</button>
+                  )}
                 </div>
               ) : null}
               {req.review_note ? <span className="muted">{t("adminTabs.cancellationRequests.labelNote")} {req.review_note}</span> : null}

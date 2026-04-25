@@ -1,3 +1,4 @@
+import { UUID_REGEX } from "../utils/validation";
 import { Router } from "express";
 import { AuthRequest, requireAuth } from "../middleware/requireAuth";
 import { requireRegisteredUser } from "../middleware/requireRegisteredUser";
@@ -30,7 +31,6 @@ import {
 } from "../services/paymentService";
 
 const router = Router();
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function paramStr(val: string | string[]): string {
   return Array.isArray(val) ? val[0] : val;
@@ -239,11 +239,15 @@ router.post("/platform-config", requireAuth, requireRegisteredUser, requireSuper
     const updated = await updatePlatformConfig({
       key_id: typeof req.body?.key_id === "string" ? req.body.key_id : undefined,
       key_secret: typeof req.body?.key_secret === "string" ? req.body.key_secret : undefined,
+      public_donation_fee_percent: typeof req.body?.public_donation_fee_percent === "number"
+        ? req.body.public_donation_fee_percent
+        : undefined,
     });
 
     logSuperAdminAudit(req, "platform_config.update", {
       key_id_set: Boolean(typeof req.body?.key_id === "string" && req.body.key_id.trim()),
       key_secret_rotated: Boolean(typeof req.body?.key_secret === "string" && req.body.key_secret.trim()),
+      public_donation_fee_percent: req.body?.public_donation_fee_percent,
     });
 
     return res.json(updated);

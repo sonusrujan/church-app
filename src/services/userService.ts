@@ -1,4 +1,4 @@
-import { db } from "./dbClient";
+import { db, getClient } from "./dbClient";
 import { logger } from "../utils/logger";
 import { computeNextDueDate, isDueSubscription } from "../utils/subscriptionHelpers";
 import { normalizeIndianPhone } from "../utils/phone";
@@ -11,6 +11,7 @@ import {
 import { createSubscription } from "./subscriptionService";
 import { buildPaymentReceiptDownloadPath } from "./receiptService";
 import { getChurchSubscription, getChurchSaaSSettings } from "./churchSubscriptionService";
+import { monthLabel } from "./subscriptionMonthlyDuesService";
 
 export interface SyncUserProfileInput {
   id: string;
@@ -36,6 +37,9 @@ export interface UpdateUserProfileInput {
   dark_mode?: boolean;
   gender?: string;
   dob?: string;
+  occupation?: string;
+  confirmation_taken?: boolean;
+  age?: number;
 }
 
 export interface AddFamilyMemberInput {
@@ -69,6 +73,8 @@ interface ChurchRow {
   location: string | null;
   contact_phone: string | null;
   created_at: string;
+  platform_fee_enabled?: boolean;
+  platform_fee_percentage?: number;
 }
 
 interface MemberRow {
@@ -119,9 +125,13 @@ interface DueSubscriptionRow {
   family_member_id: string | null;
   person_name: string;
   amount: number;
+  monthly_amount: number;
   billing_cycle: string;
   next_payment_date: string;
   status: string;
+  pending_month_count: number;
+  pending_months: string[];
+  pending_month_labels: string[];
 }
 
 interface PaymentRow {
@@ -220,105 +230,103 @@ async function listMemberPayments(memberId: string | null | undefined) {
     return { data: [] as PaymentRow[], error: null as any };
   }
 
-  // 1. Direct payments for this member
-  const result = await db
-    .from("payments")
-    .select(
-      "id, member_id, subscription_id, amount, payment_method, transaction_id, payment_status, payment_date, receipt_number, payment_category"
-    )
-    .eq("member_id", memberId)
-    .order("payment_date", { ascending: false });
-
-  const directPayments = (result.data || []) as Array<Omit<PaymentRow, "receipt_download_path">>;
-  const seenIds = new Set(directPayments.map((p) => p.id));
-
-  // 2. Payments linked to subscriptions owned by this member (family member payments)
-  //    These are payments where subscription.member_id = this member (the head)
-  //    but payment.member_id may be a different member (the family member).
-  const { data: ownedSubs } = await db
-    .from("subscriptions")
-    .select("id")
-    .eq("member_id", memberId)
-    .not("family_member_id", "is", null);
-
-  if (ownedSubs?.length) {
-    const subIds = ownedSubs.map((s: any) => s.id);
-    const { data: familyPayments } = await db
+  // Parallelise all independent lookups to reduce DB round-trips
+  const [result, { data: ownedSubs }, { data: familyMembers }, { data: asDependentLinks }] = await Promise.all([
+    // 1. Direct payments for this member
+    db
       .from("payments")
       .select(
         "id, member_id, subscription_id, amount, payment_method, transaction_id, payment_status, payment_date, receipt_number, payment_category"
       )
-      .in("subscription_id", subIds)
-      .order("payment_date", { ascending: false });
-
-    for (const fp of familyPayments || []) {
-      if (!seenIds.has(fp.id)) {
-        directPayments.push(fp as any);
-        seenIds.add(fp.id);
-      }
-    }
-  }
-
-  // 3. Also check payments where member is a family member of this head
-  //    (payments recorded directly against a linked family member's member_id)
-  const { data: familyMembers } = await db
-    .from("family_members")
-    .select("linked_to_member_id")
-    .eq("member_id", memberId)
-    .not("linked_to_member_id", "is", null);
-
-  if (familyMembers?.length) {
-    const linkedMemberIds = familyMembers
-      .map((fm: any) => fm.linked_to_member_id)
-      .filter(Boolean) as string[];
-
-    if (linkedMemberIds.length) {
-      const { data: linkedPayments } = await db
-        .from("payments")
-        .select(
-          "id, member_id, subscription_id, amount, payment_method, transaction_id, payment_status, payment_date, receipt_number, payment_category"
-        )
-        .in("member_id", linkedMemberIds)
-        .order("payment_date", { ascending: false });
-
-      for (const lp of linkedPayments || []) {
-        if (!seenIds.has(lp.id)) {
-          directPayments.push(lp as any);
-          seenIds.add(lp.id);
-        }
-      }
-    }
-  }
-
-  // 4. Payments for subscriptions where this member IS a dependent (family member)
-  //    e.g. head paid for this member's family subscription
-  const { data: asDependentLinks } = await db
-    .from("family_members")
-    .select("id")
-    .eq("linked_to_member_id", memberId);
-
-  if (asDependentLinks?.length) {
-    const fmIds = asDependentLinks.map((fm: any) => fm.id) as string[];
-    const { data: depSubs } = await db
+      .eq("member_id", memberId)
+      .order("payment_date", { ascending: false }),
+    // 2. Subscriptions owned by this member with family members
+    db
       .from("subscriptions")
       .select("id")
-      .in("family_member_id", fmIds);
+      .eq("member_id", memberId)
+      .not("family_member_id", "is", null),
+    // 3. Family members linked to other member records
+    db
+      .from("family_members")
+      .select("linked_to_member_id")
+      .eq("member_id", memberId)
+      .not("linked_to_member_id", "is", null),
+    // 4. Family member links where this member IS the dependent
+    db
+      .from("family_members")
+      .select("id")
+      .eq("linked_to_member_id", memberId),
+  ]);
 
-    if (depSubs?.length) {
-      const depSubIds = depSubs.map((s: any) => s.id) as string[];
-      const { data: depPayments } = await db
-        .from("payments")
-        .select(
-          "id, member_id, subscription_id, amount, payment_method, transaction_id, payment_status, payment_date, receipt_number, payment_category"
-        )
-        .in("subscription_id", depSubIds)
-        .order("payment_date", { ascending: false });
+  const directPayments = (result.data || []) as Array<Omit<PaymentRow, "receipt_download_path">>;
+  const seenIds = new Set(directPayments.map((p) => p.id));
 
-      for (const dp of depPayments || []) {
-        if (!seenIds.has(dp.id)) {
-          directPayments.push(dp as any);
-          seenIds.add(dp.id);
-        }
+  // Build parallel payment queries for related records
+  const relatedQueries: Promise<{ data: any[] | null }>[] = [];
+
+  // Family subscription payments
+  if (ownedSubs?.length) {
+    const subIds = ownedSubs.map((s: any) => s.id);
+    relatedQueries.push(
+      Promise.resolve(
+        db
+          .from("payments")
+          .select(
+            "id, member_id, subscription_id, amount, payment_method, transaction_id, payment_status, payment_date, receipt_number, payment_category"
+          )
+          .in("subscription_id", subIds)
+          .order("payment_date", { ascending: false })
+      )
+    );
+  }
+
+  // Linked family member payments
+  const linkedMemberIds = (familyMembers || [])
+    .map((fm: any) => fm.linked_to_member_id)
+    .filter(Boolean) as string[];
+  if (linkedMemberIds.length) {
+    relatedQueries.push(
+      Promise.resolve(
+        db
+          .from("payments")
+          .select(
+            "id, member_id, subscription_id, amount, payment_method, transaction_id, payment_status, payment_date, receipt_number, payment_category"
+          )
+          .in("member_id", linkedMemberIds)
+          .order("payment_date", { ascending: false })
+      )
+    );
+  }
+
+  // Dependent subscription payments
+  if (asDependentLinks?.length) {
+    const fmIds = asDependentLinks.map((fm: any) => fm.id) as string[];
+    relatedQueries.push(
+      db
+        .from("subscriptions")
+        .select("id")
+        .in("family_member_id", fmIds)
+        .then(async ({ data: depSubs }) => {
+          if (!depSubs?.length) return { data: [] };
+          return db
+            .from("payments")
+            .select(
+              "id, member_id, subscription_id, amount, payment_method, transaction_id, payment_status, payment_date, receipt_number, payment_category"
+            )
+            .in("subscription_id", depSubs.map((s: any) => s.id))
+            .order("payment_date", { ascending: false });
+        })
+    );
+  }
+
+  // Merge all related payments
+  const relatedResults = await Promise.all(relatedQueries);
+  for (const r of relatedResults) {
+    for (const p of r.data || []) {
+      if (!seenIds.has(p.id)) {
+        directPayments.push(p as any);
+        seenIds.add(p.id);
       }
     }
   }
@@ -402,12 +410,14 @@ export async function getRegisteredUserContext(authUserId: string, authEmail: st
     const byPhone = await getRegisteredUserByPhone(authPhone);
     if (byPhone) {
       if (!byPhone.auth_user_id) {
+        // Atomic update: only link if auth_user_id is still null (prevents race condition)
         const { data: linked, error: linkError } = await db
           .from("users")
           .update({ auth_user_id: authUserId })
           .eq("id", byPhone.id)
+          .is("auth_user_id", null)
           .select("id, auth_user_id, email, phone_number, full_name, avatar_url, role, church_id")
-          .single<UserProfileRow>();
+          .maybeSingle<UserProfileRow>();
 
         if (linkError) {
           logger.error(
@@ -417,38 +427,17 @@ export async function getRegisteredUserContext(authUserId: string, authEmail: st
           throw linkError;
         }
 
-        return linked;
+        if (linked) return linked;
+        // If linked is null, another request already claimed this row — re-fetch
+        const refetched = await getRegisteredUserByPhone(authPhone);
+        if (refetched) return refetched;
       }
       return byPhone;
     }
   }
 
-  // Fallback to email lookup
-  const byEmail = await getRegisteredUserByEmail(authEmail);
-  if (!byEmail) {
-    return null;
-  }
-
-  if (!byEmail.auth_user_id) {
-    const { data: linked, error: linkError } = await db
-      .from("users")
-      .update({ auth_user_id: authUserId })
-      .eq("id", byEmail.id)
-      .select("id, auth_user_id, email, phone_number, full_name, avatar_url, role, church_id")
-      .single<UserProfileRow>();
-
-    if (linkError) {
-      logger.error(
-        { err: linkError, authUserId, email: authEmail },
-        "getRegisteredUserContext failed to link auth_user_id"
-      );
-      throw linkError;
-    }
-
-    return linked;
-  }
-
-  return byEmail;
+  // Phone-only auth: if auth_user_id and phone both miss, user doesn't exist
+  return null;
 }
 
 export async function syncUserProfile(input: SyncUserProfileInput) {
@@ -515,9 +504,14 @@ export async function getUserProfileById(userId: string) {
 }
 
 export async function getMemberDashboardByEmail(email: string, phone?: string) {
-  let profile = await getRegisteredUserByEmail(email);
-  if (!profile && phone) {
+  // Phone-primary lookup on users table
+  let profile: UserProfileRow | null = null;
+  if (phone) {
     profile = await getRegisteredUserByPhone(phone);
+  }
+  if (!profile) {
+    // Last resort: try email on users table (user's own row, not member matching)
+    profile = await getRegisteredUserByEmail(email);
   }
   if (!profile) {
     return null;
@@ -526,7 +520,7 @@ export async function getMemberDashboardByEmail(email: string, phone?: string) {
   const churchPromise = profile.church_id
     ? db
         .from("churches")
-        .select("id, church_code, name, address, location, contact_phone, logo_url, created_at")
+        .select("id, church_code, name, address, location, contact_phone, logo_url, created_at, platform_fee_enabled, platform_fee_percentage")
         .eq("id", profile.church_id)
         .maybeSingle<ChurchRow>()
     : Promise.resolve({ data: null, error: null } as { data: ChurchRow | null; error: any });
@@ -534,7 +528,7 @@ export async function getMemberDashboardByEmail(email: string, phone?: string) {
   const byUserMember = await db
     .from("members")
     .select(
-      "id, user_id, full_name, email, phone_number, alt_phone_number, address, membership_id, verification_status, subscription_amount, church_id, created_at, gender, dob"
+      "id, user_id, full_name, email, phone_number, alt_phone_number, address, membership_id, verification_status, subscription_amount, church_id, created_at, gender, dob, occupation, confirmation_taken, age"
     )
     .eq("user_id", profile.id)
     .maybeSingle<MemberRow>();
@@ -545,51 +539,56 @@ export async function getMemberDashboardByEmail(email: string, phone?: string) {
   }
 
   let member = byUserMember.data;
-  if (!member) {
-    const byEmailMember = await db
-      .from("members")
-      .select(
-        "id, user_id, full_name, email, phone_number, alt_phone_number, address, membership_id, verification_status, subscription_amount, church_id, created_at, gender, dob"
-      )
-      .ilike("email", profile.email)
-      .maybeSingle<MemberRow>();
 
-    if (byEmailMember.error) {
-      logger.error(
-        { err: byEmailMember.error, email: profile.email },
-        "dashboard member by email failed"
-      );
-      throw byEmailMember.error;
-    }
-
-    member = byEmailMember.data;
-  }
-
-  // Step 3: Try phone lookup on members table
+  // Step 2: Try phone lookup on members table — scoped to user's church to prevent cross-church collision
   if (!member && phone) {
     const normalizedPhone = normalizeIndianPhone(phone);
     if (normalizedPhone) {
-      const { data: byPhoneMember } = await db
+      let phoneQuery = db
         .from("members")
         .select(
-          "id, user_id, full_name, email, phone_number, alt_phone_number, address, membership_id, verification_status, subscription_amount, church_id, created_at, gender, dob"
+          "id, user_id, full_name, email, phone_number, alt_phone_number, address, membership_id, verification_status, subscription_amount, church_id, created_at, gender, dob, occupation, confirmation_taken, age"
         )
-        .eq("phone_number", normalizedPhone)
-        .maybeSingle<MemberRow>();
+        .eq("phone_number", normalizedPhone);
+      // Scope to user's church if known, preventing cross-church member collision
+      if (profile.church_id) {
+        phoneQuery = phoneQuery.eq("church_id", profile.church_id);
+      }
+      const { data: byPhoneMember } = await phoneQuery.maybeSingle<MemberRow>();
 
       if (byPhoneMember) {
         member = byPhoneMember;
-        // Link the member to this user if not already linked
+        // Link the member to this user if not already linked (atomic: only if still null)
         if (!byPhoneMember.user_id && profile) {
-          await db.from("members").update({ user_id: profile.id }).eq("id", byPhoneMember.id);
-          member = { ...byPhoneMember, user_id: profile.id };
+          const { data: linked } = await db
+            .from("members")
+            .update({ user_id: profile.id })
+            .eq("id", byPhoneMember.id)
+            .is("user_id", null)
+            .select("id, user_id, full_name, email, phone_number, alt_phone_number, address, membership_id, verification_status, subscription_amount, church_id, created_at, gender, dob, occupation, confirmation_taken, age")
+            .maybeSingle<MemberRow>();
+          if (linked) {
+            member = linked;
+          } else {
+            logger.warn({ memberId: byPhoneMember.id, userId: profile.id }, "Member already linked to another user — skipped auto-link");
+          }
         }
       }
     }
   }
 
-  // Sync user profile FROM member data when user is missing church_id or full_name
-  if (member) {
+  // Sync user profile FROM member data when user is missing church_id or full_name.
+  // SAFETY: Only sync if the member is actually linked to this user (user_id match)
+  // OR if the phones match. This prevents syncing data from a wrong member found via
+  // email fallback when two different people share the same email.
+  const memberPhoneNormalized = member?.phone_number ? normalizeIndianPhone(member.phone_number) : "";
+  const profilePhoneNormalized = profile.phone_number ? normalizeIndianPhone(profile.phone_number) : "";
+  const isMemberTrustedMatch = member && (
+    member.user_id === profile.id ||
+    (memberPhoneNormalized && profilePhoneNormalized && memberPhoneNormalized === profilePhoneNormalized)
+  );
+
+  if (member && isMemberTrustedMatch) {
     const profileUpdates: Record<string, any> = {};
     if (!profile.church_id && member.church_id) {
       profileUpdates.church_id = member.church_id;
@@ -615,6 +614,11 @@ export async function getMemberDashboardByEmail(email: string, phone?: string) {
         logger.info({ userId: updatedProfile.id, updates: Object.keys(profileUpdates) }, "Synced user profile from member data");
       }
     }
+  } else if (member && !isMemberTrustedMatch) {
+    logger.warn(
+      { userId: profile.id, memberId: member.id, userPhone: profilePhoneNormalized, memberPhone: memberPhoneNormalized },
+      "Member found via fallback but phone mismatch — skipping profile sync to prevent wrong data"
+    );
   }
 
   // profile is guaranteed non-null at this point (we returned early if it was null)
@@ -625,26 +629,18 @@ export async function getMemberDashboardByEmail(email: string, phone?: string) {
   const churchPromiseFinal = profile.church_id
     ? db
         .from("churches")
-        .select("id, church_code, name, address, location, contact_phone, logo_url, created_at")
+        .select("id, church_code, name, address, location, contact_phone, logo_url, created_at, platform_fee_enabled, platform_fee_percentage")
         .eq("id", profile.church_id)
         .maybeSingle<ChurchRow>()
     : Promise.resolve({ data: null, error: null } as { data: ChurchRow | null; error: any });
 
-  // Sync member church_id if it drifted from the user's profile
+  // SEC: Previously this block auto-synced member.church_id to match profile.church_id.
+  // This was a cross-tenant data overwrite vulnerability (SH-013): switching churches
+  // would silently move a member record from Church A to Church B's roster.
+  // Now we only log the drift — the member belongs to its original church.
   if (member && profile.church_id && member.church_id !== profile.church_id) {
-    const { data: updatedMember, error: syncErr } = await db
-      .from("members")
-      .update({ church_id: profile.church_id })
-      .eq("id", member.id)
-      .select(
-        "id, user_id, full_name, email, phone_number, alt_phone_number, address, membership_id, verification_status, subscription_amount, church_id, created_at, gender, dob"
-      )
-      .single<MemberRow>();
-    if (syncErr) {
-      logger.warn({ err: syncErr, memberId: member.id }, "member church_id sync failed");
-    } else if (updatedMember) {
-      member = updatedMember;
-    }
+    logger.info({ memberId: member.id, memberChurch: member.church_id, profileChurch: profile.church_id },
+      "member church_id differs from profile — keeping member in original church");
   }
 
   // No member record found — do NOT auto-create one.
@@ -771,22 +767,55 @@ export async function getMemberDashboardByEmail(email: string, phone?: string) {
   });
   const trackingEvents = subscriptionEvents || [];
 
+  const dueSubscriptionIds = subscriptions.map((s) => s.id);
+  let pendingDueRowsBySubscription = new Map<string, string[]>();
+  if (dueSubscriptionIds.length > 0) {
+    const { data: pendingRows, error: pendingErr } = await db
+      .from("subscription_monthly_dues")
+      .select("subscription_id,due_month")
+      .in("subscription_id", dueSubscriptionIds)
+      .eq("status", "pending")
+      .order("due_month", { ascending: true });
+    if (pendingErr) {
+      logger.warn({ err: pendingErr, memberId: member.id }, "dashboard pending monthly dues query failed");
+    } else {
+      for (const row of pendingRows || []) {
+        const key = (row as { subscription_id: string }).subscription_id;
+        const month = (row as { due_month: string }).due_month;
+        const arr = pendingDueRowsBySubscription.get(key) || [];
+        arr.push(month);
+        pendingDueRowsBySubscription.set(key, arr);
+      }
+    }
+  }
+
   const dueSubscriptions: DueSubscriptionRow[] = subscriptions
-    .filter((subscription) => isDueSubscription(subscription))
-    .map((subscription) => ({
-      subscription_id: subscription.id,
-      family_member_id: subscription.family_member_id || null,
-      person_name: subscription.person_name || primaryPersonName,
-      amount: toAmount(subscription.amount),
-      billing_cycle: subscription.billing_cycle,
-      next_payment_date: subscription.next_payment_date,
-      status: subscription.status,
-    }))
-    .sort(
-      (a, b) =>
-        new Date(a.next_payment_date).getTime() -
-        new Date(b.next_payment_date).getTime()
-    );
+    .filter((subscription) => {
+      const pendingMonths = pendingDueRowsBySubscription.get(subscription.id) || [];
+      if (pendingMonths.length > 0) return true;
+      return isDueSubscription(subscription);
+    })
+    .map((subscription) => {
+      const pendingMonths = pendingDueRowsBySubscription.get(subscription.id) || [];
+      const monthlyAmount = toAmount(subscription.amount);
+      const fallbackDue = isDueSubscription(subscription) ? [subscription.next_payment_date] : [];
+      const effectivePendingMonths = pendingMonths.length ? pendingMonths : fallbackDue;
+      const pendingCount = effectivePendingMonths.length;
+      return {
+        subscription_id: subscription.id,
+        family_member_id: subscription.family_member_id || null,
+        person_name: subscription.person_name || primaryPersonName,
+        amount: monthlyAmount * Math.max(pendingCount, 1),
+        monthly_amount: monthlyAmount,
+        billing_cycle: subscription.billing_cycle,
+        next_payment_date: effectivePendingMonths[0] || subscription.next_payment_date,
+        status: subscription.status,
+        pending_month_count: pendingCount,
+        pending_months: effectivePendingMonths,
+        pending_month_labels: effectivePendingMonths.map(monthLabel),
+      };
+    })
+    .sort((a, b) => new Date(a.next_payment_date).getTime() - new Date(b.next_payment_date).getTime());
 
   const successfulPayments = receipts.filter(
     (payment) => (payment.payment_status || "").toLowerCase() === "success"
@@ -877,16 +906,22 @@ export async function getMemberDashboardByEmail(email: string, phone?: string) {
 
 export interface UpdateFamilyMemberInput {
   email: string;
+  phone?: string;
   family_member_id: string;
   full_name?: string;
   gender?: string;
   relation?: string;
   age?: number;
   dob?: string;
+  address?: string;
+  phone_number?: string;
+  alt_phone_number?: string;
+  occupation?: string;
+  confirmation_taken?: boolean;
 }
 
 export async function updateFamilyMember(input: UpdateFamilyMemberInput) {
-  const dashboard = await getMemberDashboardByEmail(input.email);
+  const dashboard = await getMemberDashboardByEmail(input.email, input.phone);
   if (!dashboard?.member) {
     throw new Error("Member profile not found");
   }
@@ -920,24 +955,72 @@ export async function updateFamilyMember(input: UpdateFamilyMemberInput) {
     patch.dob = trimmedDob;
   }
 
-  if (!Object.keys(patch).length) {
+  if (!Object.keys(patch).length && !input.address && !input.phone_number && !input.alt_phone_number && !input.occupation && input.confirmation_taken === undefined) {
     throw new Error("No fields provided to update");
   }
 
-  const { data, error } = await db
-    .from("family_members")
-    .update(patch)
-    .eq("id", input.family_member_id)
-    .eq("member_id", dashboard.member.id)
-    .select("id, member_id, full_name, gender, relation, age, dob, has_subscription, linked_to_member_id, created_at")
-    .single<FamilyMemberRow>();
+  // Update family_members row (relation, name, gender, age, dob)
+  if (Object.keys(patch).length) {
+    const { data, error } = await db
+      .from("family_members")
+      .update(patch)
+      .eq("id", input.family_member_id)
+      .eq("member_id", dashboard.member.id)
+      .select("id, member_id, full_name, gender, relation, age, dob, has_subscription, linked_to_member_id, created_at")
+      .single<FamilyMemberRow>();
 
-  if (error) {
-    logger.error({ err: error, familyMemberId: input.family_member_id }, "updateFamilyMember failed");
-    throw error;
+    if (error) {
+      logger.error({ err: error, familyMemberId: input.family_member_id }, "updateFamilyMember failed");
+      throw error;
+    }
+
+    // Also update linked member's profile in members table if linked
+    if (data?.linked_to_member_id) {
+      await syncLinkedMemberProfile(data.linked_to_member_id, input, patch);
+    }
+
+    return data;
   }
 
-  return data;
+  // No family_members patch but there are linked-profile-only fields
+  const { data: fm } = await db
+    .from("family_members")
+    .select("id, member_id, full_name, gender, relation, age, dob, has_subscription, linked_to_member_id, created_at")
+    .eq("id", input.family_member_id)
+    .eq("member_id", dashboard.member.id)
+    .single<FamilyMemberRow>();
+
+  if (!fm) throw new Error("Family member not found");
+
+  if (fm.linked_to_member_id) {
+    await syncLinkedMemberProfile(fm.linked_to_member_id, input, {});
+  }
+
+  return fm;
+}
+
+async function syncLinkedMemberProfile(
+  linkedMemberId: string,
+  input: UpdateFamilyMemberInput,
+  familyPatch: Record<string, unknown>,
+) {
+  const memberPatch: Record<string, unknown> = {};
+  if (familyPatch.full_name) memberPatch.full_name = familyPatch.full_name;
+  if (familyPatch.gender !== undefined) memberPatch.gender = familyPatch.gender;
+  if (familyPatch.dob !== undefined) memberPatch.dob = familyPatch.dob;
+  if (familyPatch.age !== undefined) memberPatch.age = familyPatch.age;
+  if (typeof input.address === "string") memberPatch.address = input.address.trim();
+  if (typeof input.phone_number === "string") memberPatch.phone_number = input.phone_number.trim();
+  if (typeof input.alt_phone_number === "string") memberPatch.alt_phone_number = input.alt_phone_number.trim();
+  if (typeof input.occupation === "string") memberPatch.occupation = input.occupation.trim();
+  if (typeof input.confirmation_taken === "boolean") memberPatch.confirmation_taken = input.confirmation_taken;
+
+  if (Object.keys(memberPatch).length) {
+    const { error } = await db.from("members").update(memberPatch).eq("id", linkedMemberId);
+    if (error) {
+      logger.error({ err: error, linkedMemberId }, "syncLinkedMemberProfile failed");
+    }
+  }
 }
 
 export async function deleteFamilyMember(email: string, familyMemberId: string) {
@@ -1011,92 +1094,94 @@ export async function addFamilyMemberForCurrentUser(input: AddFamilyMemberInput)
     resolvedSubscriptionAmount = candidateAmount;
   }
 
-  const { data: familyMember, error: familyMemberError } = await db
-    .from("family_members")
-    .insert([
-      {
-        member_id: dashboard.member.id,
-        full_name: fullName,
-        gender: typeof input.gender === "string" ? input.gender.trim() || null : null,
-        relation: typeof input.relation === "string" ? input.relation.trim() || null : null,
-        age,
-        dob: normalizedDob,
-        has_subscription: wantsSubscription,
-      },
-    ])
-    .select("id, member_id, full_name, gender, relation, age, dob, has_subscription, linked_to_member_id, created_at")
-    .single<FamilyMemberRow>();
-
-  if (familyMemberError) {
-    logger.error({ err: familyMemberError, email: input.email }, "addFamilyMemberForCurrentUser insert failed");
-    throw familyMemberError;
-  }
-
+  // H-3 FIX: Wrap multi-step writes in a single transaction
+  const client = await getClient();
+  let familyMember: FamilyMemberRow;
   let subscription: SubscriptionRow | null = null;
-  if (wantsSubscription) {
-    // Church subscriptions always start on the 5th of the month
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth();
-    const startDate = now.getDate() <= 5
-      ? new Date(year, month, 5)
-      : new Date(year, month + 1, 5);
-    const nextDate = billingCycle === "yearly"
-      ? new Date(startDate.getFullYear() + 1, startDate.getMonth(), 5)
-      : new Date(startDate.getFullYear(), startDate.getMonth() + 1, 5);
 
-    const { data: createdSubscription, error: subError } = await db
-      .from("subscriptions")
-      .insert([
-        {
+  try {
+    await client.query("BEGIN");
+
+    const fmResult = await client.query(
+      `INSERT INTO family_members (member_id, full_name, gender, relation, age, dob, has_subscription)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id, member_id, full_name, gender, relation, age, dob, has_subscription, linked_to_member_id, created_at`,
+      [
+        dashboard.member.id,
+        fullName,
+        typeof input.gender === "string" ? input.gender.trim() || null : null,
+        typeof input.relation === "string" ? input.relation.trim() || null : null,
+        age,
+        normalizedDob,
+        wantsSubscription,
+      ],
+    );
+    familyMember = fmResult.rows[0] as FamilyMemberRow;
+    if (!familyMember?.id) throw new Error("Family member insert returned no row");
+
+    if (wantsSubscription) {
+      // Church subscriptions always start on the 5th of the month
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = now.getMonth();
+      const startDate = now.getDate() <= 5
+        ? new Date(year, month, 5)
+        : new Date(year, month + 1, 5);
+      const nextDate = billingCycle === "yearly"
+        ? new Date(startDate.getFullYear() + 1, startDate.getMonth(), 5)
+        : new Date(startDate.getFullYear(), startDate.getMonth() + 1, 5);
+
+      const subResult = await client.query(
+        `INSERT INTO subscriptions (member_id, family_member_id, plan_name, amount, billing_cycle, start_date, next_payment_date, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING id, member_id, family_member_id, plan_name, amount, billing_cycle, start_date, next_payment_date, status`,
+        [
+          dashboard.member.id,
+          familyMember.id,
+          `${fullName} Individual Subscription`,
+          resolvedSubscriptionAmount,
+          billingCycle,
+          startDate.toISOString().slice(0, 10),
+          nextDate.toISOString().slice(0, 10),
+          "pending_first_payment",
+        ],
+      );
+      const createdSubscription = subResult.rows[0] as SubscriptionRow;
+
+      subscription = {
+        ...createdSubscription,
+        person_name: familyMember.full_name,
+      } as any;
+
+      try {
+        await recordSubscriptionEvent({
           member_id: dashboard.member.id,
-          family_member_id: familyMember.id,
-          plan_name: `${fullName} Individual Subscription`,
-          amount: resolvedSubscriptionAmount,
-          billing_cycle: billingCycle,
-          start_date: startDate.toISOString().slice(0, 10),
-          next_payment_date: nextDate.toISOString().slice(0, 10),
-          status: "pending_first_payment",
-        },
-      ])
-      .select(
-        "id, member_id, family_member_id, plan_name, amount, billing_cycle, start_date, next_payment_date, status"
-      )
-      .single<SubscriptionRow>();
-
-    if (subError) {
-      logger.error(
-        { err: subError, familyMemberId: familyMember.id },
-        "addFamilyMemberForCurrentUser subscription insert failed"
-      );
-      throw subError;
+          subscription_id: createdSubscription.id,
+          event_type: "subscription_created",
+          status_after: createdSubscription.status,
+          amount: Number(createdSubscription.amount),
+          source: "member",
+          metadata: {
+            family_member_id: familyMember.id,
+            person_name: familyMember.full_name,
+            billing_cycle: createdSubscription.billing_cycle,
+          },
+        });
+      } catch (eventErr) {
+        logger.warn(
+          { err: eventErr, subscriptionId: createdSubscription.id },
+          "addFamilyMemberForCurrentUser event insert failed"
+        );
+      }
     }
 
-    subscription = {
-      ...createdSubscription!,
-      person_name: familyMember.full_name,
-    } as any;
-
-    try {
-      await recordSubscriptionEvent({
-        member_id: dashboard.member.id,
-        subscription_id: createdSubscription!.id,
-        event_type: "subscription_created",
-        status_after: createdSubscription!.status,
-        amount: Number(createdSubscription!.amount),
-        source: "member",
-        metadata: {
-          family_member_id: familyMember.id,
-          person_name: familyMember.full_name,
-          billing_cycle: createdSubscription!.billing_cycle,
-        },
-      });
-    } catch (eventErr) {
-      logger.warn(
-        { err: eventErr, subscriptionId: createdSubscription!.id },
-        "addFamilyMemberForCurrentUser event insert failed"
-      );
-    }
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    logger.error({ err, email: input.email }, "addFamilyMemberForCurrentUser transaction failed");
+    throw err;
+  } finally {
+    client.release();
   }
 
   return {
@@ -1152,9 +1237,10 @@ export async function updateCurrentUserProfile(input: UpdateUserProfileInput) {
   const { data: existingMember, error: findMemberError } = await db
     .from("members")
     .select(
-      "id, user_id, full_name, email, phone_number, alt_phone_number, address, membership_id, verification_status, subscription_amount, church_id, created_at, gender, dob"
+      "id, user_id, full_name, email, phone_number, alt_phone_number, address, membership_id, verification_status, subscription_amount, church_id, created_at, gender, dob, occupation, confirmation_taken, age"
     )
     .eq("user_id", existing.id)
+    .eq("church_id", existing.church_id || "")
     .order("created_at", { ascending: true })
     .limit(1);
 
@@ -1166,13 +1252,15 @@ export async function updateCurrentUserProfile(input: UpdateUserProfileInput) {
   let memberRow = (existingMember?.[0] as MemberRow | undefined) || null;
 
   // Fallback: find member by phone or email if user_id link doesn't exist yet
+  // SH-014: Scoped to user's church_id to prevent cross-tenant writes
   if (!memberRow && input.auth_phone) {
     const normalizedPhoneLookup = normalizeIndianPhone(input.auth_phone);
-    if (normalizedPhoneLookup) {
+    if (normalizedPhoneLookup && existing.church_id) {
       const { data: byPhone } = await db
         .from("members")
-        .select("id, user_id, full_name, email, phone_number, alt_phone_number, address, membership_id, verification_status, subscription_amount, church_id, created_at, gender, dob")
+        .select("id, user_id, full_name, email, phone_number, alt_phone_number, address, membership_id, verification_status, subscription_amount, church_id, created_at, gender, dob, occupation, confirmation_taken, age")
         .eq("phone_number", normalizedPhoneLookup)
+        .eq("church_id", existing.church_id)
         .order("created_at", { ascending: true })
         .limit(1);
       if (byPhone?.[0]) {
@@ -1185,21 +1273,7 @@ export async function updateCurrentUserProfile(input: UpdateUserProfileInput) {
       }
     }
   }
-  if (!memberRow && input.email) {
-    const { data: byEmail } = await db
-      .from("members")
-      .select("id, user_id, full_name, email, phone_number, alt_phone_number, address, membership_id, verification_status, subscription_amount, church_id, created_at, gender, dob")
-      .ilike("email", input.email)
-      .order("created_at", { ascending: true })
-      .limit(1);
-    if (byEmail?.[0]) {
-      memberRow = byEmail[0] as MemberRow;
-      if (!memberRow.user_id) {
-        await db.from("members").update({ user_id: existing.id }).eq("id", memberRow.id);
-        memberRow = { ...memberRow, user_id: existing.id };
-      }
-    }
-  }
+  // Phone-only auth: no email fallback for member lookup
   if (memberRow) {
     const memberPatch: Record<string, unknown> = {};
     let previousSubscriptionAmount: number | null = null;
@@ -1222,6 +1296,15 @@ export async function updateCurrentUserProfile(input: UpdateUserProfileInput) {
     }
     if (typeof input.dob === "string") {
       memberPatch.dob = input.dob.trim() || null;
+    }
+    if (typeof input.occupation === "string") {
+      memberPatch.occupation = input.occupation.trim() || null;
+    }
+    if (typeof input.confirmation_taken === "boolean") {
+      memberPatch.confirmation_taken = input.confirmation_taken;
+    }
+    if (typeof input.age === "number") {
+      memberPatch.age = input.age;
     }
     if (typeof input.subscription_amount === "number") {
       const currentAmount = toAmount(memberRow.subscription_amount);
@@ -1509,6 +1592,15 @@ export async function joinChurchByCode(
     .from("members")
     .update({ user_id: userId, verification_status: "verified" })
     .eq("id", matchedMember.id);
+
+  // 5. Create junction table row (additive — preserves other church memberships)
+  await db.from("user_church_memberships").upsert({
+    user_id: userId,
+    church_id: church.id,
+    member_id: matchedMember.id,
+    role: "member",
+    is_active: true,
+  }, { onConflict: "user_id,church_id" });
 
   return { user_id: userId, church_id: church.id, church_name: church.name };
 }

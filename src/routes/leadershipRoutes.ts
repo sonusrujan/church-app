@@ -1,9 +1,12 @@
+import { UUID_REGEX } from "../utils/validation";
 import { Router } from "express";
 import { AuthRequest, requireAuth } from "../middleware/requireAuth";
 import { requireRegisteredUser } from "../middleware/requireRegisteredUser";
 import { isSuperAdminEmail } from "../middleware/requireSuperAdmin";
 import { safeErrorMessage } from "../utils/safeError";
 import { persistAuditLog } from "../utils/auditLog";
+import { validate, assignLeadershipSchema, updateLeadershipSchema } from "../utils/zodSchemas";
+import { logger } from "../utils/logger";
 import { db } from "../services/dbClient";
 import {
   listLeadershipRoles,
@@ -15,7 +18,6 @@ import {
 } from "../services/leadershipService";
 
 const router = Router();
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // ── List all predefined leadership roles ──
 router.get("/roles", requireAuth, requireRegisteredUser, async (_req: AuthRequest, res) => {
@@ -69,7 +71,7 @@ router.get("/pastoral/:churchId", requireAuth, requireRegisteredUser, async (req
 });
 
 // ── Create leadership assignment (admin / super admin) ──
-router.post("/assign", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+router.post("/assign", requireAuth, requireRegisteredUser, validate(assignLeadershipSchema), async (req: AuthRequest, res) => {
   try {
     if (!req.user) return res.status(401).json({ error: "Unauthenticated" });
 
@@ -142,7 +144,7 @@ router.post("/assign", requireAuth, requireRegisteredUser, async (req: AuthReque
             subject: "Leadership Role Assigned",
             body: `You have been assigned the role of ${roleName}. Thank you for your service!`,
             metadata: { url: "/dashboard" },
-          }).catch(() => {});
+          }).catch((err) => { logger.warn({ err }, "Failed to send leadership assignment notification"); });
         }
       } catch (_) {}
     }
@@ -154,7 +156,7 @@ router.post("/assign", requireAuth, requireRegisteredUser, async (req: AuthReque
 });
 
 // ── Update leadership assignment ──
-router.patch("/:id", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+router.patch("/:id", requireAuth, requireRegisteredUser, validate(updateLeadershipSchema), async (req: AuthRequest, res) => {
   try {
     if (!req.user) return res.status(401).json({ error: "Unauthenticated" });
 
@@ -213,7 +215,9 @@ router.delete("/:id", requireAuth, requireRegisteredUser, async (req: AuthReques
     }
 
     const targetChurchId = isSuperAdminEmail(req.user.email, req.user.phone)
-      ? (typeof req.query.church_id === "string" && UUID_REGEX.test(req.query.church_id) ? req.query.church_id : req.user.church_id)
+      ? (typeof req.body?.church_id === "string" && UUID_REGEX.test(req.body.church_id) ? req.body.church_id
+        : typeof req.query.church_id === "string" && UUID_REGEX.test(req.query.church_id) ? req.query.church_id
+        : req.user.church_id)
       : req.user.church_id;
 
     if (!targetChurchId) {

@@ -24,6 +24,8 @@ const LEGACY_MIGRATIONS = [
   'leadership_hierarchy_migration.sql',
   'phone_auth_migration.sql',
   'v2_comprehensive_upgrade.sql',
+  '020_multi_church_junction.sql',
+  '021_cross_tenant_security_fixes.sql',
 ];
 
 (async () => {
@@ -46,7 +48,12 @@ const LEGACY_MIGRATIONS = [
   const dir = path.join(__dirname, 'db', 'migrations');
   if (!fs.existsSync(dir)) { console.log('No migrations directory'); process.exit(0); }
 
-  const files = fs.readdirSync(dir).filter(f => f.endsWith('.sql')).sort();
+  // 7.5: Natural numeric sort so 002_ < 009_ < 010_ < 025_ regardless of suffix
+  const files = fs.readdirSync(dir).filter(f => f.endsWith('.sql')).sort((a, b) => {
+    const na = parseInt(a.match(/^(\d+)/)?.[1] || '0', 10);
+    const nb = parseInt(b.match(/^(\d+)/)?.[1] || '0', 10);
+    return na !== nb ? na - nb : a.localeCompare(b);
+  });
   const applied = await pool.query('SELECT name FROM _migrations');
   const appliedSet = new Set(applied.rows.map(r => r.name));
 

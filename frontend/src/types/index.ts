@@ -24,7 +24,7 @@ export type ChurchRow = {
   pastor_count?: number;
 };
 
-export type NoticeTone = "neutral" | "success" | "error";
+export type NoticeTone = "neutral" | "success" | "error" | "warning" | "info";
 export type Notice = { tone: NoticeTone; text: string };
 
 export type AuthContextData = {
@@ -54,6 +54,9 @@ export type MemberRow = {
   created_at: string;
   gender: string | null;
   dob: string | null;
+  occupation: string | null;
+  confirmation_taken: boolean | null;
+  age: number | null;
 };
 
 export type SubscriptionRow = {
@@ -82,14 +85,36 @@ export type FamilyMemberRow = {
   created_at: string;
 };
 
+export type LinkedMemberProfile = {
+  id: string;
+  full_name: string;
+  email: string | null;
+  phone_number: string | null;
+  alt_phone_number: string | null;
+  address: string | null;
+  membership_id: string | null;
+  verification_status: string | null;
+  subscription_amount: number | string | null;
+  gender: string | null;
+  dob: string | null;
+  occupation: string | null;
+  confirmation_taken: boolean | null;
+  age: number | null;
+  created_at: string;
+};
+
 export type DueSubscriptionRow = {
   subscription_id: string;
   family_member_id: string | null;
   person_name: string;
   amount: number;
+  monthly_amount?: number;
   billing_cycle: string;
   next_payment_date: string;
   status: string;
+  pending_month_count?: number;
+  pending_months?: string[];
+  pending_month_labels?: string[];
 };
 
 export type ReceiptRow = {
@@ -142,6 +167,8 @@ export type MemberDashboard = {
     contact_phone: string | null;
     logo_url?: string | null;
     created_at: string;
+    platform_fee_enabled?: boolean;
+    platform_fee_percentage?: number;
   } | null;
   member: MemberRow | null;
   family_members: FamilyMemberRow[];
@@ -247,6 +274,8 @@ export type EventRow = {
   title: string;
   message: string;
   event_date: string | null;
+  end_time: string | null;
+  location: string | null;
   image_url: string | null;
   created_at: string;
 };
@@ -321,6 +350,7 @@ export type AdminTabKey =
   | "membership-requests"
   | "family-requests"
   | "cancellation-requests"
+  | "account-deletion-requests"
   | "trial"
   | "export"
   | "audit-log"
@@ -336,6 +366,7 @@ export type AdminTabKey =
   | "saas-subscriptions"
   | "saas-settings"
   | "platform-razorpay"
+  | "razorpay-routes"
   | "refund-requests"
   | "create-subscription"
   | "diocese"
@@ -344,7 +375,8 @@ export type AdminTabKey =
   | "special-dates"
   | "announcements"
   | "push-notifications"
-  | "donation-funds";
+  | "donation-funds"
+  | "donation-links";
 
 // ── Diocese types ──
 
@@ -508,6 +540,23 @@ export type AuditLogRow = {
   created_at: string;
 };
 
+export type AccountDeletionRequestRow = {
+  id: string;
+  member_id: string;
+  user_id: string | null;
+  church_id: string;
+  reason: string | null;
+  status: "pending" | "approved" | "rejected";
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  review_note: string | null;
+  created_at: string;
+  member_full_name?: string;
+  member_email?: string;
+  member_phone?: string;
+  family_member_count?: number;
+};
+
 export type TrialStatus = {
   church_id: string;
   trial_ends_at: string | null;
@@ -529,6 +578,19 @@ export type PaymentHistoryRow = {
   payment_date: string;
   receipt_number: string | null;
   payment_category?: string | null;
+};
+
+export type MonthlyPaymentHistoryRow = {
+  id: string;
+  payment_id: string | null;
+  subscription_id: string;
+  month_year: string;
+  paid_amount: number;
+  person_name: string;
+  paid_date: string | null;
+  receipt_number: string | null;
+  payment_status: string | null;
+  due_status: "paid" | "pending" | "imported_paid" | string;
 };
 
 // ── Scheduled Reports ──

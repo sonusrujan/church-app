@@ -242,6 +242,7 @@ interface PaymentReportRow {
   payment_type: string;
   month_label: string;
   fund_name: string | null;
+  months_covered: string | null;
 }
 
 export async function generatePaymentReport(
@@ -297,7 +298,13 @@ export async function generatePaymentReport(
       s.billing_cycle,
       CASE WHEN LOWER(p.payment_method) = 'donation' THEN 'Donation' ELSE 'Subscription' END AS payment_type,
       to_char(p.payment_date AT TIME ZONE $2, 'Mon YYYY') AS month_label,
-      p.fund_name
+      p.fund_name,
+      (
+        SELECT string_agg(to_char(smd.due_month, 'Mon YYYY'), ', ' ORDER BY smd.due_month)
+        FROM payment_month_allocations pma
+        JOIN subscription_monthly_dues smd ON smd.id = pma.due_id
+        WHERE pma.payment_id = p.id
+      ) AS months_covered
     FROM payments p
     JOIN members m ON m.id = p.member_id AND m.church_id = $1 AND m.deleted_at IS NULL
     LEFT JOIN subscriptions s ON s.id = p.subscription_id
@@ -361,7 +368,7 @@ export async function generatePaymentReport(
 
   // Detail header
   csvLines.push(`"DETAILED TRANSACTIONS"`);
-  csvLines.push(`"Date","Member Name","Membership ID","Email","Phone","Type","Plan","Amount (₹)","Method","Fund","Status","Receipt #","Transaction ID","Billing Cycle","Month"`);
+  csvLines.push(`"Date","Member Name","Membership ID","Email","Phone","Type","Plan","Amount (₹)","Method","Fund","Status","Receipt #","Transaction ID","Billing Cycle","Month","Months Covered"`);
 
   for (const r of rows) {
     csvLines.push([
@@ -380,6 +387,7 @@ export async function generatePaymentReport(
       `"${r.transaction_id || ""}"`,
       `"${r.billing_cycle || ""}"`,
       `"${r.month_label}"`,
+      `"${(r.months_covered || "").replace(/"/g, '""')}"`,
     ].join(","));
   }
 

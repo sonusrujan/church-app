@@ -8,7 +8,7 @@ import { useI18n } from "../../i18n";
 
 export default function EditSubscriptionTab() {
   const { t } = useI18n();
-  const { token, authContext, isSuperAdmin, busyKey, setNotice, withAuthRequest, churches } = useApp();
+  const { token, authContext, isSuperAdmin, busyKey, setNotice, withAuthRequest, churches, openOperationConfirmDialog } = useApp();
 
   const [memberId, setMemberId] = useState("");
   const [memberSubs, setMemberSubs] = useState<SubscriptionRow[]>([]);
@@ -69,8 +69,7 @@ export default function EditSubscriptionTab() {
     setPlanName("");
   }
 
-  async function update() {
-    if (!subId.trim() || !isUuid(subId.trim())) { setNotice({ tone: "error", text: t("adminTabs.editSubscription.errorNoSubscription") }); return; }
+  async function doUpdate() {
     const body: Record<string, unknown> = {};
     if (amount.trim()) body.amount = Number(amount);
     if (billingCycle.trim()) body.billing_cycle = billingCycle.trim();
@@ -82,6 +81,21 @@ export default function EditSubscriptionTab() {
       await apiRequest(`/api/ops/subscriptions/${encodeURIComponent(subId.trim())}`, { method: "PATCH", token, body });
       clearSelection();
     }, t("adminTabs.editSubscription.successUpdated"));
+  }
+
+  async function update() {
+    if (!subId.trim() || !isUuid(subId.trim())) { setNotice({ tone: "error", text: t("adminTabs.editSubscription.errorNoSubscription") }); return; }
+    // Warn if amount or status changed
+    if (amount.trim() || status.trim()) {
+      openOperationConfirmDialog(
+        t("adminTabs.editSubscription.impactWarningTitle"),
+        t("adminTabs.editSubscription.impactWarningMessage"),
+        t("adminTabs.editSubscription.impactConfirmWord"),
+        doUpdate,
+      );
+    } else {
+      await doUpdate();
+    }
   }
 
   return (
@@ -144,7 +158,6 @@ export default function EditSubscriptionTab() {
               <select value={billingCycle} onChange={(e) => setBillingCycle(e.target.value)}>
                 <option value="">{t("adminTabs.editSubscription.keepCurrent")}</option>
                 <option value="monthly">{t("adminTabs.editSubscription.monthly")}</option>
-                <option value="quarterly">{t("adminTabs.editSubscription.quarterly")}</option>
                 <option value="yearly">{t("adminTabs.editSubscription.yearly")}</option>
               </select>
             </label>
@@ -152,6 +165,7 @@ export default function EditSubscriptionTab() {
               {t("adminTabs.editSubscription.statusLabel")}
               <select value={status} onChange={(e) => setStatus(e.target.value)}>
                 <option value="">{t("adminTabs.editSubscription.keepCurrent")}</option>
+                <option value="active">{t("adminTabs.editSubscription.statusActive")}</option>
                 <option value="paused">{t("adminTabs.editSubscription.statusPaused")}</option>
                 <option value="cancelled">{t("adminTabs.editSubscription.statusCancelled")}</option>
                 <option value="overdue">{t("adminTabs.editSubscription.statusOverdue")}</option>

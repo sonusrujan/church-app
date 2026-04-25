@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { CalendarDays, Bell, Pencil, Trash2, Plus, Search, X } from "lucide-react";
-import { apiRequest, API_BASE_URL, tryRefreshToken } from "../../lib/api";
+import { apiRequest, apiUploadRequest } from "../../lib/api";
 import { useApp } from "../../context/AppContext";
 import Pagination, { paginate, totalPages } from "../../components/Pagination";
 import EmptyState from "../../components/EmptyState";
@@ -33,6 +33,8 @@ export default function EventsTab() {
   const [formTitle, setFormTitle] = useState("");
   const [formMessage, setFormMessage] = useState("");
   const [formDate, setFormDate] = useState("");
+  const [formEndTime, setFormEndTime] = useState("");
+  const [formLocation, setFormLocation] = useState("");
   const [formImageUrl, setFormImageUrl] = useState("");
   const [imageUploading, setImageUploading] = useState(false);
 
@@ -108,6 +110,8 @@ export default function EventsTab() {
     setFormTitle("");
     setFormMessage("");
     setFormDate("");
+    setFormEndTime("");
+    setFormLocation("");
     setFormImageUrl("");
     setShowForm(true);
   }
@@ -117,6 +121,8 @@ export default function EventsTab() {
     setFormTitle(ev.title);
     setFormMessage(ev.message);
     setFormDate(ev.event_date ? ev.event_date.slice(0, 16) : "");
+    setFormEndTime(ev.end_time ? ev.end_time.slice(0, 16) : "");
+    setFormLocation(ev.location || "");
     setFormImageUrl(ev.image_url || "");
     setShowForm(true);
   }
@@ -134,6 +140,8 @@ export default function EventsTab() {
     setShowForm(false);
     setEditingId(null);
     setFormImageUrl("");
+    setFormEndTime("");
+    setFormLocation("");
   }
 
   // ── Image upload for events/notifications ──
@@ -147,28 +155,7 @@ export default function EventsTab() {
       form.append("folder", view === "events" ? "events" : "notifications");
       if (scopedChurchId) form.append("target_church_id", scopedChurchId);
 
-      const resp = await fetch(`${API_BASE_URL}/api/uploads/image`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: form,
-      });
-
-      if (resp.status === 401) {
-        const newToken = await tryRefreshToken();
-        if (!newToken) { setNotice({ tone: "error", text: "Session expired" }); return; }
-        const retry = await fetch(`${API_BASE_URL}/api/uploads/image`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${newToken}` },
-          body: form,
-        });
-        if (!retry.ok) throw new Error("Upload failed");
-        const data = await retry.json();
-        setFormImageUrl(data.url);
-        return;
-      }
-
-      if (!resp.ok) throw new Error("Upload failed");
-      const data = await resp.json();
+      const data = await apiUploadRequest<{ url: string }>("/api/uploads/image", form, { token });
       setFormImageUrl(data.url);
     } catch {
       setNotice({ tone: "error", text: t("adminTabs.events.errorUploadFailed") });
@@ -192,7 +179,7 @@ export default function EventsTab() {
         await withAuthRequest("update-event", () =>
           apiRequest(`/api/engagement/events/${editingId}`, {
             method: "PUT", token,
-            body: { ...churchIdPayload, title: formTitle.trim(), message: formMessage.trim(), event_date: formDate || null, image_url: formImageUrl || null },
+            body: { ...churchIdPayload, title: formTitle.trim(), message: formMessage.trim(), event_date: formDate || null, end_time: formEndTime || null, location: formLocation.trim() || null, image_url: formImageUrl || null },
           }),
           t("adminTabs.events.successEventUpdated"),
         );
@@ -200,7 +187,7 @@ export default function EventsTab() {
         await withAuthRequest("post-event", () =>
           apiRequest<EventRow>("/api/engagement/events", {
             method: "POST", token,
-            body: { ...churchIdPayload, title: formTitle.trim(), message: formMessage.trim(), event_date: formDate || undefined, image_url: formImageUrl || undefined },
+            body: { ...churchIdPayload, title: formTitle.trim(), message: formMessage.trim(), event_date: formDate || undefined, end_time: formEndTime || undefined, location: formLocation.trim() || undefined, image_url: formImageUrl || undefined },
           }),
           t("adminTabs.events.successEventCreated"),
         );
@@ -232,6 +219,7 @@ export default function EventsTab() {
   }
 
   async function handleDeleteEvent(id: string) {
+    if (!window.confirm(t("adminTabs.events.confirmDeleteEvent"))) return;
     const qs = scopedChurchId ? `?church_id=${encodeURIComponent(scopedChurchId)}` : "";
     await withAuthRequest("delete-event", () =>
       apiRequest(`/api/engagement/events/${id}${qs}`, { method: "DELETE", token }),
@@ -242,6 +230,7 @@ export default function EventsTab() {
   }
 
   async function handleDeleteNotification(id: string) {
+    if (!window.confirm(t("adminTabs.events.confirmDeleteNotification"))) return;
     const qs = scopedChurchId ? `?church_id=${encodeURIComponent(scopedChurchId)}` : "";
     await withAuthRequest("delete-notification", () =>
       apiRequest(`/api/engagement/notifications/${id}${qs}`, { method: "DELETE", token }),
@@ -338,10 +327,20 @@ export default function EventsTab() {
             <textarea value={formMessage} onChange={(e) => setFormMessage(e.target.value)} placeholder={t("adminTabs.events.messagePlaceholder")} rows={3} />
           </label>
           {view === "events" ? (
-            <label>
-              {t("adminTabs.events.eventDateLabel")}
-              <input type="datetime-local" value={formDate} onChange={(e) => setFormDate(e.target.value)} />
-            </label>
+            <>
+              <label>
+                {t("adminTabs.events.eventDateLabel")}
+                <input type="datetime-local" value={formDate} onChange={(e) => setFormDate(e.target.value)} />
+              </label>
+              <label>
+                {t("adminTabs.events.endTimeLabel")}
+                <input type="datetime-local" value={formEndTime} onChange={(e) => setFormEndTime(e.target.value)} />
+              </label>
+              <label>
+                {t("adminTabs.events.locationLabel")}
+                <input value={formLocation} onChange={(e) => setFormLocation(e.target.value)} placeholder={t("adminTabs.events.locationPlaceholder")} maxLength={500} />
+              </label>
+            </>
           ) : null}
           <label>
             {t("adminTabs.events.posterLabel")}
@@ -351,7 +350,7 @@ export default function EventsTab() {
           {formImageUrl ? (
             <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
               <img src={formImageUrl} alt="Preview" style={{ width: 80, height: 50, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border)" }} />
-              <button className="btn btn-sm btn-ghost" onClick={() => setFormImageUrl("")} title="Remove image"><X size={14} /></button>
+              <button className="btn btn-sm btn-ghost" onClick={() => setFormImageUrl("")} aria-label="Remove image"><X size={14} /></button>
             </div>
           ) : null}
           <div className="actions-row">
@@ -372,15 +371,16 @@ export default function EventsTab() {
             <div className="table-wrapper">
               <table className="data-table">
                 <thead>
-                  <tr><th>{t("adminTabs.events.titleHeader")}</th><th>{t("adminTabs.events.messageHeader")}</th><th>{t("adminTabs.events.imageHeader")}</th><th>{t("adminTabs.events.eventDateHeader")}</th><th>{t("adminTabs.events.createdHeader")}</th><th>{t("adminTabs.events.actionsHeader")}</th></tr>
+                  <tr><th>{t("adminTabs.events.titleHeader")}</th><th>{t("adminTabs.events.messageHeader")}</th><th>{t("adminTabs.events.locationHeader")}</th><th>{t("adminTabs.events.imageHeader")}</th><th>{t("adminTabs.events.eventDateHeader")}</th><th>{t("adminTabs.events.createdHeader")}</th><th>{t("adminTabs.events.actionsHeader")}</th></tr>
                 </thead>
                 <tbody>
                   {pagedEvents.map((ev) => (
                     <tr key={ev.id}>
                       <td style={{ fontWeight: 600 }}>{ev.title}</td>
                       <td style={{ maxWidth: 300, whiteSpace: "pre-wrap" }}>{ev.message}</td>
+                      <td>{ev.location || "—"}</td>
                       <td>{ev.image_url ? <img src={ev.image_url} alt="" style={{ width: 48, height: 32, objectFit: "cover", borderRadius: 4 }} /> : "—"}</td>
-                      <td>{ev.event_date ? new Date(ev.event_date).toLocaleString() : "—"}</td>
+                      <td>{ev.event_date ? new Date(ev.event_date).toLocaleString() : "—"}{ev.end_time ? <><br/><span style={{ fontSize: "0.8rem", color: "var(--secondary)" }}>→ {new Date(ev.end_time).toLocaleString()}</span></> : null}</td>
                       <td>{new Date(ev.created_at).toLocaleDateString()}</td>
                       <td>
                         <div className="actions-row" style={{ gap: 4 }}>

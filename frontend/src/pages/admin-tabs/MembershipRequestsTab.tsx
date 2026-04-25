@@ -11,12 +11,14 @@ import { useI18n } from "../../i18n";
 
 export default function MembershipRequestsTab() {
   const { t } = useI18n();
-  const { token, busyKey, setNotice, withAuthRequest } = useApp();
+  const { token, busyKey, setNotice, withAuthRequest, refreshAdminCounts } = useApp();
 
   const [requests, setRequests] = useState<MembershipRequestRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [filter, setFilter] = useState<"pending" | "all">("pending");
+  const [rejectReasons, setRejectReasons] = useState<Record<string, string>>({});
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
 
   const loadRequests = useCallback(async () => {
     if (!token) return;
@@ -35,11 +37,18 @@ export default function MembershipRequestsTab() {
   useEffect(() => { void loadRequests(); }, [loadRequests]);
 
   async function review(id: string, decision: "approved" | "rejected") {
+    const body: Record<string, string> = { decision };
+    if (decision === "rejected" && rejectReasons[id]?.trim()) {
+      body.review_note = rejectReasons[id].trim();
+    }
     await withAuthRequest("review-membership", async () => {
       await apiRequest(`/api/requests/membership-requests/${encodeURIComponent(id)}/review`, {
-        method: "POST", token, body: { decision },
+        method: "POST", token, body,
       });
+      setRejectingId(null);
+      setRejectReasons((prev) => { const next = { ...prev }; delete next[id]; return next; });
       void loadRequests();
+      void refreshAdminCounts();
     }, decision === "approved" ? t("adminTabs.membershipRequests.successApproved") : t("adminTabs.membershipRequests.successRejected"));
   }
 
@@ -71,9 +80,22 @@ export default function MembershipRequestsTab() {
               {req.address ? <span className="muted">{t("adminTabs.membershipRequests.addressLabel")} {req.address}</span> : null}
               <span className="muted">{t("adminTabs.membershipRequests.requestedLabel")} {formatDate(req.created_at)}</span>
               {req.status === "pending" ? (
-                <div className="actions-row" style={{ marginTop: 4 }}>
+                <div className="actions-row" style={{ marginTop: 4, flexWrap: "wrap" }}>
                   <button className="btn btn-primary" onClick={() => review(req.id, "approved")} disabled={busyKey === "review-membership"}>{t("adminTabs.membershipRequests.approve")}</button>
-                  <button className="btn" onClick={() => review(req.id, "rejected")} disabled={busyKey === "review-membership"}>{t("adminTabs.membershipRequests.reject")}</button>
+                  {rejectingId === req.id ? (
+                    <>
+                      <input
+                        value={rejectReasons[req.id] || ""}
+                        onChange={(e) => setRejectReasons((prev) => ({ ...prev, [req.id]: e.target.value }))}
+                        placeholder={t("adminTabs.membershipRequests.rejectReasonPlaceholder")}
+                        style={{ flex: 1, padding: "6px 10px", borderRadius: 8, border: "1px solid var(--border-color, #ddd)", fontSize: "0.85rem", minWidth: 160 }}
+                      />
+                      <button className="btn btn-danger" onClick={() => review(req.id, "rejected")} disabled={busyKey === "review-membership"}>{t("adminTabs.membershipRequests.confirmReject")}</button>
+                      <button className="btn" onClick={() => setRejectingId(null)}>{t("common.cancel")}</button>
+                    </>
+                  ) : (
+                    <button className="btn" onClick={() => setRejectingId(req.id)} disabled={busyKey === "review-membership"}>{t("adminTabs.membershipRequests.reject")}</button>
+                  )}
                 </div>
               ) : null}
               {req.review_note ? <span className="muted">{t("adminTabs.membershipRequests.noteLabel")} {req.review_note}</span> : null}

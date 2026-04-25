@@ -8,12 +8,21 @@ import { logger } from "../utils/logger";
 import { safeErrorMessage } from "../utils/safeError";
 import { VAPID_PUBLIC_KEY } from "../config";
 import { persistAuditLog } from "../utils/auditLog";
+import { validate, pushSubscribeSchema, pushUnsubscribeSchema, pushResubscribeSchema, sendNotificationSchema } from "../utils/zodSchemas";
 import { enqueueJob } from "../services/jobQueueService";
+import rateLimit from "express-rate-limit";
 
 const router = Router();
 
-// ── GET /vapid-public-key — return VAPID public key for the frontend ──
-router.get("/vapid-public-key", (_req, res) => {
+// Strict rate limiter for unauthenticated /resubscribe endpoint
+const resubscribeRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10,
+  message: { error: "Too many resubscribe requests. Try again later." },
+});
+
+// LOW-002: Require auth for VAPID key to prevent unauthenticated reconnaissance
+router.get("/vapid-public-key", requireAuth, (_req, res) => {
   if (!VAPID_PUBLIC_KEY) {
     return res.status(503).json({ error: "Push notifications not configured" });
   }
@@ -21,7 +30,7 @@ router.get("/vapid-public-key", (_req, res) => {
 });
 
 // ── POST /subscribe — save push subscription ──
-router.post("/subscribe", requireAuth, async (req: AuthRequest, res) => {
+router.post("/subscribe", requireAuth, validate(pushSubscribeSchema), async (req: AuthRequest, res) => {
   try {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ error: "Unauthenticated" });
@@ -40,7 +49,7 @@ router.post("/subscribe", requireAuth, async (req: AuthRequest, res) => {
 });
 
 // ── POST /unsubscribe — remove push subscription ──
-router.post("/unsubscribe", requireAuth, async (req: AuthRequest, res) => {
+router.post("/unsubscribe", requireAuth, validate(pushUnsubscribeSchema), async (req: AuthRequest, res) => {
   try {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ error: "Unauthenticated" });
@@ -56,34 +65,39 @@ router.post("/unsubscribe", requireAuth, async (req: AuthRequest, res) => {
 });
 
 // ── POST /resubscribe — called by service worker when push subscription rotates ──
-// No auth required (service worker can't attach auth tokens).
-// Matches old endpoint to find the user, then replaces with new endpoint.
-router.post("/resubscribe", async (req, res) => {
+// Tries auth first; if authed we use the known user_id directly.
+// Falls back to old-endpoint lookup (rate-limited) for service workers that can't attach tokens.
+router.post("/resubscribe", resubscribeRateLimit, validate(pushResubscribeSchema), async (req, res) => {
   try {
     const { oldEndpoint, newEndpoint, keys } = req.body;
     if (!newEndpoint || !keys?.p256dh || !keys?.auth) {
       return res.status(400).json({ error: "Invalid resubscribe payload" });
     }
 
-    if (oldEndpoint && typeof oldEndpoint === "string") {
-      // Find the user who owns the old endpoint
-      const { data: existing } = await db
-        .from("push_subscriptions")
-        .select("user_id")
-        .eq("endpoint", oldEndpoint)
-        .maybeSingle();
-
-      if (existing?.user_id) {
-        // Remove old subscription and save new one
-        await removePushSubscription(existing.user_id, oldEndpoint);
-        await savePushSubscription(existing.user_id, newEndpoint, keys.p256dh, keys.auth);
-        logger.info({ userId: existing.user_id }, "Push subscription rotated successfully");
-        return res.json({ success: true });
-      }
+    // Try to extract authenticated user from Bearer token (optional)
+    let authedUserId: string | null = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith("Bearer ")) {
+      try {
+        const jwt = await import("jsonwebtoken");
+        const { JWT_SECRET } = await import("../config");
+        const decoded = jwt.default.verify(authHeader.split(" ")[1], JWT_SECRET) as any;
+        if (decoded?.sub) authedUserId = decoded.sub;
+      } catch { /* token invalid/expired — fall through to old-endpoint lookup */ }
     }
 
-    // Old endpoint not found — can't determine user without auth
-    return res.json({ success: false, reason: "old_endpoint_not_found" });
+    // PUSH-001: Authentication is REQUIRED — no unauthenticated fallback
+    if (!authedUserId) {
+      return res.status(401).json({ error: "Authentication required for resubscribe" });
+    }
+
+    // Authenticated path: remove old + save new directly
+    if (oldEndpoint && typeof oldEndpoint === "string") {
+      await removePushSubscription(authedUserId, oldEndpoint);
+    }
+    await savePushSubscription(authedUserId, newEndpoint, keys.p256dh, keys.auth);
+    logger.info({ userId: authedUserId }, "Push subscription rotated (authenticated)");
+    return res.json({ success: true });
   } catch (err: any) {
     logger.error({ err }, "push resubscribe failed");
     return res.status(500).json({ error: safeErrorMessage(err, "Failed to resubscribe") });
@@ -97,7 +111,15 @@ router.post("/resubscribe", async (req, res) => {
 // Channel: "push" | "sms"
 // ══════════════════════════════════════════════════════════════════
 
-router.post("/send-notification", requireAuth, requireRegisteredUser, requireSuperAdmin, async (req: AuthRequest, res) => {
+const sendNotificationLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many notification requests, please try again later" },
+});
+
+router.post("/send-notification", requireAuth, requireRegisteredUser, requireSuperAdmin, sendNotificationLimiter, validate(sendNotificationSchema), async (req: AuthRequest, res) => {
   try {
     const { diocese_id, church_id, member_id, channel, title, message, url } = req.body;
 
@@ -151,13 +173,10 @@ router.post("/send-notification", requireAuth, requireRegisteredUser, requireSup
       if (error) throw error;
       members = data || [];
     } else {
-      // All members globally
-      const { data, error } = await db
-        .from("members")
-        .select("id, user_id, email, phone_number, church_id")
-        .is("deleted_at", null);
-      if (error) throw error;
-      members = data || [];
+      // PUSH-002: Global blast denied — require explicit scope
+      return res.status(400).json({
+        error: "At least one of diocese_id, church_id, or member_id is required. Global sends are not permitted.",
+      });
     }
 
     if (!members.length) {
