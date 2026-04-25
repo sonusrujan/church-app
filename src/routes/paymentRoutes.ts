@@ -694,15 +694,6 @@ router.post("/subscription/verify", requireAuth, requireRegisteredUser, paymentW
       return res.status(400).json({ error: "Missing verification fields" });
     }
 
-    const { data: existingBatch } = await db
-      .from("payments")
-      .select("id")
-      .eq("transaction_id", razorpay_payment_id)
-      .limit(1);
-    if (existingBatch && existingBatch.length > 0) {
-      return res.status(200).json({ status: "already_processed", payment_id: existingBatch[0].id });
-    }
-
     const dashboard = await getCurrentMemberDashboard(req);
 
     const selectedIds = normalizeSelectedSubscriptionIds(subscription_ids);
@@ -715,6 +706,26 @@ router.post("/subscription/verify", requireAuth, requireRegisteredUser, paymentW
 
     if (!normalizedSubscriptionIds.length) {
       return res.status(400).json({ error: "No subscriptions selected for payment" });
+    }
+
+    // Idempotency: only short-circuit if EVERY requested subscription already has
+    // a successful payment row for this transaction_id. Prior verify attempts that
+    // left `failed` rows (allocation failures) must not block retries.
+    const { data: existingBatchRows } = await db
+      .from("payments")
+      .select("id, subscription_id, payment_status")
+      .eq("transaction_id", razorpay_payment_id);
+    const successfulSubIds = new Set(
+      (existingBatchRows || [])
+        .filter((row: any) => row.payment_status === "success" && row.subscription_id)
+        .map((row: any) => row.subscription_id as string)
+    );
+    if (
+      normalizedSubscriptionIds.length > 0 &&
+      normalizedSubscriptionIds.every((id) => successfulSubIds.has(id))
+    ) {
+      const successRow = (existingBatchRows || []).find((row: any) => row.payment_status === "success");
+      return res.status(200).json({ status: "already_processed", payment_id: successRow?.id });
     }
 
     const subscriptionById = new Map<string, DashboardSubscription>();
@@ -800,15 +811,28 @@ router.post("/subscription/verify", requireAuth, requireRegisteredUser, paymentW
           .update({ receipt_number: receiptNumber, receipt_generated_at: new Date().toISOString() })
           .eq("id", payment.id);
 
-        const allocatedMonths = await allocateOldestPendingMonthsAtomic({
-          payment_id: payment.id,
-          subscription_id: selectedId,
-          member_id: dashboard.member.id,
-          church_id: req.user?.church_id || req.registeredProfile?.church_id || "",
-          monthly_amount: numericAmount,
-          months_to_allocate: selectedMonths,
-          person_name: subscription.person_name || "Member",
-        });
+        // Skip allocation if this payment already has month allocations (idempotent retry)
+        const { data: existingAllocs } = await db
+          .from("payment_month_allocations")
+          .select("covered_month")
+          .eq("payment_id", payment.id);
+        let allocatedMonths: string[];
+        if (existingAllocs && existingAllocs.length > 0) {
+          allocatedMonths = existingAllocs
+            .map((row: any) => row.covered_month as string)
+            .sort();
+          logger.info({ paymentId: payment.id, count: allocatedMonths.length }, "Skipping allocation; existing allocations found");
+        } else {
+          allocatedMonths = await allocateOldestPendingMonthsAtomic({
+            payment_id: payment.id,
+            subscription_id: selectedId,
+            member_id: dashboard.member.id,
+            church_id: req.user?.church_id || req.registeredProfile?.church_id || "",
+            monthly_amount: numericAmount,
+            months_to_allocate: selectedMonths,
+            person_name: subscription.person_name || "Member",
+          });
+        }
 
         payments.push({ id: payment.id, receipt_number: receiptNumber });
         updatedSubscriptions.push({

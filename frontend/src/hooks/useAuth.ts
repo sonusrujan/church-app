@@ -22,6 +22,7 @@ export interface LocalSession {
 }
 
 export const SESSION_KEY = "shalom_jwt";
+export const SIGNED_OUT_KEY = "shalom_signed_out";
 
 export function useAuth(setNotice: React.Dispatch<React.SetStateAction<Notice>>) {
   const navigate = useNavigate();
@@ -150,9 +151,23 @@ export function useAuth(setNotice: React.Dispatch<React.SetStateAction<Notice>>)
     return () => clearInterval(id);
   }, [token]);
 
-  // Background token refresh on mount — uses httpOnly refresh cookie to restore session
+  // Background token refresh on mount — uses httpOnly refresh cookie to restore session.
+  // Honors SIGNED_OUT_KEY: if the user just signed out, do NOT auto-refresh, and proactively
+  // re-revoke server-side in case the prior clearCookie didn't take effect cross-origin.
   useEffect(() => {
     let cancelled = false;
+    const wasSignedOut = localStorage.getItem(SIGNED_OUT_KEY) === "1";
+
+    if (wasSignedOut) {
+      // Best-effort re-revoke: the server clears the cookie again on this call.
+      fetch(`${API_BASE_URL}/api/auth/refresh/revoke`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest" },
+        credentials: "include",
+      }).catch(() => {});
+      setLoadingSession(false);
+      return () => { cancelled = true; };
+    }
 
     fetch(`${API_BASE_URL}/api/auth/refresh`, {
       method: "POST",
@@ -228,6 +243,8 @@ export function useAuth(setNotice: React.Dispatch<React.SetStateAction<Notice>>)
         churches?: UserChurch[];
       }>("/api/otp/verify", { method: "POST", body: { phone, otp } });
       hasBootstrappedRef.current = false;
+      // Clear the signed-out marker now that the user is signing back in
+      try { localStorage.removeItem(SIGNED_OUT_KEY); } catch { /* ignore */ }
       setSession({
         access_token: result.access_token,
         user: { id: result.user.id, email: result.user.email, phone: result.user.phone },
@@ -292,13 +309,21 @@ export function useAuth(setNotice: React.Dispatch<React.SetStateAction<Notice>>)
 
   const signOut = useCallback(async () => {
     setBusyKey("logout");
+    // Mark signed-out FIRST so a concurrent refresh-on-mount in another tab also bails out.
+    try { localStorage.setItem(SIGNED_OUT_KEY, "1"); } catch { /* ignore */ }
+    // Always call revoke (even without a token) so the cookie-based refresh token
+    // is killed server-side and the cookie is cleared in the response.
     try {
-      if (token) {
-        await apiRequest("/api/auth/refresh/revoke", { method: "POST", token }).catch(() => {});
-      }
-    } catch {
-      /* ignore */
-    }
+      await fetch(`${API_BASE_URL}/api/auth/refresh/revoke`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Requested-With": "XMLHttpRequest",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: "include",
+      });
+    } catch { /* ignore network errors — local state still cleared */ }
     setBusyKey("");
     // Clear any legacy storage
     localStorage.removeItem(SESSION_KEY);

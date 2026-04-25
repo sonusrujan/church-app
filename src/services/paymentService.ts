@@ -134,7 +134,7 @@ export async function storePayment(input: CreatePaymentInput) {
   if (input.transaction_id) {
     let query = db
       .from("payments")
-      .select("id, receipt_number")
+      .select("id, receipt_number, payment_status")
       .eq("transaction_id", input.transaction_id)
       .eq("member_id", input.member_id);
 
@@ -144,11 +144,22 @@ export async function storePayment(input: CreatePaymentInput) {
       query = query.is("subscription_id", null);
     }
 
-    const { data: existing } = await query.maybeSingle<StoredPaymentRow>();
+    const { data: existing } = await query.maybeSingle<StoredPaymentRow & { payment_status?: string }>();
 
     if (existing) {
-      logger.info({ transactionId: input.transaction_id, paymentId: existing.id }, "Duplicate payment detected, returning existing record");
-      return existing;
+      // If prior attempt left a non-success row (e.g., 'failed' from allocation failure)
+      // and we are now retrying with success, reactivate the row so receipts/reconciliation
+      // reflect reality.
+      if (input.payment_status === "success" && existing.payment_status && existing.payment_status !== "success") {
+        await db
+          .from("payments")
+          .update({ payment_status: "success", payment_date: input.payment_date || new Date().toISOString() })
+          .eq("id", existing.id);
+        logger.info({ transactionId: input.transaction_id, paymentId: existing.id, prior: existing.payment_status }, "Reactivated prior non-success payment row to success");
+      } else {
+        logger.info({ transactionId: input.transaction_id, paymentId: existing.id }, "Duplicate payment detected, returning existing record");
+      }
+      return { id: existing.id, receipt_number: existing.receipt_number };
     }
   }
 

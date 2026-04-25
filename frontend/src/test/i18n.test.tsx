@@ -22,9 +22,9 @@ describe("i18n", () => {
     expect(screen.getByTestId("output")).toHaveTextContent("Welcome, John.");
   });
 
-  it("returns key as fallback when key missing", () => {
+  it("returns a human-readable fallback when key missing", () => {
     renderWithI18n(<TestComponent keyPath="nonexistent.key.here" />);
-    expect(screen.getByTestId("output")).toHaveTextContent("nonexistent.key.here");
+    expect(screen.getByTestId("output")).toHaveTextContent("Here");
   });
 
   it("resolves newly added profile OTP keys", () => {

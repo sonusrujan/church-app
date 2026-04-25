@@ -15,8 +15,6 @@ import {
   CalendarDays,
   ChevronRight,
   Wallet,
-  Crown,
-  User,
 } from "lucide-react";
 import donationIcon from "../assets/donation-icon.png";
 import prayerIcon from "../assets/prayer-icon.png";
@@ -693,36 +691,6 @@ export default function DashboardPage() {
               </p>
             ) : null}
           </div>
-
-          {/* Diocese Leadership */}
-          {memberDashboard?.diocese && (memberDashboard.diocese_leaders?.length || 0) > 0 ? (
-            <div className="dash-card-leadership">
-              <div className="dash-card-head">
-                <div className="dash-card-head-left">
-                  <Crown size={20} strokeWidth={1.5} className="dash-card-head-icon" />
-                  <h3>{memberDashboard.diocese.name}</h3>
-                </div>
-                <Link to="/home" className="dash-card-see-all">{t("common.viewAll")}</Link>
-              </div>
-              <div className="dash-leadership-grid">
-                {(memberDashboard.diocese_leaders || []).slice(0, 6).map((leader) => (
-                  <div key={leader.id} className="dash-leader-card">
-                    <div className="dash-leader-avatar">
-                      {leader.photo_url ? (
-                        <img src={leader.photo_url} alt={leader.full_name} loading="lazy" decoding="async" />
-                      ) : (
-                        <User size={28} strokeWidth={1.5} />
-                      )}
-                    </div>
-                    <div className="dash-leader-info">
-                      <p className="dash-leader-role">{leader.role}</p>
-                      <p className="dash-leader-name">{leader.full_name}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
 
           {/* Prayer Request */}
           <div className="dash-card-prayer">

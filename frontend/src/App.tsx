@@ -41,6 +41,7 @@ import OfflineIndicator from "./components/OfflineIndicator";
 import CookieConsentBanner from "./components/CookieConsentBanner";
 import LanguageSelector from "./components/LanguageSelector";
 import NotificationBadge from "./components/NotificationBadge";
+import BottomNav from "./components/BottomNav";
 import { useI18n } from "./i18n";
 
 // ── Helpers ──
@@ -460,15 +461,23 @@ function App() {
       <OfflineIndicator />
       <CookieConsentBanner />
       <div className={`app-layout ${workspaceToneClass}`}>
-        <nav className="sidebar">
+        {/* Floating burger (mobile only — top-left) */}
+        <button
+          className={`floating-burger ${mobileNavOpen ? "fab-open" : ""}`}
+          onClick={() => setMobileNavOpen((v) => !v)}
+          aria-label={t("nav.toggleNavigation")}
+          aria-expanded={mobileNavOpen}
+          aria-controls="mobile-nav"
+        >
+          {mobileNavOpen ? <X size={22} /> : <Menu size={22} />}
+        </button>
+
+        <nav className={`sidebar ${mobileNavOpen ? "sidebar-open" : ""}`}>
           <div className="brand-block">
             <img src={shalomLogo} alt="Shalom" className="nav-logo" />
             <span className="brand-name">{authContext?.profile.full_name || (isSuperAdmin ? t("profile.superAdmin") : "Shalom")}</span>
-            <button className="hamburger-btn" onClick={() => setMobileNavOpen((v) => !v)} aria-label={t("nav.toggleNavigation")} aria-expanded={mobileNavOpen} aria-controls="mobile-nav">
-              {mobileNavOpen ? <X size={22} /> : <Menu size={22} />}
-            </button>
           </div>
-          <nav id="mobile-nav" className={`nav-stack ${mobileNavOpen ? "nav-open" : ""}`}>
+          <nav id="mobile-nav" className="nav-stack">
             <div className="sidebar-user-badge">
               {avatarUrl ? (
                 <img className="avatar" src={avatarUrl} alt={memberName} />
@@ -669,6 +678,15 @@ function App() {
             </section>
           ) : null}
         </main>
+
+        {/* Floating bottom navigation bar (mobile only — CSS hides on desktop) */}
+        <BottomNav
+          isSuperAdmin={isSuperAdmin}
+          isAdminUser={isAdminUser}
+          paymentsEnabled={paymentsEnabled}
+          duesCount={duesCount}
+          adminPendingCount={totalAdminPending}
+        />
       </div>
     </AppContext.Provider>
   );
