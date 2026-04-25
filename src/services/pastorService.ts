@@ -1,5 +1,6 @@
-import { supabaseAdmin } from "./supabaseClient";
+import { db } from "./dbClient";
 import { logger } from "../utils/logger";
+import { normalizeIndianPhone } from "../utils/phone";
 
 export type PastorRow = {
   id: string;
@@ -37,7 +38,7 @@ async function assertPastorSingleChurchAssignment(input: {
   exclude_pastor_id?: string;
 }) {
   const churchId = String(input.church_id || "").trim();
-  const phoneNumber = String(input.phone_number || "").trim();
+  const phoneNumber = normalizeIndianPhone(String(input.phone_number || ""));
   const normalizedEmail = typeof input.email === "string" ? input.email.trim().toLowerCase() : "";
   const excludePastorId = typeof input.exclude_pastor_id === "string" ? input.exclude_pastor_id.trim() : "";
 
@@ -49,7 +50,7 @@ async function assertPastorSingleChurchAssignment(input: {
     throw new Error("Pastor phone number is required");
   }
 
-  const { data: phoneRows, error: phoneError } = await supabaseAdmin
+  const { data: phoneRows, error: phoneError } = await db
     .from("pastors")
     .select("id, church_id")
     .eq("phone_number", phoneNumber)
@@ -61,7 +62,7 @@ async function assertPastorSingleChurchAssignment(input: {
   }
 
   const conflictingPhone = (phoneRows || []).find(
-    (row) => row.id !== excludePastorId && row.church_id !== churchId
+    (row: any) => row.id !== excludePastorId && row.church_id !== churchId
   );
 
   if (conflictingPhone) {
@@ -69,7 +70,7 @@ async function assertPastorSingleChurchAssignment(input: {
   }
 
   const duplicatePhone = (phoneRows || []).find(
-    (row) => row.id !== excludePastorId && row.church_id === churchId
+    (row: any) => row.id !== excludePastorId && row.church_id === churchId
   );
 
   if (duplicatePhone) {
@@ -77,7 +78,7 @@ async function assertPastorSingleChurchAssignment(input: {
   }
 
   if (normalizedEmail) {
-    const { data: emailRows, error: emailError } = await supabaseAdmin
+    const { data: emailRows, error: emailError } = await db
       .from("pastors")
       .select("id, church_id")
       .ilike("email", normalizedEmail)
@@ -89,7 +90,7 @@ async function assertPastorSingleChurchAssignment(input: {
     }
 
     const conflictingEmail = (emailRows || []).find(
-      (row) => row.id !== excludePastorId && row.church_id !== churchId
+      (row: any) => row.id !== excludePastorId && row.church_id !== churchId
     );
 
     if (conflictingEmail) {
@@ -97,7 +98,7 @@ async function assertPastorSingleChurchAssignment(input: {
     }
 
     const duplicateEmail = (emailRows || []).find(
-      (row) => row.id !== excludePastorId && row.church_id === churchId
+      (row: any) => row.id !== excludePastorId && row.church_id === churchId
     );
 
     if (duplicateEmail) {
@@ -107,7 +108,7 @@ async function assertPastorSingleChurchAssignment(input: {
 }
 
 export async function listPastors(churchId: string, activeOnly = false) {
-  let query = supabaseAdmin
+  let query = db
     .from("pastors")
     .select("id, church_id, full_name, phone_number, email, details, is_active, created_by, created_at")
     .eq("church_id", churchId)
@@ -127,7 +128,7 @@ export async function listPastors(churchId: string, activeOnly = false) {
 }
 
 export async function getPastorById(churchId: string, pastorId: string) {
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await db
     .from("pastors")
     .select("id, church_id, full_name, phone_number, email, details, is_active, created_by, created_at")
     .eq("id", pastorId)
@@ -145,7 +146,7 @@ export async function getPastorById(churchId: string, pastorId: string) {
 export async function createPastor(input: CreatePastorInput) {
   const churchId = String(input.church_id || "").trim();
   const fullName = String(input.full_name || "").trim();
-  const phoneNumber = String(input.phone_number || "").trim();
+  const phoneNumber = normalizeIndianPhone(String(input.phone_number || ""));
   const email = input.email?.trim() || "";
 
   if (!churchId) {
@@ -166,7 +167,7 @@ export async function createPastor(input: CreatePastorInput) {
     email,
   });
 
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await db
     .from("pastors")
     .insert([
       {
@@ -201,7 +202,7 @@ export async function updatePastor(churchId: string, pastorId: string, input: Up
   }
 
   if (typeof input.phone_number === "string") {
-    const phoneNumber = input.phone_number.trim();
+    const phoneNumber = normalizeIndianPhone(input.phone_number);
     if (!phoneNumber) {
       throw new Error("Pastor phone number cannot be empty");
     }
@@ -224,7 +225,7 @@ export async function updatePastor(churchId: string, pastorId: string, input: Up
     throw new Error("No pastor fields provided to update");
   }
 
-  const { data: existingPastor, error: existingPastorError } = await supabaseAdmin
+  const { data: existingPastor, error: existingPastorError } = await db
     .from("pastors")
     .select("id, church_id, phone_number, email")
     .eq("id", pastorId)
@@ -254,7 +255,7 @@ export async function updatePastor(churchId: string, pastorId: string, input: Up
     exclude_pastor_id: pastorId,
   });
 
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await db
     .from("pastors")
     .update(patch)
     .eq("id", pastorId)
@@ -292,7 +293,7 @@ export async function transferPastor(input: {
     throw new Error("Pastor not found in source church");
   }
 
-  const { data: targetChurch, error: targetChurchError } = await supabaseAdmin
+  const { data: targetChurch, error: targetChurchError } = await db
     .from("churches")
     .select("id")
     .eq("id", toChurchId)
@@ -314,17 +315,21 @@ export async function transferPastor(input: {
     exclude_pastor_id: pastorId,
   });
 
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await db
     .from("pastors")
     .update({ church_id: toChurchId })
     .eq("id", pastorId)
     .eq("church_id", fromChurchId)
     .select("id, church_id, full_name, phone_number, email, details, is_active, created_by, created_at")
-    .single<PastorRow>();
+    .maybeSingle<PastorRow>();
 
   if (error) {
     logger.error({ err: error, pastorId, fromChurchId, toChurchId }, "transferPastor failed");
     throw error;
+  }
+
+  if (!data) {
+    throw new Error("Pastor was already transferred by another request");
   }
 
   return data;
@@ -336,7 +341,7 @@ export async function deletePastor(churchId: string, pastorId: string) {
     throw new Error("Pastor not found in this church");
   }
 
-  const { error } = await supabaseAdmin
+  const { error } = await db
     .from("pastors")
     .delete()
     .eq("id", pastorId)

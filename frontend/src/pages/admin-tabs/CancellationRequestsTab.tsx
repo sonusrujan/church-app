@@ -1,0 +1,96 @@
+import { useState, useEffect, useCallback } from "react";
+import { XCircle } from "lucide-react";
+import { apiRequest } from "../../lib/api";
+import { useApp } from "../../context/AppContext";
+import Pagination, { paginate, totalPages } from "../../components/Pagination";
+import LoadingSkeleton from "../../components/LoadingSkeleton";
+import EmptyState from "../../components/EmptyState";
+import type { CancellationRequestRow } from "../../types";
+import { formatAmount, formatDate } from "../../types";
+import { useI18n } from "../../i18n";
+
+export default function CancellationRequestsTab() {
+  const { t } = useI18n();
+  const { token, busyKey, setNotice, withAuthRequest, openOperationConfirmDialog } = useApp();
+
+  const [requests, setRequests] = useState<CancellationRequestRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [filter, setFilter] = useState<"pending" | "all">("pending");
+
+  const loadRequests = useCallback(async () => {
+    if (!token) return;
+    setLoading(true);
+    try {
+      const statusParam = filter === "pending" ? "?status=pending" : "";
+      const data = await apiRequest<CancellationRequestRow[]>(`/api/requests/cancellation-requests${statusParam}`, { token });
+      setRequests(data);
+    } catch {
+      setNotice({ tone: "error", text: t("adminTabs.cancellationRequests.errorLoadFailed") });
+    } finally {
+      setLoading(false);
+    }
+  }, [token, setNotice, filter]);
+
+  useEffect(() => { void loadRequests(); }, [loadRequests]);
+
+  async function review(id: string, decision: "approved" | "rejected") {
+    await withAuthRequest("review-cancellation", async () => {
+      await apiRequest(`/api/requests/cancellation-requests/${encodeURIComponent(id)}/review`, {
+        method: "POST", token, body: { decision },
+      });
+      void loadRequests();
+    }, t("adminTabs.cancellationRequests.successReviewed", { decision }));
+  }
+
+  return (
+    <article className="panel">
+      <h3>{t("adminTabs.cancellationRequests.title")}</h3>
+      <p className="muted">{t("adminTabs.cancellationRequests.description")}</p>
+      <div className="actions-row" style={{ marginBottom: "1rem" }}>
+        <select value={filter} onChange={(e) => setFilter(e.target.value as "pending" | "all")}>
+          <option value="pending">{t("adminTabs.cancellationRequests.filterPending")}</option>
+          <option value="all">{t("adminTabs.cancellationRequests.filterAll")}</option>
+        </select>
+        <button className="btn" onClick={() => void loadRequests()} disabled={loading}>
+          {loading ? t("common.loading") : t("common.refresh")}
+        </button>
+      </div>
+      {loading && !requests.length ? (
+        <LoadingSkeleton lines={4} />
+      ) : requests.length ? (
+        <>
+          {paginate(requests, page, 10).map((req) => (
+            <div key={req.id} className="activity-event-row" style={{ flexDirection: "column", alignItems: "flex-start", gap: 6, padding: "12px 0", borderBottom: "1px solid var(--border-color, #eee)" }}>
+              <div style={{ display: "flex", gap: 12, alignItems: "center", width: "100%" }}>
+                <strong>{req.member?.full_name || t("adminTabs.cancellationRequests.fallbackMember")}</strong>
+                <span className="muted">{req.member?.email || ""}</span>
+                <span className={`event-badge ${req.status === "pending" ? "badge-system" : req.status === "approved" ? "badge-created" : "badge-overdue"}`}>{req.status}</span>
+              </div>
+              {req.reason ? <span className="muted">{t("adminTabs.cancellationRequests.labelReason")} {req.reason}</span> : null}
+              {req.subscription ? <span className="muted">{t("adminTabs.cancellationRequests.labelSubscription")} {req.subscription.plan_name} — {formatAmount(req.subscription.amount)}</span> : null}
+              <span className="muted">{t("adminTabs.cancellationRequests.labelRequested")} {formatDate(req.created_at)}</span>
+              {req.status === "pending" ? (
+                <div className="actions-row" style={{ marginTop: 4 }}>
+                  <button className="btn btn-primary" onClick={() => {
+                    openOperationConfirmDialog(
+                      t("adminTabs.cancellationRequests.approveCancellation"),
+                      t("adminTabs.cancellationRequests.approveConfirmMessage", { name: req.member?.full_name || t("adminTabs.cancellationRequests.fallbackMember"), plan: req.subscription?.plan_name || "plan" }),
+                      t("adminTabs.cancellationRequests.approveConfirmWord"),
+                      () => review(req.id, "approved"),
+                    );
+                  }} disabled={busyKey === "review-cancellation"}>{t("adminTabs.cancellationRequests.approveCancellation")}</button>
+                  <button className="btn" onClick={() => review(req.id, "rejected")} disabled={busyKey === "review-cancellation"}>{t("adminTabs.cancellationRequests.reject")}</button>
+                </div>
+              ) : null}
+              {req.review_note ? <span className="muted">{t("adminTabs.cancellationRequests.labelNote")} {req.review_note}</span> : null}
+            </div>
+          ))}
+          <Pagination page={page} total={totalPages(requests.length, 10)} onPageChange={setPage} />
+        </>
+      ) : (
+        <EmptyState icon={<XCircle size={32} />} title={t("adminTabs.cancellationRequests.emptyTitle")} description={t("adminTabs.cancellationRequests.emptyDescription")} />
+      )}
+    </article>
+  );
+}

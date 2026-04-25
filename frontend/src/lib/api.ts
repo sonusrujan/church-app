@@ -1,5 +1,38 @@
 export const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
+  import.meta.env.VITE_API_URL || "http://localhost:4000";
+
+// ── Token refresh plumbing ──
+let _onTokenRefreshed: ((newToken: string) => void) | null = null;
+let _refreshPromise: Promise<string | null> | null = null;
+
+/** App.tsx calls this once to wire up the token update callback */
+export function setTokenRefreshCallback(cb: (newToken: string) => void) {
+  _onTokenRefreshed = cb;
+}
+
+export async function tryRefreshToken(): Promise<string | null> {
+  // Deduplicate concurrent refresh calls
+  if (_refreshPromise) return _refreshPromise;
+  _refreshPromise = (async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      const newToken = data?.access_token as string | undefined;
+      if (newToken && _onTokenRefreshed) _onTokenRefreshed(newToken);
+      return newToken || null;
+    } catch {
+      return null;
+    } finally {
+      _refreshPromise = null;
+    }
+  })();
+  return _refreshPromise;
+}
 
 type ApiRequestOptions = Omit<RequestInit, "body"> & {
   token?: string;
@@ -37,6 +70,7 @@ export async function apiRequest<T>(
       headers: requestHeaders,
       body: requestBody,
       signal: controller.signal,
+      credentials: "include",
     });
   } catch (err: unknown) {
     if (err instanceof DOMException && err.name === "AbortError") {
@@ -68,7 +102,28 @@ export async function apiRequest<T>(
           `Request failed (HTTP ${response.status})`;
 
     if (response.status === 401) {
+      // Attempt silent token refresh
+      const newToken = await tryRefreshToken();
+      if (newToken) {
+        // Retry the original request with the fresh token
+        const retryHeaders = new Headers(requestHeaders);
+        retryHeaders.set("Authorization", `Bearer ${newToken}`);
+        const retryRes = await fetch(`${API_BASE_URL}${path}`, {
+          ...rest,
+          headers: retryHeaders,
+          body: requestBody,
+          credentials: "include",
+        });
+        if (retryRes.ok) {
+          const ct = retryRes.headers.get("content-type") || "";
+          return (ct.includes("application/json") ? await retryRes.json() : await retryRes.text()) as T;
+        }
+      }
       throw new Error("Session expired. Please sign in again.");
+    }
+    if (response.status === 402) {
+      // Church inactive or trial expired — surface the server message
+      throw new Error(message || "Your church subscription is inactive. Please contact support.");
     }
     if (response.status === 403) {
       throw new Error(message || "You do not have permission to perform this action.");

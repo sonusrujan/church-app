@@ -1,5 +1,5 @@
 -- Migration: Family members and per-person subscriptions
--- Run this in Supabase SQL Editor for existing projects.
+-- Run this against your PostgreSQL database for existing projects.
 
 create table if not exists family_members (
   id uuid primary key default uuid_generate_v4(),

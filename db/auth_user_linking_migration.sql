@@ -1,4 +1,4 @@
--- Migration: allow pre-registering users by email and linking Supabase Auth UUID later.
+-- Migration: allow pre-registering users by email and linking auth UUID later.
 
 begin;
 

@@ -1,103 +1,241 @@
-# SHALOM Backend
+# SHALOM — Church Management Platform
 
-## Setup
-1. Copy `.env.example` to `.env`.
-2. Fill Supabase keys.
-3. Keep `PAYMENTS_ENABLED=false` to run backend without Razorpay.
-4. Add Razorpay keys only when you enable payments later.
-5. Start dev server:
+> Full-stack church management SaaS running on **AWS** (RDS PostgreSQL, ECS Fargate, S3 + CloudFront).
+
+---
+
+## Quick Start (Local Development)
+
+### Option A: Docker Compose (recommended)
 
 ```bash
+docker-compose up
+```
+
+This starts PostgreSQL, backend (port 4000), and frontend (port 5173) automatically.
+The database is seeded from `db/aws_rds_full_schema.sql` on first run.
+
+### Option B: Manual
+
+**1. Database**
+
+Set up a local PostgreSQL instance and run the migration:
+
+```bash
+psql postgresql://user:pass@localhost:5432/shalom -f db/aws_rds_full_schema.sql
+```
+
+**2. Backend**
+
+```bash
+cp .env.example .env
+# Edit .env — set DATABASE_URL, JWT_SECRET at minimum
+npm install
 npm run dev
 ```
 
-## Frontend UI
-1. Go to `frontend` folder.
-2. Copy `frontend/.env.example` to `frontend/.env`.
-3. Fill `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
-4. Keep `VITE_API_BASE_URL=http://localhost:4000` for local dev.
-5. Run:
+**3. Frontend**
 
 ```bash
 cd frontend
+cp .env.example .env
+# Edit .env — set VITE_API_URL=http://localhost:4000
+npm install
 npm run dev
 ```
 
-Backend root now redirects to frontend (`FRONTEND_URL`, default `http://localhost:5173`) so opening `http://localhost:4000` lands on UI instead of API text.
+---
+
+## Environment Variables
+
+### Backend (`.env`)
+
+| Variable | Required | Description |
+|---|---|---|
+| `DATABASE_URL` | ✅ | PostgreSQL connection string |
+| `JWT_SECRET` | ✅ | Secret for signing JWT tokens (min 32 chars) |
+| `PORT` | | Server port (default: 4000) |
+| `FRONTEND_URL` | | Frontend origin for CORS (default: `http://localhost:5173`) |
+| `GOOGLE_CLIENT_ID` | | Google OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | | Google OAuth client secret |
+| `GOOGLE_REDIRECT_URI` | | Google OAuth callback URL |
+| `OTP_EXPIRY_MINUTES` | | OTP validity period (default: 10) |
+| `AWS_REGION` | | AWS region for SNS (default: `ap-south-1`) |
+| `AWS_ACCESS_KEY_ID` | | AWS credentials for SNS |
+| `AWS_SECRET_ACCESS_KEY` | | AWS credentials for SNS |
+| `PAYMENTS_ENABLED` | | Set `true` to enable Razorpay (default: `false`) |
+| `RAZORPAY_KEY_ID` | | Razorpay key (required if payments enabled) |
+| `RAZORPAY_KEY_SECRET` | | Razorpay secret (required if payments enabled) |
+| `SUPER_ADMIN_EMAILS` | | Comma-separated super-admin emails |
+
+### Frontend (`frontend/.env`)
+
+| Variable | Required | Description |
+|---|---|---|
+| `VITE_API_URL` | ✅ | Backend API URL (e.g. `http://localhost:4000`) |
+
+---
+
+## AWS Deployment
+
+### Architecture
+
+```
+CloudFront (CDN) ─┬─ S3 (frontend static files)
+                   └─ ALB ─── ECS Fargate (backend container)
+                                    │
+                              RDS PostgreSQL
+```
+
+### Deploy via CloudFormation
+
+```bash
+# Set required secrets
+export DB_PASSWORD="your-db-password-min-12-chars"
+export JWT_SECRET="your-jwt-secret-min-32-chars"
+
+# Run deployment
+bash aws/deploy.sh
+```
+
+The script will:
+1. Create the full AWS infrastructure (VPC, RDS, ECS, ALB, S3, CloudFront)
+2. Store secrets in SSM Parameter Store
+3. Build and push the Docker image to ECR
+4. Deploy the ECS service
+5. Build and upload the frontend to S3
+6. Invalidate the CloudFront cache
+
+### Manual Deployment Steps
+
+```bash
+# 1. Deploy infrastructure
+aws cloudformation deploy \
+  --template-file aws/cloudformation.yaml \
+  --stack-name shalom-stack \
+  --parameter-overrides DBPassword=<password> JwtSecret=<secret> \
+  --capabilities CAPABILITY_IAM
+
+# 2. Run database migration (use bastion host or VPN)
+psql <DATABASE_URL> -f db/aws_rds_full_schema.sql
+
+# 3. Build & push Docker image
+aws ecr get-login-password | docker login --username AWS --password-stdin <ECR_URI>
+docker build -t shalom-backend .
+docker tag shalom-backend:latest <ECR_URI>:latest
+docker push <ECR_URI>:latest
+
+# 4. Build & deploy frontend
+cd frontend
+VITE_API_URL=<ALB_URL> npm run build
+aws s3 sync dist/ s3://<FRONTEND_BUCKET>/ --delete
+```
+
+---
+
+## Auth System
+
+Two authentication methods:
+
+1. **OTP (Phone)** — `POST /api/auth/otp/send` → `POST /api/auth/otp/verify` → JWT issued
+2. **Google OAuth** — `GET /api/auth/google` → Google consent → callback → JWT issued
+
+All protected routes use `Authorization: Bearer <JWT>` headers.
+
+---
 
 ## API Endpoints
-- `GET /api` (API index)
-- `GET /health`
-- `POST /api/auth/sync-profile`
-- `GET /api/auth/me`
-- `GET /api/auth/member-dashboard`
-- `POST /api/auth/update-profile`
-- `POST /api/auth/family-members`
-- `POST /api/members/create`
-- `POST /api/members/link`
-- `GET /api/members/list`
-- `GET /api/members/search`
-- `GET /api/members/:id`
-- `GET /api/members/:id/delete-impact`
-- `PATCH /api/members/:id`
-- `DELETE /api/members/:id`
-- `POST /api/subscriptions/create`
-- `GET /api/subscriptions/my?member_id=...`
-- `POST /api/subscriptions/reconcile-overdue` (admin only)
-- `GET /api/payments/config`
-- `POST /api/payments/order`
-- `POST /api/payments/verify`
-- `POST /api/payments/donation/order`
-- `POST /api/payments/donation/verify`
-- `POST /api/payments/subscription/order`
-- `POST /api/payments/subscription/verify`
-- `GET /api/payments/:paymentId/receipt`
-- `POST /api/announcements/send`
-- `GET /api/announcements/list`
-- `GET /api/admins/list`
-- `GET /api/admins/search`
-- `GET /api/admins/id/:id`
-- `GET /api/admins/income`
-- `POST /api/admins/pre-register-member`
-- `POST /api/admins/grant`
-- `POST /api/admins/revoke`
-- `PATCH /api/admins/id/:id`
-- `DELETE /api/admins/id/:id`
-- `GET /api/churches/summary`
-- `GET /api/churches/search`
-- `GET /api/churches/id/:id`
-- `GET /api/churches/id/:id/delete-impact`
-- `POST /api/churches/create`
-- `PATCH /api/churches/id/:id`
-- `DELETE /api/churches/id/:id`
-- `GET /api/churches/payment-config`
-- `POST /api/churches/payment-config`
-- `GET /api/pastors/list`
-- `GET /api/pastors/:id`
-- `POST /api/pastors/create`
-- `PATCH /api/pastors/:id`
-- `DELETE /api/pastors/:id`
-- `POST /api/pastors/:id/transfer`
-- `GET /api/engagement/events`
-- `POST /api/engagement/events`
-- `GET /api/engagement/notifications`
-- `POST /api/engagement/notifications`
-- `POST /api/engagement/prayer-requests`
-- `GET /api/engagement/prayer-requests`
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/health` | Health check |
+| `GET` | `/api` | API index |
+| **Auth** | | |
+| `POST` | `/api/auth/otp/send` | Send OTP |
+| `POST` | `/api/auth/otp/verify` | Verify OTP, get JWT |
+| `GET` | `/api/auth/google` | Initiate Google OAuth |
+| `GET` | `/api/auth/google/callback` | Google OAuth callback |
+| `POST` | `/api/auth/sync-profile` | Sync user profile |
+| `GET` | `/api/auth/me` | Get current user |
+| `GET` | `/api/auth/member-dashboard` | Member dashboard data |
+| `POST` | `/api/auth/update-profile` | Update profile |
+| `POST` | `/api/auth/family-members` | Manage family members |
+| **Members** | | |
+| `POST` | `/api/members/create` | Create member |
+| `POST` | `/api/members/link` | Link member |
+| `GET` | `/api/members/list` | List members |
+| `GET` | `/api/members/search` | Search members |
+| `GET` | `/api/members/:id` | Get member |
+| `PATCH` | `/api/members/:id` | Update member |
+| `DELETE` | `/api/members/:id` | Delete member |
+| **Subscriptions** | | |
+| `POST` | `/api/subscriptions/create` | Create subscription |
+| `GET` | `/api/subscriptions/my` | My subscriptions |
+| `POST` | `/api/subscriptions/reconcile-overdue` | Reconcile overdue (admin) |
+| **Payments** | | |
+| `GET` | `/api/payments/config` | Payment config |
+| `POST` | `/api/payments/order` | Create order |
+| `POST` | `/api/payments/verify` | Verify payment |
+| `POST` | `/api/payments/donation/order` | Donation order |
+| `POST` | `/api/payments/donation/verify` | Verify donation |
+| `GET` | `/api/payments/:paymentId/receipt` | Get receipt |
+| **Churches** | | |
+| `POST` | `/api/churches/create` | Create church |
+| `GET` | `/api/churches/summary` | Church summary |
+| `GET` | `/api/churches/search` | Search churches |
+| `GET` | `/api/churches/id/:id` | Get church |
+| `PATCH` | `/api/churches/id/:id` | Update church |
+| `DELETE` | `/api/churches/id/:id` | Delete church |
+| **Pastors** | | |
+| `POST` | `/api/pastors/create` | Create pastor |
+| `GET` | `/api/pastors/list` | List pastors |
+| `GET` | `/api/pastors/:id` | Get pastor |
+| `PATCH` | `/api/pastors/:id` | Update pastor |
+| `DELETE` | `/api/pastors/:id` | Delete pastor |
+| `POST` | `/api/pastors/:id/transfer` | Transfer pastor |
+| **Admins** | | |
+| `GET` | `/api/admins/list` | List admins |
+| `GET` | `/api/admins/search` | Search admins |
+| `POST` | `/api/admins/grant` | Grant admin role |
+| `POST` | `/api/admins/revoke` | Revoke admin role |
+| **Engagement** | | |
+| `GET/POST` | `/api/engagement/events` | Events |
+| `GET/POST` | `/api/engagement/notifications` | Notifications |
+| `GET/POST` | `/api/engagement/prayer-requests` | Prayer requests |
+| `GET/POST` | `/api/announcements/*` | Announcements |
+
+---
+
+## Project Structure
+
+```
+├── aws/                    # AWS deployment configs
+│   ├── cloudformation.yaml # Full infrastructure template
+│   └── deploy.sh           # One-command deployment script
+├── db/
+│   └── aws_rds_full_schema.sql  # Combined database migration
+├── frontend/               # React 19 + Vite + Tailwind
+├── src/
+│   ├── config.ts           # Environment config
+│   ├── app.ts              # Express app setup
+│   ├── index.ts            # Server entry point
+│   ├── middleware/
+│   │   └── requireAuth.ts  # JWT auth middleware
+│   ├── routes/             # API route handlers
+│   ├── services/
+│   │   ├── supabaseClient.ts  # PostgreSQL query builder (pg Pool)
+│   │   └── *.ts            # Business logic services
+│   └── types/              # TypeScript types
+├── Dockerfile              # Multi-stage Docker build
+├── docker-compose.yml      # Local dev environment
+└── package.json
+```
 
 ## Notes
-- Use Supabase Auth token in `Authorization: Bearer <token>`.
-- `requireAuth` middleware expects Supabase JWT and user metadata includes `role`, `church_id`.
-- Add RLS policies in Supabase for row-level security.
-- Run SQL scripts in this order: `db/schema.sql` -> `db/grants.sql` -> `db/rls.sql`.
-- If upgrading existing DB, run `db/auth_user_linking_migration.sql` before using pre-registration without UID.
-- For realtime tracking on existing DBs, run `db/subscription_realtime_tracking_migration.sql`.
-- For family member subscriptions on existing DBs, run `db/family_members_subscription_migration.sql`.
-- For SHALOM churches/pastors/events/notifications/prayer modules, run `db/shalom_expansion_migration.sql`.
-- For strict single-church pastor assignment on existing DBs, run `db/pastors_single_church_enforcement_migration.sql`.
-- For payment receipt metadata on existing DBs, run `db/payment_receipt_metadata_migration.sql`.
 - Set `SUPER_ADMIN_EMAILS` in `.env`. Primary super-admin is `sonusrujan76@gmail.com`.
 - If `PAYMENTS_ENABLED=false`, `/api/payments/*` returns HTTP 503 by design.
+- The query builder in `supabaseClient.ts` provides a Supabase-compatible API over raw `pg` Pool.
+- All database access goes through AWS RDS PostgreSQL — no Supabase dependency.
 
 ## Razorpay Setup
 

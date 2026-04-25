@@ -2,6 +2,7 @@ import { Router } from "express";
 import { AuthRequest, requireAuth } from "../middleware/requireAuth";
 import { requireRegisteredUser } from "../middleware/requireRegisteredUser";
 import { isSuperAdminEmail } from "../middleware/requireSuperAdmin";
+import { safeErrorMessage } from "../utils/safeError";
 import {
   createPastor,
   deletePastor,
@@ -11,6 +12,7 @@ import {
   updatePastor,
 } from "../services/pastorService";
 import { logSuperAdminAudit } from "../utils/superAdminAudit";
+import { persistAuditLog } from "../utils/auditLog";
 
 const router = Router();
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -20,11 +22,13 @@ function resolveScopedChurchId(req: AuthRequest, requestedChurchId?: string) {
     throw new Error("Unauthenticated");
   }
 
-  const requesterIsSuperAdmin = isSuperAdminEmail(req.user.email);
+  const requesterIsSuperAdmin = isSuperAdminEmail(req.user.email, req.user.phone);
   const normalizedRequested = typeof requestedChurchId === "string" ? requestedChurchId.trim() : "";
 
   if (requesterIsSuperAdmin) {
-    return normalizedRequested || req.user.church_id;
+    const resolved = normalizedRequested || req.user.church_id;
+    if (!resolved) throw new Error("church_id is required for super admin operations");
+    return resolved;
   }
 
   return req.user.church_id;
@@ -49,7 +53,7 @@ router.get("/list", requireAuth, requireRegisteredUser, async (req: AuthRequest,
     const pastors = await listPastors(churchId, activeOnly);
     return res.json(pastors);
   } catch (err: any) {
-    return res.status(400).json({ error: err.message || "Failed to list pastors" });
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to list pastors") });
   }
 });
 
@@ -59,11 +63,11 @@ router.post("/create", requireAuth, requireRegisteredUser, async (req: AuthReque
       return res.status(401).json({ error: "Unauthenticated" });
     }
 
-    if (req.user.role !== "admin" && !isSuperAdminEmail(req.user.email)) {
+    if (req.user.role !== "admin" && !isSuperAdminEmail(req.user.email, req.user.phone)) {
       return res.status(403).json({ error: "Only admin can add pastors" });
     }
 
-    const requesterIsSuperAdmin = isSuperAdminEmail(req.user.email);
+    const requesterIsSuperAdmin = isSuperAdminEmail(req.user.email, req.user.phone);
     const requestedChurchId = typeof req.body?.church_id === "string" ? req.body.church_id.trim() : "";
     if (requesterIsSuperAdmin && !requestedChurchId) {
       return res.status(400).json({ error: "church_id is required to create pastor" });
@@ -88,10 +92,11 @@ router.post("/create", requireAuth, requireRegisteredUser, async (req: AuthReque
       church_id: churchId,
       full_name: pastor.full_name,
     });
+    await persistAuditLog(req, "pastor.create", "pastor", pastor.id, { church_id: churchId });
 
     return res.json(pastor);
   } catch (err: any) {
-    return res.status(400).json({ error: err.message || "Failed to create pastor" });
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to create pastor") });
   }
 });
 
@@ -101,7 +106,7 @@ router.patch("/:id", requireAuth, requireRegisteredUser, async (req: AuthRequest
       return res.status(401).json({ error: "Unauthenticated" });
     }
 
-    if (req.user.role !== "admin" && !isSuperAdminEmail(req.user.email)) {
+    if (req.user.role !== "admin" && !isSuperAdminEmail(req.user.email, req.user.phone)) {
       return res.status(403).json({ error: "Only admin can update pastors" });
     }
 
@@ -126,10 +131,11 @@ router.patch("/:id", requireAuth, requireRegisteredUser, async (req: AuthRequest
       pastor_id: pastorId,
       church_id: churchId,
     });
+    await persistAuditLog(req, "pastor.update", "pastor", pastorId, { church_id: churchId });
 
     return res.json(pastor);
   } catch (err: any) {
-    return res.status(400).json({ error: err.message || "Failed to update pastor" });
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to update pastor") });
   }
 });
 
@@ -139,7 +145,7 @@ router.get("/:id", requireAuth, requireRegisteredUser, async (req: AuthRequest, 
       return res.status(401).json({ error: "Unauthenticated" });
     }
 
-    if (req.user.role !== "admin" && !isSuperAdminEmail(req.user.email)) {
+    if (req.user.role !== "admin" && !isSuperAdminEmail(req.user.email, req.user.phone)) {
       return res.status(403).json({ error: "Only admin can fetch pastor details" });
     }
 
@@ -159,7 +165,7 @@ router.get("/:id", requireAuth, requireRegisteredUser, async (req: AuthRequest, 
 
     return res.json(pastor);
   } catch (err: any) {
-    return res.status(400).json({ error: err.message || "Failed to fetch pastor" });
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to fetch pastor") });
   }
 });
 
@@ -169,7 +175,7 @@ router.delete("/:id", requireAuth, requireRegisteredUser, async (req: AuthReques
       return res.status(401).json({ error: "Unauthenticated" });
     }
 
-    if (req.user.role !== "admin" && !isSuperAdminEmail(req.user.email)) {
+    if (req.user.role !== "admin" && !isSuperAdminEmail(req.user.email, req.user.phone)) {
       return res.status(403).json({ error: "Only admin can delete pastors" });
     }
 
@@ -187,9 +193,10 @@ router.delete("/:id", requireAuth, requireRegisteredUser, async (req: AuthReques
       pastor_id: pastorId,
       church_id: churchId,
     });
+    await persistAuditLog(req, "pastor.delete", "pastor", pastorId, { church_id: churchId });
     return res.json(result);
   } catch (err: any) {
-    return res.status(400).json({ error: err.message || "Failed to delete pastor" });
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to delete pastor") });
   }
 });
 
@@ -199,7 +206,7 @@ router.post("/:id/transfer", requireAuth, requireRegisteredUser, async (req: Aut
       return res.status(401).json({ error: "Unauthenticated" });
     }
 
-    if (!isSuperAdminEmail(req.user.email)) {
+    if (!isSuperAdminEmail(req.user.email, req.user.phone)) {
       return res.status(403).json({ error: "Only super admin can transfer pastors across churches" });
     }
 
@@ -207,7 +214,13 @@ router.post("/:id/transfer", requireAuth, requireRegisteredUser, async (req: Aut
     if (!pastorId || !UUID_REGEX.test(pastorId)) {
       return res.status(400).json({ error: "Invalid pastor ID format" });
     }
-    const fromChurchId = resolveScopedChurchId(req, req.body?.from_church_id || req.body?.church_id);
+
+    // Super admins must explicitly provide from_church_id (no defaulting to own church)
+    const explicitFromChurchId = typeof req.body?.from_church_id === "string" ? req.body.from_church_id.trim() : "";
+    if (!explicitFromChurchId) {
+      return res.status(400).json({ error: "from_church_id is required for pastor transfers" });
+    }
+    const fromChurchId = explicitFromChurchId;
     const toChurchId = typeof req.body?.to_church_id === "string" ? req.body.to_church_id.trim() : "";
 
     if (!fromChurchId || !toChurchId) {
@@ -225,10 +238,11 @@ router.post("/:id/transfer", requireAuth, requireRegisteredUser, async (req: Aut
       from_church_id: fromChurchId,
       to_church_id: toChurchId,
     });
+    await persistAuditLog(req, "pastor.transfer", "pastor", pastorId, { from_church_id: fromChurchId, to_church_id: toChurchId });
 
     return res.json(transferred);
   } catch (err: any) {
-    return res.status(400).json({ error: err.message || "Failed to transfer pastor" });
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to transfer pastor") });
   }
 });
 

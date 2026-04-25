@@ -1,0 +1,6 @@
+{
+  "containerOverrides": [{
+    "name": "backend",
+    "command": ["sh", "-c", "PGPASSWORD=ShalomDB2026Secure psql 'host=shalom-db.czqqcm2c0efn.ap-south-1.rds.amazonaws.com port=5432 dbname=shalom user=shalom_admin sslmode=require' -c \"ALTER TABLE ad_banners ADD COLUMN IF NOT EXISTS media_type text NOT NULL DEFAULT 'image' CHECK (media_type IN ('image', 'video', 'gif'))\" -c \"ALTER TABLE ad_banners ADD COLUMN IF NOT EXISTS position text NOT NULL DEFAULT 'bottom' CHECK (position IN ('top', 'bottom'))\" -c \"ALTER TABLE church_events ADD COLUMN IF NOT EXISTS image_url text\" -c \"ALTER TABLE church_notifications ADD COLUMN IF NOT EXISTS image_url text\" -c \"UPDATE leadership_roles SET name = 'Deanery Chairman' WHERE name = 'DC'\""]
+  }]
+}

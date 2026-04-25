@@ -1,5 +1,5 @@
 import Razorpay from "razorpay";
-import { supabaseAdmin } from "./supabaseClient";
+import { db } from "./dbClient";
 import { logger } from "../utils/logger";
 import { recordSubscriptionEvent } from "./subscriptionTrackingService";
 import { createReceiptNumber } from "./receiptService";
@@ -14,6 +14,8 @@ type RazorpayCredentials = {
   key_secret: string;
 };
 
+// HIGH-05: LRU cache for Razorpay clients with max 100 entries
+const MAX_RAZORPAY_CLIENTS = 100;
 const razorpayClients = new Map<string, Razorpay>();
 
 function getRazorpayClient(credentials: RazorpayCredentials) {
@@ -23,33 +25,61 @@ function getRazorpayClient(credentials: RazorpayCredentials) {
 
   const cached = razorpayClients.get(credentials.key_id);
   if (cached) {
+    // Move to end (most recently used)
+    razorpayClients.delete(credentials.key_id);
+    razorpayClients.set(credentials.key_id, cached);
     return cached;
   }
 
-  const client = new Razorpay({
-    key_id: credentials.key_id,
-    key_secret: credentials.key_secret,
-  });
-
-  razorpayClients.set(credentials.key_id, client);
-  return client;
+  try {
+    const client = new Razorpay({
+      key_id: credentials.key_id,
+      key_secret: credentials.key_secret,
+    });
+    // Evict oldest if at capacity
+    if (razorpayClients.size >= MAX_RAZORPAY_CLIENTS) {
+      const oldest = razorpayClients.keys().next().value;
+      if (oldest) razorpayClients.delete(oldest);
+    }
+    razorpayClients.set(credentials.key_id, client);
+    return client;
+  } catch (err) {
+    logger.error({ err }, "Failed to initialize Razorpay SDK");
+    throw new Error("Payment gateway initialization failed. Please contact support.");
+  }
 }
 
 export async function createPaymentOrder(
   amount: number,
   currency = "INR",
   receipt = "church_receipt",
-  credentials: RazorpayCredentials
+  credentials: RazorpayCredentials,
+  notes?: Record<string, string>
 ) {
   const client = getRazorpayClient(credentials);
-  const options = {
+  const options: Record<string, unknown> = {
     amount: Math.round(amount * 100),
     currency,
     receipt,
     payment_capture: 1,
   };
-  const order = await client.orders.create(options);
+  if (notes) options.notes = notes;
+  const order = await client.orders.create(options as any);
   return order;
+}
+
+export async function fetchRazorpayOrder(
+  orderId: string,
+  credentials: RazorpayCredentials
+): Promise<{ amount: number; amount_paid: number; status: string; notes?: Record<string, string> }> {
+  const client = getRazorpayClient(credentials);
+  const order = await client.orders.fetch(orderId);
+  return {
+    amount: Number(order.amount) / 100,
+    amount_paid: Number(order.amount_paid) / 100,
+    status: String(order.status),
+    notes: (order as any).notes || undefined,
+  };
 }
 
 export async function verifyPayment(
@@ -68,12 +98,23 @@ export async function verifyPayment(
     .update(`${order_id}|${payment_id}`)
     .digest("hex");
 
-  return generated_signature === signature;
+  // LOW-06: Pad to same length before timingSafeEqual to avoid timing leak on length
+  const genBuf = Buffer.from(generated_signature, "hex");
+  const sigBuf = Buffer.from(signature, "hex");
+
+  if (genBuf.length !== sigBuf.length) {
+    // Compare against expected to prevent timing info on length mismatch
+    crypto.timingSafeEqual(genBuf, genBuf);
+    return false;
+  }
+
+  return crypto.timingSafeEqual(genBuf, sigBuf);
 }
 
 export interface CreatePaymentInput {
   member_id: string;
   subscription_id?: string | null;
+  church_id?: string | null;
   amount: number;
   payment_method?: string | null;
   transaction_id?: string | null;
@@ -81,22 +122,34 @@ export interface CreatePaymentInput {
   payment_date: string;
   receipt_number?: string | null;
   receipt_generated_at?: string | null;
-}
-
-function isMissingReceiptMetadataColumnError(error: unknown) {
-  const message =
-    typeof error === "object" && error !== null && "message" in error
-      ? String((error as { message?: unknown }).message || "")
-      : "";
-
-  const normalized = message.toLowerCase();
-  return (
-    (normalized.includes("receipt_number") && normalized.includes("does not exist")) ||
-    (normalized.includes("receipt_generated_at") && normalized.includes("does not exist"))
-  );
+  fund_name?: string | null;
 }
 
 export async function storePayment(input: CreatePaymentInput) {
+  // Idempotency: if a payment with the same transaction_id + subscription_id already exists, return it.
+  // For multi-subscription payments the same razorpay_payment_id is used across subscriptions,
+  // so subscription_id is part of the key to avoid blocking the 2nd+ payment.
+  if (input.transaction_id) {
+    let query = db
+      .from("payments")
+      .select("id, receipt_number")
+      .eq("transaction_id", input.transaction_id)
+      .eq("member_id", input.member_id);
+
+    if (input.subscription_id) {
+      query = query.eq("subscription_id", input.subscription_id);
+    } else {
+      query = query.is("subscription_id", null);
+    }
+
+    const { data: existing } = await query.maybeSingle<StoredPaymentRow>();
+
+    if (existing) {
+      logger.info({ transactionId: input.transaction_id, paymentId: existing.id }, "Duplicate payment detected, returning existing record");
+      return existing;
+    }
+  }
+
   const paymentDate = input.payment_date || new Date().toISOString();
   const receiptNumber =
     input.receipt_number ||
@@ -110,6 +163,7 @@ export async function storePayment(input: CreatePaymentInput) {
   const payload = {
     member_id: input.member_id,
     subscription_id: input.subscription_id || null,
+    church_id: input.church_id || null,
     amount: input.amount,
     payment_method: input.payment_method || null,
     transaction_id: input.transaction_id || null,
@@ -117,64 +171,14 @@ export async function storePayment(input: CreatePaymentInput) {
     payment_date: paymentDate,
     receipt_number: receiptNumber,
     receipt_generated_at: receiptGeneratedAt,
+    fund_name: input.fund_name || null,
   };
 
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await db
     .from("payments")
     .insert([payload])
     .select("id, receipt_number")
     .single<StoredPaymentRow>();
-
-  if (error && isMissingReceiptMetadataColumnError(error)) {
-    const legacyPayload = {
-      member_id: input.member_id,
-      subscription_id: input.subscription_id || null,
-      amount: input.amount,
-      payment_method: input.payment_method || null,
-      transaction_id: input.transaction_id || null,
-      payment_status: input.payment_status,
-      payment_date: paymentDate,
-    };
-
-    const { data: legacyData, error: legacyError } = await supabaseAdmin
-      .from("payments")
-      .insert([legacyPayload])
-      .select("id")
-      .single<{ id: string }>();
-
-    if (legacyError) {
-      logger.error({ err: legacyError }, "storePayment failed (legacy fallback)");
-      throw legacyError;
-    }
-
-    if (!legacyData) {
-      throw new Error("Payment stored but no row returned");
-    }
-
-    try {
-      await recordSubscriptionEvent({
-        member_id: input.member_id,
-        subscription_id: input.subscription_id || null,
-        event_type: "payment_recorded",
-        status_after: input.payment_status,
-        amount: Number(input.amount),
-        source: "payment_gateway",
-        metadata: {
-          payment_method: input.payment_method || null,
-          transaction_id: input.transaction_id || null,
-          payment_date: paymentDate,
-          receipt_number: receiptNumber,
-        },
-      });
-    } catch (eventErr) {
-      logger.warn({ err: eventErr, paymentId: legacyData.id }, "storePayment event insert failed");
-    }
-
-    return {
-      id: legacyData.id,
-      receipt_number: null,
-    } as StoredPaymentRow;
-  }
 
   if (error) {
     logger.error({ err: error }, "storePayment failed");

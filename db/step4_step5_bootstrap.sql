@@ -6,7 +6,7 @@
 --
 -- How to use:
 -- 1) Make sure the admin has already logged in once with Google in your app.
--- 2) In Supabase Dashboard -> Authentication -> Users, copy that user's UUID.
+-- 2) In your auth system -> Users, copy that user's UUID.
 -- 3) Replace values in the declare block below.
 -- 4) Run the script in SQL Editor.
 

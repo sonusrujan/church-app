@@ -9,6 +9,21 @@ interface State {
   error: Error | null;
 }
 
+const fallbackStrings: Record<string, { title: string; fallback: string; reload: string }> = {
+  en: { title: "Something went wrong", fallback: "An unexpected error occurred.", reload: "Reload App" },
+  hi: { title: "कुछ गलत हो गया", fallback: "एक अप्रत्याशित त्रुटि हुई।", reload: "ऐप पुनः लोड करें" },
+  ta: { title: "ஏதோ தவறு ஏற்பட்டது", fallback: "எதிர்பாராத பிழை ஏற்பட்டது.", reload: "செயலியை மீளேற்றவும்" },
+  te: { title: "ఏదో తప్పు జరిగింది", fallback: "ఊహించని లోపం సంభవించింది.", reload: "యాప్ రీలోడ్ చేయండి" },
+  ml: { title: "എന്തോ കുഴപ്പം സംഭവിച്ചു", fallback: "ഒരു അപ്രതീക്ഷിത പിശക് സംഭവിച്ചു.", reload: "ആപ്പ് റീലോഡ് ചെയ്യുക" },
+  kn: { title: "ಏನೋ ತಪ್ಪಾಗಿದೆ", fallback: "ಅನಿರೀಕ್ಷಿತ ದೋಷ ಸಂಭವಿಸಿದೆ.", reload: "ಆಪ್ ಮರುಲೋಡ್ ಮಾಡಿ" },
+};
+
+function getStrings() {
+  const saved = typeof localStorage !== "undefined" ? localStorage.getItem("language") : null;
+  const lang = saved || navigator.language?.slice(0, 2) || "en";
+  return fallbackStrings[lang] || fallbackStrings.en;
+}
+
 export class ErrorBoundary extends Component<Props, State> {
   constructor(props: Props) {
     super(props);
@@ -25,41 +40,21 @@ export class ErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.hasError) {
+      const s = getStrings();
       return (
-        <div style={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          minHeight: "100vh",
-          padding: "2rem",
-          textAlign: "center",
-          fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif",
-          color: "#1d1d1f",
-          background: "#f5f5f7",
-        }}>
-          <h1 style={{ fontSize: "1.5rem", fontWeight: 600, marginBottom: "0.5rem" }}>
-            Something went wrong
-          </h1>
-          <p style={{ color: "#86868b", maxWidth: 420, marginBottom: "1.5rem" }}>
-            {this.state.error?.message || "An unexpected error occurred."}
+        <div className="error-boundary-root">
+          <h1>{s.title}</h1>
+          <p>
+            {this.state.error?.message || s.fallback}
           </p>
           <button
             onClick={() => {
               this.setState({ hasError: false, error: null });
               window.location.href = "/";
             }}
-            style={{
-              padding: "0.5rem 1.25rem",
-              borderRadius: "980px",
-              border: "none",
-              background: "#0071e3",
-              color: "#fff",
-              fontSize: "0.875rem",
-              cursor: "pointer",
-            }}
+            className="error-boundary-root-btn"
           >
-            Reload App
+            {s.reload}
           </button>
         </div>
       );

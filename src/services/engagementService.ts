@@ -1,22 +1,13 @@
-import { supabaseAdmin } from "./supabaseClient";
+import { db, pool } from "./dbClient";
 import { logger } from "../utils/logger";
-import { sendEmail } from "./mailerService";
+import { enqueueEmailJob } from "./jobQueueService";
 import { APP_NAME } from "../config";
-
-type PastorRecipientRow = {
-  id: string;
-  church_id: string;
-  full_name: string;
-  phone_number: string;
-  email: string | null;
-  details: string | null;
-  is_active: boolean;
-};
 
 type MemberLookupRow = {
   id: string;
   full_name: string;
   email: string;
+  user_id: string | null;
   church_id: string | null;
 };
 
@@ -25,10 +16,11 @@ export async function createChurchEvent(input: {
   title: string;
   message: string;
   event_date?: string;
+  image_url?: string;
   created_by?: string;
 }) {
-  const title = String(input.title || "").trim();
-  const message = String(input.message || "").trim();
+  const title = String(input.title || "").trim().replace(/<[^>]*>/g, "");
+  const message = String(input.message || "").trim().replace(/<[^>]*>/g, "");
 
   if (!title || !message) {
     throw new Error("title and message are required");
@@ -39,7 +31,21 @@ export async function createChurchEvent(input: {
       ? new Date(input.event_date).toISOString()
       : null;
 
-  const { data, error } = await supabaseAdmin
+  if (eventDate) {
+    const eventDay = new Date(eventDate);
+    eventDay.setHours(0, 0, 0, 0);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (eventDay < today) {
+      throw new Error("Event date cannot be in the past");
+    }
+  }
+
+  const imageUrl = typeof input.image_url === "string" && input.image_url.trim()
+    ? input.image_url.trim()
+    : null;
+
+  const { data, error } = await db
     .from("church_events")
     .insert([
       {
@@ -47,10 +53,11 @@ export async function createChurchEvent(input: {
         title,
         message,
         event_date: eventDate,
+        image_url: imageUrl,
         created_by: input.created_by || null,
       },
     ])
-    .select("id, church_id, title, message, event_date, created_by, created_at")
+    .select("id, church_id, title, message, event_date, image_url, created_by, created_at")
     .single();
 
   if (error) {
@@ -62,11 +69,12 @@ export async function createChurchEvent(input: {
 }
 
 export async function listChurchEvents(churchId: string) {
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await db
     .from("church_events")
-    .select("id, church_id, title, message, event_date, created_by, created_at")
+    .select("id, church_id, title, message, event_date, image_url, created_by, created_at")
     .eq("church_id", churchId)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .limit(200);
 
   if (error) {
     logger.error({ err: error, churchId }, "listChurchEvents failed");
@@ -80,26 +88,32 @@ export async function createChurchNotification(input: {
   church_id: string;
   title: string;
   message: string;
+  image_url?: string;
   created_by?: string;
 }) {
-  const title = String(input.title || "").trim();
-  const message = String(input.message || "").trim();
+  const title = String(input.title || "").trim().replace(/<[^>]*>/g, "");
+  const message = String(input.message || "").trim().replace(/<[^>]*>/g, "");
 
   if (!title || !message) {
     throw new Error("title and message are required");
   }
 
-  const { data, error } = await supabaseAdmin
+  const imageUrl = typeof input.image_url === "string" && input.image_url.trim()
+    ? input.image_url.trim()
+    : null;
+
+  const { data, error } = await db
     .from("church_notifications")
     .insert([
       {
         church_id: input.church_id,
         title,
         message,
+        image_url: imageUrl,
         created_by: input.created_by || null,
       },
     ])
-    .select("id, church_id, title, message, created_by, created_at")
+    .select("id, church_id, title, message, image_url, created_by, created_at")
     .single();
 
   if (error) {
@@ -110,22 +124,151 @@ export async function createChurchNotification(input: {
   return data;
 }
 
-export async function listChurchNotifications(churchId: string) {
-  const { data, error } = await supabaseAdmin
+export async function listChurchNotifications(churchId: string, limit = 100, offset = 0) {
+  const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
+  const safeOffset = Math.max(Number(offset) || 0, 0);
+
+  const { data, error } = await db
     .from("church_notifications")
-    .select("id, church_id, title, message, created_by, created_at")
+    .select("id, church_id, title, message, image_url, created_by, created_at")
     .eq("church_id", churchId)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .range(safeOffset, safeOffset + safeLimit - 1);
 
   if (error) {
     logger.error({ err: error, churchId }, "listChurchNotifications failed");
     throw error;
   }
 
+  // Filter out any legacy family-related notifications
+  return (data || []).filter((n: any) => {
+    const t = (n.title || "").toLowerCase();
+    return !t.includes("family member");
+  });
+}
+
+// ── Event update / delete ──
+
+export async function updateChurchEvent(
+  eventId: string,
+  churchId: string,
+  input: { title?: string; message?: string; event_date?: string | null; image_url?: string | null },
+) {
+  const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+
+  if (typeof input.title === "string") {
+    const t = input.title.trim().replace(/<[^>]*>/g, "");
+    if (!t) throw new Error("title cannot be empty");
+    updates.title = t;
+  }
+  if (typeof input.message === "string") {
+    const m = input.message.trim().replace(/<[^>]*>/g, "");
+    if (!m) throw new Error("message cannot be empty");
+    updates.message = m;
+  }
+  if (input.event_date !== undefined) {
+    if (input.event_date === null || input.event_date === "") {
+      updates.event_date = null;
+    } else {
+      const d = new Date(input.event_date);
+      if (isNaN(d.getTime())) throw new Error("Invalid event_date");
+      updates.event_date = d.toISOString();
+    }
+  }
+  if (input.image_url !== undefined) {
+    updates.image_url = typeof input.image_url === "string" && input.image_url.trim() ? input.image_url.trim() : null;
+  }
+
+  const { data, error } = await db
+    .from("church_events")
+    .update(updates)
+    .eq("id", eventId)
+    .eq("church_id", churchId)
+    .select("id, church_id, title, message, event_date, image_url, created_by, created_at")
+    .single();
+
+  if (error) {
+    logger.error({ err: error, eventId, churchId }, "updateChurchEvent failed");
+    throw error;
+  }
+  return data;
+}
+
+// ── Notification update / delete ──
+
+export async function updateChurchNotification(
+  notificationId: string,
+  churchId: string,
+  input: { title?: string; message?: string; image_url?: string | null },
+) {
+  const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+
+  if (typeof input.title === "string") {
+    const t = input.title.trim().replace(/<[^>]*>/g, "");
+    if (!t) throw new Error("title cannot be empty");
+    updates.title = t;
+  }
+  if (typeof input.message === "string") {
+    const m = input.message.trim().replace(/<[^>]*>/g, "");
+    if (!m) throw new Error("message cannot be empty");
+    updates.message = m;
+  }
+  if (input.image_url !== undefined) {
+    updates.image_url = typeof input.image_url === "string" && input.image_url.trim() ? input.image_url.trim() : null;
+  }
+
+  const { data, error } = await db
+    .from("church_notifications")
+    .update(updates)
+    .eq("id", notificationId)
+    .eq("church_id", churchId)
+    .select("id, church_id, title, message, image_url, created_by, created_at")
+    .single();
+
+  if (error) {
+    logger.error({ err: error, notificationId, churchId }, "updateChurchNotification failed");
+    throw error;
+  }
+  return data;
+}
+
+// ── List all events/notifications across churches (super admin) ──
+
+export async function listAllEvents(limit = 100, offset = 0) {
+  const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
+  const safeOffset = Math.max(Number(offset) || 0, 0);
+
+  const { data, error } = await db
+    .from("church_events")
+    .select("id, church_id, title, message, event_date, created_by, created_at")
+    .order("created_at", { ascending: false })
+    .range(safeOffset, safeOffset + safeLimit - 1);
+
+  if (error) {
+    logger.error({ err: error }, "listAllEvents failed");
+    throw error;
+  }
   return data || [];
 }
 
-function normalizePastorIds(value: unknown) {
+export async function listAllNotifications(limit = 100, offset = 0) {
+  const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
+  const safeOffset = Math.max(Number(offset) || 0, 0);
+
+  const { data, error } = await db
+    .from("church_notifications")
+    .select("id, church_id, title, message, created_by, created_at")
+    .order("created_at", { ascending: false })
+    .range(safeOffset, safeOffset + safeLimit - 1);
+
+  if (error) {
+    logger.error({ err: error }, "listAllNotifications failed");
+    throw error;
+  }
+  return data || [];
+}
+
+function normalizeLeaderIds(value: unknown) {
   if (!Array.isArray(value)) {
     return [] as string[];
   }
@@ -138,55 +281,105 @@ function normalizePastorIds(value: unknown) {
 export async function createPrayerRequest(input: {
   church_id: string;
   member_email: string;
-  pastor_ids: unknown;
+  member_phone?: string;
+  member_user_id?: string;
+  leader_ids: unknown;
   details: string;
 }) {
-  const details = String(input.details || "").trim();
+  const details = String(input.details || "").trim().replace(/<[^>]*>/g, "");
   if (!details) {
     throw new Error("Prayer request details are required");
   }
 
-  const pastorIds = normalizePastorIds(input.pastor_ids);
-  if (!pastorIds.length) {
-    throw new Error("Select at least one pastor");
+  const normalizedEmail = String(input.member_email || "").trim().toLowerCase();
+  const normalizedPhone = String(input.member_phone || "").trim();
+
+  if ((!normalizedEmail || !normalizedEmail.includes("@")) && !normalizedPhone && !input.member_user_id) {
+    throw new Error("Member identification is required (email or phone)");
   }
 
-  const { data: pastors, error: pastorsError } = await supabaseAdmin
-    .from("pastors")
-    .select("id, church_id, full_name, phone_number, email, details, is_active")
-    .in("id", pastorIds)
+  const leaderIds = normalizeLeaderIds(input.leader_ids);
+  if (!leaderIds.length) {
+    throw new Error("Select at least one leader");
+  }
+
+  const { data: leaders, error: leadersError } = await db
+    .from("church_leadership")
+    .select("id, church_id, full_name, phone_number, email, bio, is_active")
+    .in("id", leaderIds)
     .eq("church_id", input.church_id)
     .eq("is_active", true);
 
-  if (pastorsError) {
-    logger.error({ err: pastorsError, churchId: input.church_id }, "createPrayerRequest pastors lookup failed");
-    throw pastorsError;
+  if (leadersError) {
+    logger.error({ err: leadersError, churchId: input.church_id }, "createPrayerRequest leaders lookup failed");
+    throw leadersError;
   }
 
-  const recipients = (pastors || []) as PastorRecipientRow[];
-  if (recipients.length !== pastorIds.length) {
-    throw new Error("One or more selected pastors are invalid for your church");
+  const recipients = (leaders || []) as Array<{
+    id: string;
+    church_id: string;
+    full_name: string;
+    phone_number: string | null;
+    email: string | null;
+    bio: string | null;
+    is_active: boolean;
+  }>;
+  if (recipients.length !== leaderIds.length) {
+    throw new Error("One or more selected leaders are invalid for your church");
   }
 
-  const { data: member, error: memberError } = await supabaseAdmin
-    .from("members")
-    .select("id, full_name, email, church_id")
-    .ilike("email", input.member_email.trim().toLowerCase())
-    .eq("church_id", input.church_id)
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle<MemberLookupRow>();
+  // Resolve member by user_id, then email, then phone
+  let member: MemberLookupRow | null = null;
 
-  if (memberError) {
-    logger.error({ err: memberError, email: input.member_email }, "createPrayerRequest member lookup failed");
-    throw memberError;
+  if (input.member_user_id) {
+    const { data: byUserId } = await db
+      .from("members")
+      .select("id, full_name, email, user_id, church_id")
+      .eq("user_id", input.member_user_id)
+      .eq("church_id", input.church_id)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle<MemberLookupRow>();
+    if (byUserId) member = byUserId;
+  }
+
+  if (!member && normalizedEmail && normalizedEmail.includes("@")) {
+    const { data: byEmail, error: memberError } = await db
+      .from("members")
+      .select("id, full_name, email, user_id, church_id")
+      .ilike("email", normalizedEmail)
+      .eq("church_id", input.church_id)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle<MemberLookupRow>();
+    if (memberError) {
+      logger.error({ err: memberError, email: normalizedEmail }, "createPrayerRequest member lookup by email failed");
+      throw memberError;
+    }
+    if (byEmail) member = byEmail;
+  }
+
+  if (!member && normalizedPhone) {
+    const { data: byPhone, error: phoneError } = await db
+      .from("members")
+      .select("id, full_name, email, user_id, church_id")
+      .eq("phone_number", normalizedPhone)
+      .eq("church_id", input.church_id)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle<MemberLookupRow>();
+    if (phoneError) {
+      logger.error({ err: phoneError, phone: normalizedPhone }, "createPrayerRequest member lookup by phone failed");
+      throw phoneError;
+    }
+    if (byPhone) member = byPhone;
   }
 
   if (!member) {
     throw new Error("Member profile not found for prayer request");
   }
 
-  const { data: prayerRequest, error: prayerRequestError } = await supabaseAdmin
+  const { data: prayerRequest, error: prayerRequestError } = await db
     .from("prayer_requests")
     .insert([
       {
@@ -208,7 +401,7 @@ export async function createPrayerRequest(input: {
 
   const deliveryRows: Array<{
     prayer_request_id: string;
-    pastor_id: string;
+    leader_id: string;
     pastor_email: string | null;
     delivery_status: string;
     delivery_note: string | null;
@@ -216,51 +409,116 @@ export async function createPrayerRequest(input: {
   }> = [];
 
   for (const recipient of recipients) {
-    if (!recipient.email) {
+    if (!recipient.email && !recipient.phone_number) {
       deliveryRows.push({
         prayer_request_id: prayerRequest.id,
-        pastor_id: recipient.id,
+        leader_id: recipient.id,
         pastor_email: null,
         delivery_status: "skipped",
-        delivery_note: "Pastor email missing",
+        delivery_note: "Leader contact info missing",
         delivered_at: null,
       });
       continue;
     }
 
-    const subject = `${APP_NAME} Prayer Request from ${member.full_name}`;
+    const subject = `${APP_NAME.toUpperCase} Prayer Request from ${member.full_name}`;
+    const memberContact = member.email || "phone user";
     const text = [
-      `Prayer request from ${member.full_name} (${member.email})`,
+      `Prayer request from ${member.full_name} (${memberContact})`,
       "",
       details,
       "",
       `Requested at: ${new Date().toISOString()}`,
     ].join("\n");
 
-    const sendResult = await sendEmail({
-      to: recipient.email,
-      subject,
-      text,
-    });
+    // Send email if available
+    if (recipient.email) {
+      try {
+        await enqueueEmailJob(recipient.email, subject, text);
+        deliveryRows.push({
+          prayer_request_id: prayerRequest.id,
+          leader_id: recipient.id,
+          pastor_email: recipient.email,
+          delivery_status: "queued",
+          delivery_note: "Queued for async email delivery",
+          delivered_at: null,
+        });
+      } catch (queueErr) {
+        logger.warn({ err: queueErr, leaderId: recipient.id }, "Failed to queue prayer request email");
+        deliveryRows.push({
+          prayer_request_id: prayerRequest.id,
+          leader_id: recipient.id,
+          pastor_email: recipient.email,
+          delivery_status: "failed",
+          delivery_note: "Failed to queue email for delivery",
+          delivered_at: null,
+        });
+      }
+    }
 
-    deliveryRows.push({
-      prayer_request_id: prayerRequest.id,
-      pastor_id: recipient.id,
-      pastor_email: recipient.email,
-      delivery_status: sendResult.delivered ? "sent" : "queued",
-      delivery_note: sendResult.note,
-      delivered_at: sendResult.delivered ? new Date().toISOString() : null,
-    });
+    // Also send SMS if leader has phone number
+    if (recipient.phone_number) {
+      try {
+        const smsBody = `${APP_NAME}: Prayer request from ${member.full_name} — "${details.slice(0, 120)}${details.length > 120 ? "..." : ""}"`;
+        const { sendSmsNow } = await import("./notificationService");
+        const smsResult = await sendSmsNow(recipient.phone_number, smsBody);
+        if (!smsResult.success) {
+          logger.warn({ leaderId: recipient.id, phone: recipient.phone_number, error: smsResult.error }, "Prayer request SMS failed");
+        }
+        // If no email was sent, record the SMS as the delivery
+        if (!recipient.email) {
+          deliveryRows.push({
+            prayer_request_id: prayerRequest.id,
+            leader_id: recipient.id,
+            pastor_email: null,
+            delivery_status: smsResult.success ? "queued" : "failed",
+            delivery_note: smsResult.success ? "Delivered via SMS" : `SMS failed: ${smsResult.error}`,
+            delivered_at: smsResult.success ? new Date().toISOString() : null,
+          });
+        }
+      } catch (smsErr) {
+        logger.warn({ err: smsErr, leaderId: recipient.id }, "Failed to send prayer request SMS");
+        if (!recipient.email) {
+          deliveryRows.push({
+            prayer_request_id: prayerRequest.id,
+            leader_id: recipient.id,
+            pastor_email: null,
+            delivery_status: "failed",
+            delivery_note: "Failed to send SMS",
+            delivered_at: null,
+          });
+        }
+      }
+    }
   }
 
-  const { data: insertedRecipients, error: recipientsError } = await supabaseAdmin
+  const { data: insertedRecipients, error: recipientsError } = await db
     .from("prayer_request_recipients")
     .insert(deliveryRows)
-    .select("id, prayer_request_id, pastor_id, pastor_email, delivery_status, delivery_note, delivered_at, created_at");
+    .select("id, prayer_request_id, leader_id, pastor_email, delivery_status, delivery_note, delivered_at, created_at");
 
   if (recipientsError) {
     logger.error({ err: recipientsError, prayerRequestId: prayerRequest.id }, "createPrayerRequest recipients insert failed");
     throw recipientsError;
+  }
+
+  // Push confirmation to the submitter
+  const queuedCount = deliveryRows.filter(r => r.delivery_status === "queued").length;
+  if (member.user_id && member.church_id && queuedCount > 0) {
+    try {
+      const { queueNotification } = await import("./notificationService");
+      await queueNotification({
+        church_id: member.church_id,
+        recipient_user_id: member.user_id,
+        channel: "push",
+        notification_type: "prayer_request_confirmation",
+        subject: "Prayer Request Submitted",
+        body: `Your prayer request has been sent to ${queuedCount} leader${queuedCount > 1 ? "s" : ""}. They will keep you in their prayers.`,
+        metadata: { url: "/prayer-request" },
+      });
+    } catch (notifErr) {
+      logger.warn({ err: notifErr }, "Failed to send prayer request confirmation push");
+    }
   }
 
   return {
@@ -269,23 +527,175 @@ export async function createPrayerRequest(input: {
   };
 }
 
-export async function listPrayerRequests(churchId: string, memberEmail?: string) {
-  let query = supabaseAdmin
+export async function listPrayerRequests(churchId: string, memberIdentifier?: { email: string; phone: string; user_id: string }) {
+  // If filtering by member, first resolve the member_id to query prayer_requests accurately
+  if (memberIdentifier) {
+    let memberId: string | null = null;
+
+    // Try user_id lookup first
+    if (memberIdentifier.user_id) {
+      const { data: byUserId } = await db
+        .from("members")
+        .select("id")
+        .eq("user_id", memberIdentifier.user_id)
+        .eq("church_id", churchId)
+        .limit(1)
+        .maybeSingle();
+      if (byUserId) memberId = byUserId.id;
+    }
+
+    // Fallback to email
+    if (!memberId && memberIdentifier.email && memberIdentifier.email.includes("@")) {
+      const { data: byEmail } = await db
+        .from("members")
+        .select("id")
+        .ilike("email", memberIdentifier.email.trim().toLowerCase())
+        .eq("church_id", churchId)
+        .limit(1)
+        .maybeSingle();
+      if (byEmail) memberId = byEmail.id;
+    }
+
+    // Fallback to phone
+    if (!memberId && memberIdentifier.phone) {
+      const { data: byPhone } = await db
+        .from("members")
+        .select("id")
+        .eq("phone_number", memberIdentifier.phone)
+        .eq("church_id", churchId)
+        .limit(1)
+        .maybeSingle();
+      if (byPhone) memberId = byPhone.id;
+    }
+
+    if (!memberId) return [];
+
+    const { data, error } = await db
+      .from("prayer_requests")
+      .select("id, church_id, member_id, member_name, member_email, details, status, created_at")
+      .eq("church_id", churchId)
+      .eq("member_id", memberId)
+      .order("created_at", { ascending: false })
+      .limit(100);
+
+    if (error) {
+      logger.error({ err: error, churchId, memberId }, "listPrayerRequests failed");
+      throw error;
+    }
+    return data || [];
+  }
+
+  // Admin view: all requests
+  const { data, error } = await db
     .from("prayer_requests")
     .select("id, church_id, member_id, member_name, member_email, details, status, created_at")
     .eq("church_id", churchId)
     .order("created_at", { ascending: false })
     .limit(100);
 
-  if (memberEmail) {
-    query = query.ilike("member_email", memberEmail.trim().toLowerCase());
-  }
-
-  const { data, error } = await query;
   if (error) {
-    logger.error({ err: error, churchId, memberEmail }, "listPrayerRequests failed");
+    logger.error({ err: error, churchId }, "listPrayerRequests failed");
     throw error;
   }
 
   return data || [];
+}
+
+// ── Delete functions ──
+
+export async function deleteChurchEvent(eventId: string, churchId: string) {
+  const { error } = await db
+    .from("church_events")
+    .delete()
+    .eq("id", eventId)
+    .eq("church_id", churchId);
+  if (error) {
+    logger.error({ err: error, eventId, churchId }, "deleteChurchEvent failed");
+    throw error;
+  }
+  return { deleted: true, id: eventId };
+}
+
+export async function deleteChurchNotification(notificationId: string, churchId: string) {
+  const { error } = await db
+    .from("church_notifications")
+    .delete()
+    .eq("id", notificationId)
+    .eq("church_id", churchId);
+  if (error) {
+    logger.error({ err: error, notificationId, churchId }, "deleteChurchNotification failed");
+    throw error;
+  }
+  return { deleted: true, id: notificationId };
+}
+
+export async function deletePrayerRequest(requestId: string, churchId: string) {
+  // Delete recipients first (FK constraint)
+  await db
+    .from("prayer_request_recipients")
+    .delete()
+    .eq("prayer_request_id", requestId);
+
+  const { error } = await db
+    .from("prayer_requests")
+    .delete()
+    .eq("id", requestId)
+    .eq("church_id", churchId);
+  if (error) {
+    logger.error({ err: error, requestId, churchId }, "deletePrayerRequest failed");
+    throw error;
+  }
+  return { deleted: true, id: requestId };
+}
+
+/**
+ * Delete all events whose event_date has passed (the day after the scheduled date).
+ * Events with no event_date are left untouched.
+ */
+export async function cleanupExpiredEvents(): Promise<{ deleted: number }> {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayISO = today.toISOString();
+
+  const { data, error } = await db
+    .from("church_events")
+    .delete()
+    .not("event_date", "is", null)
+    .lt("event_date", todayISO)
+    .select("id");
+
+  if (error) {
+    logger.error({ err: error }, "cleanupExpiredEvents failed");
+    throw error;
+  }
+
+  const count = data?.length || 0;
+  if (count > 0) {
+    logger.info({ deleted: count }, "cleanupExpiredEvents: removed past events");
+  }
+  return { deleted: count };
+}
+
+/**
+ * Get pending admin counts for badge indicators.
+ * Returns counts of pending membership requests, family requests,
+ * cancellation requests, and upcoming events for the given church.
+ */
+export async function getAdminPendingCounts(churchId: string): Promise<{
+  membership_requests: number;
+  family_requests: number;
+  cancellation_requests: number;
+  events: number;
+  notifications: number;
+}> {
+  const { rows } = await pool.query(
+    `SELECT
+       (SELECT COUNT(*)::int FROM membership_requests WHERE church_id = $1 AND status = 'pending') AS membership_requests,
+       (SELECT COUNT(*)::int FROM family_member_create_requests WHERE church_id = $1 AND status = 'pending') AS family_requests,
+       (SELECT COUNT(*)::int FROM cancellation_requests WHERE church_id = $1 AND status = 'pending') AS cancellation_requests,
+       (SELECT COUNT(*)::int FROM church_events WHERE church_id = $1) AS events,
+       (SELECT COUNT(*)::int FROM church_notifications WHERE church_id = $1) AS notifications`,
+    [churchId],
+  );
+  return rows[0];
 }

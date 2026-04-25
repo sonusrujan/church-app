@@ -1,6 +1,7 @@
 import { AuthRequest } from "../middleware/requireAuth";
 import { isSuperAdminEmail } from "../middleware/requireSuperAdmin";
 import { logger } from "./logger";
+import { persistAuditLog } from "./auditLog";
 
 type AuditDetails = Record<string, unknown>;
 
@@ -11,9 +12,11 @@ function compactDetails(details: AuditDetails) {
 }
 
 export function logSuperAdminAudit(req: AuthRequest, action: string, details: AuditDetails = {}) {
-  if (!req.user || !isSuperAdminEmail(req.user.email)) {
+  if (!req.user || !isSuperAdminEmail(req.user.email, req.user.phone)) {
     return;
   }
+
+  const compact = compactDetails(details);
 
   logger.info(
     {
@@ -24,9 +27,12 @@ export function logSuperAdminAudit(req: AuthRequest, action: string, details: Au
       actor_church_id: req.user.church_id || null,
       method: req.method,
       path: req.originalUrl,
-      details: compactDetails(details),
+      details: compact,
       at: new Date().toISOString(),
     },
     "super-admin operation executed"
   );
+
+  // Also persist to DB audit trail (fire-and-forget)
+  persistAuditLog(req, `super_admin.${action}`, "super_admin", req.user.id, compact).catch(() => {});
 }

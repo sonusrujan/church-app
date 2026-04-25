@@ -1,0 +1,15 @@
+node_modules
+.env
+.env.*
+!.env.example
+dist
+frontend/node_modules
+frontend/dist
+*.log
+.git
+.gitignore
+db/
+!db/aws_rds_full_schema.sql
+!db/migrations/
+*.md
+*.bak

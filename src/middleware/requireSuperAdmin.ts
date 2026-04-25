@@ -1,11 +1,14 @@
 import { NextFunction, Response } from "express";
-import { SUPER_ADMIN_EMAILS } from "../config";
+import { SUPER_ADMIN_EMAILS, SUPER_ADMIN_PHONES } from "../config";
 import { AuthRequest } from "./requireAuth";
 
-const superAdminSet = new Set(SUPER_ADMIN_EMAILS.map((email) => email.toLowerCase()));
+const superAdminEmailSet = new Set(SUPER_ADMIN_EMAILS.map((email) => email.toLowerCase()));
+const superAdminPhoneSet = new Set(SUPER_ADMIN_PHONES);
 
-export function isSuperAdminEmail(email: string) {
-  return superAdminSet.has(email.trim().toLowerCase());
+export function isSuperAdminEmail(email?: string, phone?: string) {
+  if (email && superAdminEmailSet.has(email.trim().toLowerCase())) return true;
+  if (phone && superAdminPhoneSet.has(phone.trim())) return true;
+  return false;
 }
 
 export function requireSuperAdmin(req: AuthRequest, res: Response, next: NextFunction) {
@@ -13,7 +16,7 @@ export function requireSuperAdmin(req: AuthRequest, res: Response, next: NextFun
     return res.status(401).json({ error: "Unauthenticated" });
   }
 
-  if (!isSuperAdminEmail(req.user.email)) {
+  if (!isSuperAdminEmail(req.user.email, req.user.phone)) {
     return res.status(403).json({ error: "Only super admin can manage admins" });
   }
 

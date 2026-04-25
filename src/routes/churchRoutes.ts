@@ -2,6 +2,7 @@ import { Router } from "express";
 import { AuthRequest, requireAuth } from "../middleware/requireAuth";
 import { requireRegisteredUser } from "../middleware/requireRegisteredUser";
 import { isSuperAdminEmail, requireSuperAdmin } from "../middleware/requireSuperAdmin";
+import { safeErrorMessage } from "../utils/safeError";
 import {
   createChurch,
   deleteChurch,
@@ -17,9 +18,30 @@ import {
   updateChurchPaymentSettings,
 } from "../services/churchPaymentService";
 import { logSuperAdminAudit } from "../utils/superAdminAudit";
+import { persistAuditLog } from "../utils/auditLog";
 
 const router = Router();
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// ── Public: search churches (no auth required, limited fields) ──
+router.get("/public-search", async (req, res) => {
+  try {
+    const query = typeof req.query.query === "string" ? req.query.query.trim() : "";
+    if (!query || query.length < 2) {
+      return res.json([]);
+    }
+    const rows = await searchChurches(query, 20);
+    // Return only safe public fields
+    const publicRows = rows.map((r: any) => ({
+      name: r.name,
+      address: r.address || null,
+      location: r.location || null,
+    }));
+    return res.json(publicRows);
+  } catch (err: any) {
+    return res.status(500).json({ error: "Search failed" });
+  }
+});
 
 function resolveScopedChurchId(req: AuthRequest, requestedChurchId?: string) {
   if (!req.user) {
@@ -27,8 +49,10 @@ function resolveScopedChurchId(req: AuthRequest, requestedChurchId?: string) {
   }
 
   const normalizedRequested = typeof requestedChurchId === "string" ? requestedChurchId.trim() : "";
-  if (isSuperAdminEmail(req.user.email)) {
-    return normalizedRequested || req.user.church_id;
+  if (isSuperAdminEmail(req.user.email, req.user.phone)) {
+    const resolved = normalizedRequested || req.user.church_id;
+    if (!resolved) throw new Error("church_id is required for super admin operations");
+    return resolved;
   }
 
   return req.user.church_id;
@@ -45,7 +69,7 @@ router.get("/list", requireAuth, requireRegisteredUser, async (req: AuthRequest,
         ? req.query.church_id.trim()
         : undefined;
 
-    if (isSuperAdminEmail(req.user.email)) {
+    if (isSuperAdminEmail(req.user.email, req.user.phone)) {
       const churches = await listChurches(requestedChurchId);
       return res.json(churches);
     }
@@ -57,7 +81,7 @@ router.get("/list", requireAuth, requireRegisteredUser, async (req: AuthRequest,
     const churches = await listChurches(req.user.church_id);
     return res.json(churches);
   } catch (err: any) {
-    return res.status(500).json({ error: err.message || "Failed to fetch churches" });
+    return res.status(500).json({ error: safeErrorMessage(err, "Failed to fetch churches") });
   }
 });
 
@@ -67,19 +91,24 @@ router.get("/summary", requireAuth, requireRegisteredUser, async (req: AuthReque
       return res.status(401).json({ error: "Unauthenticated" });
     }
 
+    // Only admins and super admins can view church summary/stats
+    if (req.user.role !== "admin" && !isSuperAdminEmail(req.user.email, req.user.phone)) {
+      return res.status(403).json({ error: "Only admin can view church summary" });
+    }
+
     const requestedChurchId =
       typeof req.query.church_id === "string" && req.query.church_id.trim()
         ? req.query.church_id.trim()
         : undefined;
 
-    const churchId = isSuperAdminEmail(req.user.email)
+    const churchId = isSuperAdminEmail(req.user.email, req.user.phone)
       ? requestedChurchId
       : req.user.church_id || undefined;
 
     const rows = await listChurchesWithStats(churchId);
     return res.json(rows);
   } catch (err: any) {
-    return res.status(500).json({ error: err.message || "Failed to fetch church summary" });
+    return res.status(500).json({ error: safeErrorMessage(err, "Failed to fetch church summary") });
   }
 });
 
@@ -90,7 +119,7 @@ router.get("/search", requireAuth, requireRegisteredUser, requireSuperAdmin, asy
     const rows = await searchChurches(query, limit || 50);
     return res.json(rows);
   } catch (err: any) {
-    return res.status(400).json({ error: err.message || "Failed to search churches" });
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to search churches") });
   }
 });
 
@@ -106,7 +135,7 @@ router.get("/id/:id", requireAuth, requireRegisteredUser, requireSuperAdmin, asy
     }
     return res.json(church);
   } catch (err: any) {
-    return res.status(400).json({ error: err.message || "Failed to fetch church" });
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to fetch church") });
   }
 });
 
@@ -123,17 +152,25 @@ router.post(
         location: typeof req.body?.location === "string" ? req.body.location : undefined,
         contact_phone:
           typeof req.body?.contact_phone === "string" ? req.body.contact_phone : undefined,
+        logo_url: typeof req.body?.logo_url === "string" ? req.body.logo_url : undefined,
         admin_emails: Array.isArray(req.body?.admin_emails) ? req.body.admin_emails : undefined,
+        member_subscription_enabled: typeof req.body?.member_subscription_enabled === "boolean" ? req.body.member_subscription_enabled : undefined,
+        church_subscription_enabled: typeof req.body?.church_subscription_enabled === "boolean" ? req.body.church_subscription_enabled : undefined,
+        church_subscription_amount: typeof req.body?.church_subscription_amount === "number" ? req.body.church_subscription_amount : undefined,
+        platform_fee_enabled: typeof req.body?.platform_fee_enabled === "boolean" ? req.body.platform_fee_enabled : undefined,
+        platform_fee_percentage: typeof req.body?.platform_fee_percentage === "number" ? req.body.platform_fee_percentage : undefined,
+        service_enabled: typeof req.body?.service_enabled === "boolean" ? req.body.service_enabled : undefined,
       });
 
       logSuperAdminAudit(req, "church.create", {
         church_id: created.church.id,
         name: created.church.name,
       });
+      persistAuditLog(req, "church.create", "church", created.church.id, { name: created.church.name });
 
       return res.json(created);
     } catch (err: any) {
-      return res.status(400).json({ error: err.message || "Failed to create church" });
+      return res.status(400).json({ error: safeErrorMessage(err, "Failed to create church") });
     }
   }
 );
@@ -149,15 +186,18 @@ router.patch("/id/:id", requireAuth, requireRegisteredUser, requireSuperAdmin, a
       address: req.body?.address,
       location: req.body?.location,
       contact_phone: req.body?.contact_phone,
+      church_code: req.body?.church_code,
+      logo_url: req.body?.logo_url,
     });
 
     logSuperAdminAudit(req, "church.update", {
       church_id: churchId,
     });
+    persistAuditLog(req, "church.update", "church", churchId);
 
     return res.json(updated);
   } catch (err: any) {
-    return res.status(400).json({ error: err.message || "Failed to update church" });
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to update church") });
   }
 });
 
@@ -170,7 +210,7 @@ router.get("/id/:id/delete-impact", requireAuth, requireRegisteredUser, requireS
     const impact = await getChurchDeleteImpact(churchId);
     return res.json(impact);
   } catch (err: any) {
-    return res.status(400).json({ error: err.message || "Failed to inspect delete impact" });
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to inspect delete impact") });
   }
 });
 
@@ -196,9 +236,10 @@ router.delete("/id/:id", requireAuth, requireRegisteredUser, requireSuperAdmin, 
     logSuperAdminAudit(req, "church.delete", {
       church_id: churchId,
     });
+    persistAuditLog(req, "church.delete", "church", churchId);
     return res.json(result);
   } catch (err: any) {
-    return res.status(400).json({ error: err.message || "Failed to delete church" });
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to delete church") });
   }
 });
 
@@ -208,7 +249,7 @@ router.get("/payment-config", requireAuth, requireRegisteredUser, async (req: Au
       return res.status(401).json({ error: "Unauthenticated" });
     }
 
-    if (req.user.role !== "admin" && !isSuperAdminEmail(req.user.email)) {
+    if (req.user.role !== "admin" && !isSuperAdminEmail(req.user.email, req.user.phone)) {
       return res.status(403).json({ error: "Only admin can access church payment config" });
     }
 
@@ -220,7 +261,7 @@ router.get("/payment-config", requireAuth, requireRegisteredUser, async (req: Au
     const config = await getChurchPaymentSettings(churchId);
     return res.json(config);
   } catch (err: any) {
-    return res.status(400).json({ error: err.message || "Failed to get church payment config" });
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to get church payment config") });
   }
 });
 
@@ -230,7 +271,7 @@ router.post("/payment-config", requireAuth, requireRegisteredUser, async (req: A
       return res.status(401).json({ error: "Unauthenticated" });
     }
 
-    if (req.user.role !== "admin" && !isSuperAdminEmail(req.user.email)) {
+    if (req.user.role !== "admin" && !isSuperAdminEmail(req.user.email, req.user.phone)) {
       return res.status(403).json({ error: "Only admin can update church payment config" });
     }
 
@@ -259,7 +300,22 @@ router.post("/payment-config", requireAuth, requireRegisteredUser, async (req: A
 
     return res.json(updated);
   } catch (err: any) {
-    return res.status(400).json({ error: err.message || "Failed to update church payment config" });
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to update church payment config") });
+  }
+});
+
+// ── Admin self-service: update own church logo ──
+router.patch("/my-logo", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: "Unauthenticated" });
+    if (req.user.role !== "admin") return res.status(403).json({ error: "Only admin can update church logo" });
+    const churchId = req.user.church_id;
+    if (!churchId) return res.status(400).json({ error: "No church association" });
+    const logoUrl = typeof req.body?.logo_url === "string" ? req.body.logo_url : null;
+    const updated = await updateChurch(churchId, { logo_url: logoUrl || "" });
+    return res.json(updated);
+  } catch (err: any) {
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to update church logo") });
   }
 });
 

@@ -1,4 +1,5 @@
-import { supabaseAdmin } from "./supabaseClient";
+import { randomInt } from "crypto";
+import { db, rawQuery } from "./dbClient";
 import { logger } from "../utils/logger";
 import { SUPER_ADMIN_EMAILS } from "../config";
 
@@ -9,6 +10,7 @@ type ChurchRow = {
   address: string | null;
   location: string | null;
   contact_phone: string | null;
+  logo_url: string | null;
   created_at: string;
 };
 
@@ -42,6 +44,7 @@ export type ChurchSummaryRow = {
   address: string | null;
   location: string | null;
   contact_phone: string | null;
+  logo_url: string | null;
   created_at: string;
   admin_count: number;
   member_count: number;
@@ -67,6 +70,13 @@ export interface CreateChurchInput {
   location?: string;
   contact_phone?: string;
   admin_emails?: string[];
+  logo_url?: string;
+  member_subscription_enabled?: boolean;
+  church_subscription_enabled?: boolean;
+  church_subscription_amount?: number;
+  platform_fee_enabled?: boolean;
+  platform_fee_percentage?: number;
+  service_enabled?: boolean;
 }
 
 export interface UpdateChurchInput {
@@ -74,6 +84,8 @@ export interface UpdateChurchInput {
   address?: string;
   location?: string;
   contact_phone?: string;
+  church_code?: string;
+  logo_url?: string;
 }
 
 export type ChurchDeleteImpact = {
@@ -94,8 +106,8 @@ function normalizeEmail(email: string) {
 
 async function generateUniqueChurchCode() {
   for (let attempt = 0; attempt < 24; attempt += 1) {
-    const code = String(Math.floor(100000 + Math.random() * 900000));
-    const { data, error } = await supabaseAdmin
+    const code = String(randomInt(10000000, 100000000));
+    const { data, error } = await db
       .from("churches")
       .select("id")
       .eq("church_code", code)
@@ -127,12 +139,19 @@ async function assignAdminsToChurch(churchId: string, adminEmails: string[]) {
     return [] as UserRow[];
   }
 
+  // Validate email format on backend side
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const badFormat = normalizedEmails.filter((e) => !EMAIL_RE.test(e));
+  if (badFormat.length) {
+    throw new Error(`Invalid email format: ${badFormat.join(", ")}`);
+  }
+
   const hasSuperAdminEmail = normalizedEmails.some((email) => superAdminEmailSet.has(email));
   if (hasSuperAdminEmail) {
     throw new Error("Super admin emails cannot be assigned as church admins");
   }
 
-  const { data: users, error: usersError } = await supabaseAdmin
+  const { data: users, error: usersError } = await db
     .from("users")
     .select("id, email, full_name, role, church_id")
     .in("email", normalizedEmails);
@@ -142,40 +161,41 @@ async function assignAdminsToChurch(churchId: string, adminEmails: string[]) {
     throw usersError;
   }
 
-  const foundEmails = new Set((users || []).map((row) => normalizeEmail(row.email || "")));
+  const foundEmails = new Set((users || []).map((row: any) => normalizeEmail(row.email || "")));
   const missing = normalizedEmails.filter((email) => !foundEmails.has(email));
   if (missing.length) {
     throw new Error(`Admin user not found for emails: ${missing.join(", ")}`);
   }
 
-  const updatedAdmins: UserRow[] = [];
-  for (const user of users || []) {
-    if (superAdminEmailSet.has(normalizeEmail(user.email || ""))) {
-      throw new Error(`Super admin cannot be assigned to church: ${user.email}`);
-    }
-
-    const { data: updatedUser, error: updateError } = await supabaseAdmin
-      .from("users")
-      .update({ role: "admin", church_id: churchId })
-      .eq("id", user.id)
-      .select("id, email, full_name, role, church_id")
-      .single<UserRow>();
-
-    if (updateError) {
-      logger.error({ err: updateError, userId: user.id }, "assignAdminsToChurch update failed");
-      throw updateError;
-    }
-
-    updatedAdmins.push(updatedUser);
+  // Check if any user already belongs to a DIFFERENT church
+  const alreadyAssigned = (users || []).filter(
+    (u: any) => u.church_id && u.church_id !== churchId
+  );
+  if (alreadyAssigned.length) {
+    const names = alreadyAssigned.map((u: any) => u.email).join(", ");
+    throw new Error(`These users already belong to another church: ${names}. Remove them from their current church first.`);
   }
 
-  return updatedAdmins;
+  const userIds = (users || []).map((u: any) => u.id);
+  const { data: updatedAdmins, error: updateError } = await db
+    .from("users")
+    .update({ role: "admin", church_id: churchId })
+    .in("id", userIds)
+    .select("id, email, full_name, role, church_id");
+
+  if (updateError) {
+    logger.error({ err: updateError, userIds }, "assignAdminsToChurch batch update failed");
+    throw updateError;
+  }
+
+  return (updatedAdmins || []) as UserRow[];
 }
 
 export async function listChurches(churchId?: string) {
-  let query = supabaseAdmin
+  let query = db
     .from("churches")
-    .select("id, church_code, name, address, location, contact_phone, created_at")
+    .select("id, church_code, name, address, location, contact_phone, logo_url, created_at")
+    .is("deleted_at", null)
     .order("name", { ascending: true });
 
   if (churchId) {
@@ -195,14 +215,15 @@ export async function searchChurches(queryText: string, limit = 50) {
   const q = queryText.trim();
   const size = Math.min(Math.max(limit, 1), 200);
 
-  let query = supabaseAdmin
+  let query = db
     .from("churches")
-    .select("id, church_code, name, address, location, contact_phone, created_at")
+    .select("id, church_code, name, address, location, contact_phone, logo_url, created_at")
+    .is("deleted_at", null)
     .order("name", { ascending: true })
     .limit(size);
 
   if (q) {
-    const escaped = q.replace(/,/g, "");
+    const escaped = q.replace(/,/g, "").replace(/_/g, "\\_");
     query = query.or(
       `name.ilike.%${escaped}%,church_code.ilike.%${escaped}%,address.ilike.%${escaped}%,location.ilike.%${escaped}%,contact_phone.ilike.%${escaped}%`
     );
@@ -218,10 +239,11 @@ export async function searchChurches(queryText: string, limit = 50) {
 }
 
 export async function getChurchById(churchId: string) {
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await db
     .from("churches")
-    .select("id, church_code, name, address, location, contact_phone, created_at")
+    .select("id, church_code, name, address, location, contact_phone, logo_url, created_at")
     .eq("id", churchId)
+    .is("deleted_at", null)
     .maybeSingle<ChurchRow>();
 
   if (error) {
@@ -239,18 +261,40 @@ export async function createChurch(input: CreateChurchInput) {
   }
 
   const churchCode = await generateUniqueChurchCode();
-  const { data: church, error: churchError } = await supabaseAdmin
+
+  const insertPayload: Record<string, unknown> = {
+    church_code: churchCode,
+    name: churchName,
+    address: input.address?.trim() || null,
+    location: input.location?.trim() || null,
+    contact_phone: input.contact_phone?.trim() || null,
+    logo_url: input.logo_url?.trim() || null,
+  };
+
+  // SaaS toggles
+  if (typeof input.member_subscription_enabled === "boolean") {
+    insertPayload.member_subscription_enabled = input.member_subscription_enabled;
+  }
+  if (typeof input.church_subscription_enabled === "boolean") {
+    insertPayload.church_subscription_enabled = input.church_subscription_enabled;
+  }
+  if (typeof input.church_subscription_amount === "number" && input.church_subscription_amount >= 0) {
+    insertPayload.church_subscription_amount = input.church_subscription_amount;
+  }
+  if (typeof input.platform_fee_enabled === "boolean") {
+    insertPayload.platform_fee_enabled = input.platform_fee_enabled;
+  }
+  if (typeof input.platform_fee_percentage === "number" && input.platform_fee_percentage >= 0) {
+    insertPayload.platform_fee_percentage = input.platform_fee_percentage;
+  }
+  if (typeof input.service_enabled === "boolean") {
+    insertPayload.service_enabled = input.service_enabled;
+  }
+
+  const { data: church, error: churchError } = await db
     .from("churches")
-    .insert([
-      {
-        church_code: churchCode,
-        name: churchName,
-        address: input.address?.trim() || null,
-        location: input.location?.trim() || null,
-        contact_phone: input.contact_phone?.trim() || null,
-      },
-    ])
-    .select("id, church_code, name, address, location, contact_phone, created_at")
+    .insert([insertPayload])
+    .select("id, church_code, name, address, location, contact_phone, logo_url, created_at")
     .single<ChurchRow>();
 
   if (churchError) {
@@ -288,15 +332,37 @@ export async function updateChurch(churchId: string, input: UpdateChurchInput) {
     patch.contact_phone = input.contact_phone.trim() || null;
   }
 
+  if (typeof input.logo_url === "string") {
+    patch.logo_url = input.logo_url.trim() || null;
+  }
+
+  if (typeof input.church_code === "string") {
+    const code = input.church_code.trim();
+    if (!/^\d{8}$/.test(code)) {
+      throw new Error("Church code must be exactly 8 digits");
+    }
+    // Check uniqueness
+    const { data: existing } = await db
+      .from("churches")
+      .select("id")
+      .eq("church_code", code)
+      .neq("id", churchId)
+      .maybeSingle();
+    if (existing) {
+      throw new Error("Church code already in use by another church");
+    }
+    patch.church_code = code;
+  }
+
   if (!Object.keys(patch).length) {
     throw new Error("No church fields provided to update");
   }
 
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await db
     .from("churches")
     .update(patch)
     .eq("id", churchId)
-    .select("id, church_code, name, address, location, contact_phone, created_at")
+    .select("id, church_code, name, address, location, contact_phone, logo_url, created_at")
     .single<ChurchRow>();
 
   if (error) {
@@ -314,12 +380,12 @@ export async function getChurchDeleteImpact(churchId: string): Promise<ChurchDel
   }
 
   const [{ count: usersCount, error: usersError }, { count: membersCount, error: membersError }, { count: pastorsCount, error: pastorsError }, { count: eventsCount, error: eventsError }, { count: notificationsCount, error: notificationsError }, { count: prayerCount, error: prayerError }] = await Promise.all([
-    supabaseAdmin.from("users").select("id", { count: "exact", head: true }).eq("church_id", churchId),
-    supabaseAdmin.from("members").select("id", { count: "exact", head: true }).eq("church_id", churchId),
-    supabaseAdmin.from("pastors").select("id", { count: "exact", head: true }).eq("church_id", churchId),
-    supabaseAdmin.from("church_events").select("id", { count: "exact", head: true }).eq("church_id", churchId),
-    supabaseAdmin.from("church_notifications").select("id", { count: "exact", head: true }).eq("church_id", churchId),
-    supabaseAdmin.from("prayer_requests").select("id", { count: "exact", head: true }).eq("church_id", churchId),
+    db.from("users").select("id", { count: "exact", head: true }).eq("church_id", churchId),
+    db.from("members").select("id", { count: "exact", head: true }).eq("church_id", churchId),
+    db.from("pastors").select("id", { count: "exact", head: true }).eq("church_id", churchId),
+    db.from("church_events").select("id", { count: "exact", head: true }).eq("church_id", churchId),
+    db.from("church_notifications").select("id", { count: "exact", head: true }).eq("church_id", churchId),
+    db.from("prayer_requests").select("id", { count: "exact", head: true }).eq("church_id", churchId),
   ]);
 
   if (usersError || membersError || pastorsError || eventsError || notificationsError || prayerError) {
@@ -338,7 +404,7 @@ export async function getChurchDeleteImpact(churchId: string): Promise<ChurchDel
     throw usersError || membersError || pastorsError || eventsError || notificationsError || prayerError;
   }
 
-  const { data: memberIds, error: memberIdsError } = await supabaseAdmin
+  const { data: memberIds, error: memberIdsError } = await db
     .from("members")
     .select("id")
     .eq("church_id", churchId);
@@ -348,10 +414,10 @@ export async function getChurchDeleteImpact(churchId: string): Promise<ChurchDel
     throw memberIdsError;
   }
 
-  const memberIdList = (memberIds || []).map((row) => String((row as { id: string }).id)).filter(Boolean);
+  const memberIdList = (memberIds || []).map((row: any) => String((row as { id: string }).id)).filter(Boolean);
   let paymentsCount = 0;
   if (memberIdList.length) {
-    const { count, error } = await supabaseAdmin
+    const { count, error } = await db
       .from("payments")
       .select("id", { count: "exact", head: true })
       .in("member_id", memberIdList);
@@ -381,7 +447,7 @@ export async function deleteChurch(churchId: string) {
     throw new Error("Church not found");
   }
 
-  const { data: superAdminRows, error: superAdminRowsError } = await supabaseAdmin
+  const { data: superAdminRows, error: superAdminRowsError } = await db
     .from("users")
     .select("id, email")
     .eq("church_id", churchId)
@@ -396,9 +462,12 @@ export async function deleteChurch(churchId: string) {
     throw new Error("Cannot delete church while a super admin user is mapped to it");
   }
 
-  const { error } = await supabaseAdmin.from("churches").delete().eq("id", churchId);
+  const { error } = await db
+    .from("churches")
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", churchId);
   if (error) {
-    logger.error({ err: error, churchId }, "deleteChurch failed");
+    logger.error({ err: error, churchId }, "deleteChurch (soft) failed");
     throw error;
   }
 
@@ -412,17 +481,17 @@ export async function listChurchesWithStats(churchId?: string) {
   }
 
   const churchIds = churches.map((church) => church.id);
-  const [{ data: admins, error: adminsError }, { data: members, error: membersError }, { data: pastors, error: pastorsError }] = await Promise.all([
-    supabaseAdmin
+  const [{ data: admins, error: adminsError }, memberCountResult, { data: pastors, error: pastorsError }] = await Promise.all([
+    db
       .from("users")
       .select("id, email, full_name, role, church_id")
       .eq("role", "admin")
       .in("church_id", churchIds),
-    supabaseAdmin
-      .from("members")
-      .select("id, church_id")
-      .in("church_id", churchIds),
-    supabaseAdmin
+    rawQuery<{ church_id: string; cnt: string }>(
+      `SELECT church_id, COUNT(*)::text AS cnt FROM members WHERE church_id = ANY($1) GROUP BY church_id`,
+      [churchIds],
+    ),
+    db
       .from("pastors")
       .select("id, church_id, full_name, phone_number, email, details, is_active")
       .in("church_id", churchIds),
@@ -431,11 +500,6 @@ export async function listChurchesWithStats(churchId?: string) {
   if (adminsError) {
     logger.error({ err: adminsError }, "listChurchesWithStats admins query failed");
     throw adminsError;
-  }
-
-  if (membersError) {
-    logger.error({ err: membersError }, "listChurchesWithStats members query failed");
-    throw membersError;
   }
 
   if (pastorsError) {
@@ -459,11 +523,8 @@ export async function listChurchesWithStats(churchId?: string) {
   }
 
   const memberCountsByChurch = new Map<string, number>();
-  for (const member of (members || []) as MemberRow[]) {
-    if (!member.church_id) {
-      continue;
-    }
-    memberCountsByChurch.set(member.church_id, (memberCountsByChurch.get(member.church_id) || 0) + 1);
+  for (const row of memberCountResult.rows) {
+    memberCountsByChurch.set(row.church_id, Number(row.cnt) || 0);
   }
 
   const pastorsByChurch = new Map<string, PastorRow[]>();
@@ -484,6 +545,7 @@ export async function listChurchesWithStats(churchId?: string) {
       address: church.address,
       location: church.location,
       contact_phone: church.contact_phone,
+      logo_url: church.logo_url,
       created_at: church.created_at,
       admin_count: churchAdmins.length,
       member_count: memberCountsByChurch.get(church.id) || 0,
@@ -503,4 +565,31 @@ export async function listChurchesWithStats(churchId?: string) {
       })),
     };
   });
+}
+
+// ── Restore soft-deleted church ──
+
+export async function restoreChurch(churchId: string) {
+  // Look up including deleted
+  const { data: church, error: findErr } = await db
+    .from("churches")
+    .select("id, deleted_at")
+    .eq("id", churchId)
+    .maybeSingle<{ id: string; deleted_at: string | null }>();
+
+  if (findErr) throw findErr;
+  if (!church) throw new Error("Church not found");
+  if (!church.deleted_at) throw new Error("Church is not deleted");
+
+  const { error } = await db
+    .from("churches")
+    .update({ deleted_at: null })
+    .eq("id", churchId);
+
+  if (error) {
+    logger.error({ err: error, churchId }, "restoreChurch failed");
+    throw error;
+  }
+
+  return { restored: true, id: churchId };
 }

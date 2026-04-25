@@ -1,6 +1,9 @@
-import { PAYMENTS_ENABLED, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET } from "../config";
+import { PAYMENTS_ENABLED, RAZORPAY_KEY_ID } from "../config";
 import { logger } from "../utils/logger";
-import { supabaseAdmin } from "./supabaseClient";
+import { encryptSecret, decryptSecret, isEncrypted } from "../utils/crypto";
+import { db } from "./dbClient";
+
+const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || "";
 
 type ChurchPaymentRow = {
   id: string;
@@ -32,7 +35,7 @@ function isMissingChurchPaymentColumnsError(error: unknown) {
 }
 
 async function readChurchPaymentRow(churchId: string) {
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await db
     .from("churches")
     .select("id, payments_enabled, razorpay_key_id, razorpay_key_secret")
     .eq("id", churchId)
@@ -123,7 +126,24 @@ export async function getEffectivePaymentConfig(churchId?: string | null): Promi
 
   const enabled = Boolean(church.data.payments_enabled);
   const keyId = church.data.razorpay_key_id?.trim() || "";
-  const keySecret = church.data.razorpay_key_secret?.trim() || "";
+  const rawKeySecret = church.data.razorpay_key_secret?.trim() || "";
+  // HIGH-06: Encrypt synchronously before returning — do not return plaintext
+  let keySecret: string;
+  if (rawKeySecret && !isEncrypted(rawKeySecret)) {
+    keySecret = rawKeySecret;
+    // Persist encryption synchronously so plaintext is never stored again
+    try {
+      await db
+        .from("churches")
+        .update({ razorpay_key_secret: encryptSecret(rawKeySecret) })
+        .eq("id", churchId);
+      logger.info({ churchId }, "auto-encrypted legacy plaintext Razorpay key_secret");
+    } catch (encErr: any) {
+      logger.warn({ err: encErr, churchId }, "auto-encrypt key_secret failed");
+    }
+  } else {
+    keySecret = rawKeySecret ? decryptSecret(rawKeySecret) : "";
+  }
 
   if (!enabled) {
     return {
@@ -205,6 +225,14 @@ export async function updateChurchPaymentSettings(input: {
   const nextKeySecret =
     typeof input.key_secret === "string" ? input.key_secret.trim() : currentKeySecret;
 
+  // MED-06: Validate Razorpay credential format
+  if (typeof input.key_id === "string" && input.key_id.trim()) {
+    const keyIdTrimmed = input.key_id.trim();
+    if (!/^rzp_(live|test)_[A-Za-z0-9]{14,}$/.test(keyIdTrimmed)) {
+      throw new Error("Invalid Razorpay key_id format. Expected rzp_live_... or rzp_test_...");
+    }
+  }
+
   if (nextEnabled && (!nextKeyId || !nextKeySecret)) {
     throw new Error("Enable payments only after setting both Razorpay key_id and key_secret");
   }
@@ -218,10 +246,10 @@ export async function updateChurchPaymentSettings(input: {
   }
 
   if (typeof input.key_secret === "string") {
-    patch.razorpay_key_secret = nextKeySecret || null;
+    patch.razorpay_key_secret = nextKeySecret ? encryptSecret(nextKeySecret) : null;
   }
 
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await db
     .from("churches")
     .update(patch)
     .eq("id", input.church_id)

@@ -1,5 +1,5 @@
 -- Migration: SHALOM role expansion and engagement modules
--- Run this in Supabase SQL Editor for existing projects.
+-- Run this against your PostgreSQL database for existing projects.
 
 alter table if exists churches
   add column if not exists church_code text;

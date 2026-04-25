@@ -96,7 +96,10 @@ export function generateReceiptPdfBuffer(input: ReceiptDocumentInput): Promise<B
     doc.moveDown();
 
     doc.text(`Amount Paid: ${formatAmount(input.amount)}`);
-    doc.text(`Payment Method: ${input.payment_method}`);
+    const methodLabel = (input.payment_method || "").startsWith("manual_")
+      ? input.payment_method.replace(/^manual_/, "").replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()) + " (Manual)"
+      : input.payment_method;
+    doc.text(`Payment Method: ${methodLabel}`);
     doc.text(`Payment Status: ${input.payment_status}`);
     doc.text(`Transaction ID: ${input.transaction_id || "-"}`);
     doc.moveDown();
@@ -106,9 +109,13 @@ export function generateReceiptPdfBuffer(input: ReceiptDocumentInput): Promise<B
 
     doc.moveDown(2);
     doc.fontSize(10).fillColor("#444444");
-    doc.text("This is a system-generated receipt after Razorpay payment verification.", {
-      align: "left",
-    });
+    const isManual = (input.payment_method || "").startsWith("manual_");
+    doc.text(
+      isManual
+        ? "This is a system-generated receipt for a manually recorded payment."
+        : "This is a system-generated receipt after payment verification.",
+      { align: "left" },
+    );
     doc.text("For support, contact your church administration.", { align: "left" });
 
     doc.end();

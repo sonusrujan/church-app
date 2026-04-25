@@ -2,6 +2,8 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { ErrorBoundary } from './ErrorBoundary'
+import { I18nProvider } from './i18n'
+import { DarkModeProvider } from './context/DarkModeContext'
 import './index.css'
 import App from './App.tsx'
 
@@ -13,9 +15,13 @@ window.addEventListener('unhandledrejection', (event) => {
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
+      <I18nProvider>
+      <DarkModeProvider>
       <BrowserRouter>
         <App />
       </BrowserRouter>
+      </DarkModeProvider>
+      </I18nProvider>
     </ErrorBoundary>
   </StrictMode>,
 )

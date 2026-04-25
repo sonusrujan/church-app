@@ -1,9 +1,10 @@
-import { supabaseAdmin } from "./supabaseClient";
+import { db } from "./dbClient";
 import { logger } from "../utils/logger";
 
 type SubscriptionEventSource =
   | "system"
   | "admin"
+  | "admin_manual"
   | "member"
   | "payment_gateway"
   | "reconciler";
@@ -66,7 +67,7 @@ function getChurchIdFromJoin(members: MemberChurchRow | MemberChurchRow[] | null
 }
 
 async function getMemberChurchId(memberId: string) {
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await db
     .from("members")
     .select("church_id")
     .eq("id", memberId)
@@ -97,7 +98,7 @@ export async function recordSubscriptionEvent(input: RecordSubscriptionEventInpu
     event_at: input.event_at || new Date().toISOString(),
   };
 
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await db
     .from("subscription_events")
     .insert([payload])
     .select(
@@ -115,7 +116,7 @@ export async function recordSubscriptionEvent(input: RecordSubscriptionEventInpu
 
 export async function listMemberSubscriptionEvents(memberId: string, limit = 20) {
   const normalizedLimit = Math.max(1, Math.min(limit, 100));
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await db
     .from("subscription_events")
     .select(
       "id, member_id, subscription_id, church_id, event_type, status_before, status_after, amount, source, metadata, event_at, created_at"
@@ -133,13 +134,17 @@ export async function listMemberSubscriptionEvents(memberId: string, limit = 20)
 }
 
 export async function reconcileOverdueSubscriptions(churchId?: string) {
-  const todayDate = new Date().toISOString().slice(0, 10);
+  // Use IST (UTC+5:30) for date comparison since users are in India
+  const nowUtc = new Date();
+  const istOffsetMs = 5.5 * 60 * 60 * 1000;
+  const istNow = new Date(nowUtc.getTime() + istOffsetMs);
+  const todayDate = istNow.toISOString().slice(0, 10);
 
-  let overdueQuery = supabaseAdmin
+  let overdueQuery = db
     .from("subscriptions")
     .select("id, member_id, status, next_payment_date, members!inner(church_id)")
-    .eq("status", "active")
-    .lt("next_payment_date", todayDate);
+    .in("status", ["active", "pending_first_payment"])
+    .lte("next_payment_date", todayDate);
 
   if (churchId) {
     overdueQuery = overdueQuery.eq("members.church_id", churchId);
@@ -158,17 +163,17 @@ export async function reconcileOverdueSubscriptions(churchId?: string) {
     return { updated_count: 0, event_count: 0 };
   }
 
-  const subscriptionIds = rows.map((row) => row.id);
+  const subscriptionIds = rows.map((row: any) => row.id);
   const churchBySubscriptionId = new Map<string, string | null>();
   for (const row of rows) {
     churchBySubscriptionId.set(row.id, getChurchIdFromJoin(row.members));
   }
 
-  const { data: updatedRows, error: updateError } = await supabaseAdmin
+  const { data: updatedRows, error: updateError } = await db
     .from("subscriptions")
     .update({ status: "overdue" })
     .in("id", subscriptionIds)
-    .eq("status", "active")
+    .in("status", ["active", "pending_first_payment"])
     .select("id, member_id, status, next_payment_date")
     .returns<ReconcileUpdatedRow[]>();
 
@@ -206,4 +211,30 @@ export async function reconcileOverdueSubscriptions(churchId?: string) {
     updated_count: (updatedRows || []).length,
     event_count: eventCount,
   };
+}
+
+export async function listChurchActivityEvents(churchId: string | null, limit = 50, offset = 0) {
+  const normalizedLimit = Math.max(1, Math.min(limit, 200));
+  const normalizedOffset = Math.max(0, offset);
+
+  let query = db
+    .from("subscription_events")
+    .select(
+      "id, member_id, subscription_id, church_id, event_type, status_before, status_after, amount, source, metadata, event_at, created_at"
+    )
+    .order("event_at", { ascending: false })
+    .range(normalizedOffset, normalizedOffset + normalizedLimit - 1);
+
+  if (churchId) {
+    query = query.eq("church_id", churchId);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    logger.error({ err: error, churchId }, "listChurchActivityEvents failed");
+    throw error;
+  }
+
+  return (data || []) as SubscriptionEventRow[];
 }

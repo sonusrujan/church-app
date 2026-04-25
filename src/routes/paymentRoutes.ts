@@ -1,12 +1,21 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import { requireAuth, AuthRequest } from "../middleware/requireAuth";
 import { requireRegisteredUser } from "../middleware/requireRegisteredUser";
-import { createPaymentOrder, verifyPayment, storePayment } from "../services/paymentService";
+import { createPaymentOrder, verifyPayment, storePayment, fetchRazorpayOrder } from "../services/paymentService";
 import { getMemberDashboardByEmail } from "../services/userService";
-import { supabaseAdmin } from "../services/supabaseClient";
-import { recordSubscriptionEvent } from "../services/subscriptionTrackingService";
+import { isSuperAdminEmail } from "../middleware/requireSuperAdmin";
+import { safeErrorMessage } from "../utils/safeError";
+import { logger } from "../utils/logger";
+import { db } from "../services/dbClient";
 import { getEffectivePaymentConfig } from "../services/churchPaymentService";
+import { getChurchSaaSSettings } from "../services/churchSubscriptionService";
 import { createReceiptNumber, generateReceiptPdfBuffer } from "../services/receiptService";
+import {
+  computeNextDueDate,
+  isDueSubscription,
+  normalizeSelectedSubscriptionIds,
+} from "../utils/subscriptionHelpers";
 
 const router = Router();
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -56,73 +65,12 @@ type PaymentReceiptRow = {
   receipt_generated_at: string | null;
 };
 
-function isMissingReceiptMetadataColumnError(error: unknown) {
-  const message =
-    typeof error === "object" && error !== null && "message" in error
-      ? String((error as { message?: unknown }).message || "")
-      : "";
-
-  const normalized = message.toLowerCase();
-  return (
-    (normalized.includes("receipt_number") && normalized.includes("does not exist")) ||
-    (normalized.includes("receipt_generated_at") && normalized.includes("does not exist"))
-  );
-}
-
-function normalizeDate(value: string) {
-  return new Date(value);
-}
-
-function isDueSubscription(subscription: DashboardSubscription, now = new Date()) {
-  const status = (subscription.status || "").toLowerCase();
-  if (status === "cancelled" || status === "paused") {
-    return false;
-  }
-
-  if (status === "overdue") {
-    return true;
-  }
-
-  const nextDue = normalizeDate(subscription.next_payment_date);
-  if (Number.isNaN(nextDue.getTime())) {
-    return false;
-  }
-
-  return nextDue.getTime() <= now.getTime();
-}
-
-function computeNextDueDate(previousDueDate: string, billingCycle: string) {
-  const base = new Date(previousDueDate);
-  if (Number.isNaN(base.getTime())) {
-    // Fallback: next month's 5th
-    const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth() + 1, 5).toISOString().slice(0, 10);
-  }
-
-  const normalizedCycle = (billingCycle || "monthly").toLowerCase();
-  if (normalizedCycle === "yearly") {
-    return new Date(base.getFullYear() + 1, base.getMonth(), 5).toISOString().slice(0, 10);
-  }
-  // Monthly: always the 5th of next month from the base date
-  return new Date(base.getFullYear(), base.getMonth() + 1, 5).toISOString().slice(0, 10);
-}
-
-function normalizeSelectedSubscriptionIds(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value
-    .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
-    .filter(Boolean);
-}
-
 async function getCurrentMemberDashboard(req: AuthRequest): Promise<CurrentMemberDashboard> {
   if (!req.user) {
     throw new Error("Unauthenticated");
   }
 
-  const dashboard = await getMemberDashboardByEmail(req.user.email);
+  const dashboard = await getMemberDashboardByEmail(req.user.email, req.user.phone);
   if (!dashboard?.member) {
     throw new Error("Member profile not found");
   }
@@ -142,6 +90,21 @@ async function resolvePaymentConfig(req: AuthRequest) {
   return getEffectivePaymentConfig(churchId || null);
 }
 
+// 3.1: Calculate platform fee to add ON TOP of payment amount
+async function calculatePlatformFee(churchId: string | null | undefined, baseAmount: number): Promise<{ fee: number; percentage: number; enabled: boolean }> {
+  if (!churchId) return { fee: 0, percentage: 0, enabled: false };
+  try {
+    const settings = await getChurchSaaSSettings(churchId);
+    if (!settings.platform_fee_enabled || settings.platform_fee_percentage <= 0) {
+      return { fee: 0, percentage: settings.platform_fee_percentage, enabled: false };
+    }
+    const fee = Math.round(baseAmount * settings.platform_fee_percentage) / 100;
+    return { fee, percentage: settings.platform_fee_percentage, enabled: true };
+  } catch {
+    return { fee: 0, percentage: 0, enabled: false };
+  }
+}
+
 router.get("/config", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
   try {
     const paymentConfig = await resolvePaymentConfig(req);
@@ -152,7 +115,7 @@ router.get("/config", requireAuth, requireRegisteredUser, async (req: AuthReques
       reason: paymentConfig.reason,
     });
   } catch (err: any) {
-    return res.status(400).json({ error: err.message || "Failed to load payment configuration" });
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to load payment configuration") });
   }
 });
 
@@ -165,12 +128,10 @@ router.post("/order", requireAuth, requireRegisteredUser, async (req: AuthReques
 
     const dashboard = await getCurrentMemberDashboard(req);
 
-    const { amount, currency, receipt, subscription_id } = req.body;
-    const numericAmount = Number(amount);
-    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
-      return res.status(400).json({ error: "amount must be greater than 0" });
-    }
+    const { currency, receipt, subscription_id } = req.body;
 
+    // CRIT-05: Always derive amount from DB, never trust client-provided amount
+    let numericAmount: number;
     if (subscription_id) {
       const ownedSubscription = (dashboard.subscriptions || []).find(
         (subscription) => subscription.id === subscription_id
@@ -178,24 +139,44 @@ router.post("/order", requireAuth, requireRegisteredUser, async (req: AuthReques
       if (!ownedSubscription) {
         return res.status(403).json({ error: "Subscription does not belong to current member" });
       }
+      numericAmount = Number(ownedSubscription.amount);
+      if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+        return res.status(400).json({ error: "Subscription has an invalid amount" });
+      }
+    } else {
+      // For non-subscription single payments (donations via authenticated route), accept client amount
+      numericAmount = Number(req.body.amount);
+      if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+        return res.status(400).json({ error: "amount must be greater than 0" });
+      }
     }
 
+    // 3.1: Add platform fee ON TOP of the base amount
+    const churchId = req.user?.church_id || req.registeredProfile?.church_id;
+    const platformFee = await calculatePlatformFee(churchId, numericAmount);
+    const totalAmount = numericAmount + platformFee.fee;
+
     const order = await createPaymentOrder(
-      numericAmount,
+      totalAmount,
       currency || "INR",
       receipt || "church_receipt",
       {
         key_id: paymentConfig.key_id,
         key_secret: paymentConfig.key_secret,
-      }
+      },
+      { platform_fee: String(platformFee.fee), platform_fee_pct: String(platformFee.percentage) }
     );
     return res.json({
       order,
       key_id: paymentConfig.key_id,
       member_id: dashboard.member.id,
+      base_amount: numericAmount,
+      platform_fee: platformFee.fee,
+      platform_fee_percentage: platformFee.percentage,
+      total_amount: totalAmount,
     });
   } catch (err: any) {
-    return res.status(500).json({ error: err.message || "Failed to create order" });
+    return res.status(500).json({ error: safeErrorMessage(err, "Failed to create order") });
   }
 });
 
@@ -213,7 +194,6 @@ router.post("/verify", requireAuth, requireRegisteredUser, async (req: AuthReque
       razorpay_payment_id,
       razorpay_signature,
       subscription_id,
-      amount,
       payment_method,
     } = req.body;
 
@@ -221,9 +201,13 @@ router.post("/verify", requireAuth, requireRegisteredUser, async (req: AuthReque
       return res.status(400).json({ error: "Missing Razorpay verification fields" });
     }
 
-    const numericAmount = Number(amount);
-    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
-      return res.status(400).json({ error: "amount must be greater than 0" });
+    const { data: existingPayment } = await db
+      .from("payments")
+      .select("id")
+      .eq("transaction_id", razorpay_payment_id)
+      .maybeSingle();
+    if (existingPayment) {
+      return res.status(200).json({ status: "already_processed", payment_id: existingPayment.id });
     }
 
     if (subscription_id) {
@@ -248,18 +232,52 @@ router.post("/verify", requireAuth, requireRegisteredUser, async (req: AuthReque
       return res.status(400).json({ error: "Invalid signature" });
     }
 
+    // Fetch actual order amount from Razorpay instead of trusting client-sent amount
+    const razorpayOrder = await fetchRazorpayOrder(razorpay_order_id, {
+      key_id: paymentConfig.key_id,
+      key_secret: paymentConfig.key_secret,
+    });
+    const verifiedAmount = razorpayOrder.amount;
+    if (!Number.isFinite(verifiedAmount) || verifiedAmount <= 0) {
+      return res.status(400).json({ error: "Could not verify payment amount with Razorpay" });
+    }
+
     const payment = await storePayment({
       member_id: dashboard.member.id,
       subscription_id: subscription_id || null,
-      amount: numericAmount,
+      church_id: req.user?.church_id || req.registeredProfile?.church_id || null,
+      amount: verifiedAmount,
       payment_method,
       transaction_id: razorpay_payment_id,
       payment_status: "success",
       payment_date: new Date().toISOString(),
     });
+
+    // 3.1: Record platform fee collection if applicable — use fee stored at order time
+    const churchId = req.user?.church_id || req.registeredProfile?.church_id;
+    if (churchId) {
+      const storedFee = Number(razorpayOrder.notes?.platform_fee || 0);
+      const storedPct = Number(razorpayOrder.notes?.platform_fee_pct || 0);
+      if (storedFee > 0) {
+        const baseAmount = verifiedAmount - storedFee;
+        const { error: feeErr } = await db.from("platform_fee_collections").insert({
+          church_id: churchId,
+          payment_id: payment.id,
+          member_id: dashboard.member.id,
+          base_amount: baseAmount,
+          fee_percentage: storedPct,
+          fee_amount: storedFee,
+          collected_at: new Date().toISOString(),
+        });
+        if (feeErr) {
+          logger.error({ err: feeErr, paymentId: payment.id }, "platform_fee_collections insert FAILED — refund cap may be incorrect");
+        }
+      }
+    }
+
     return res.json({ success: true, payment });
   } catch (err: any) {
-    return res.status(500).json({ error: err.message || "Failed to verify payment" });
+    return res.status(500).json({ error: safeErrorMessage(err, "Failed to verify payment") });
   }
 });
 
@@ -283,10 +301,16 @@ router.post("/donation/order", requireAuth, requireRegisteredUser, async (req: A
 
     const memberToken = dashboard.member.id.replace(/-/g, "").slice(0, 8);
     const receipt = `donation_${memberToken}_${Date.now()}`;
-    const order = await createPaymentOrder(amount, "INR", receipt, {
+    
+    // 3.1: Add platform fee ON TOP
+    const churchId = req.user?.church_id || req.registeredProfile?.church_id;
+    const platformFee = await calculatePlatformFee(churchId, amount);
+    const totalAmount = amount + platformFee.fee;
+
+    const order = await createPaymentOrder(totalAmount, "INR", receipt, {
       key_id: paymentConfig.key_id,
       key_secret: paymentConfig.key_secret,
-    });
+    }, { platform_fee: String(platformFee.fee), platform_fee_pct: String(platformFee.percentage) });
 
     return res.json({
       order,
@@ -294,9 +318,13 @@ router.post("/donation/order", requireAuth, requireRegisteredUser, async (req: A
       member_id: dashboard.member.id,
       church_name: dashboard.church?.name || null,
       donation_amount: amount,
+      base_amount: amount,
+      platform_fee: platformFee.fee,
+      platform_fee_percentage: platformFee.percentage,
+      total_amount: totalAmount,
     });
   } catch (err: any) {
-    return res.status(500).json({ error: err.message || "Failed to create donation order" });
+    return res.status(500).json({ error: safeErrorMessage(err, "Failed to create donation order") });
   }
 });
 
@@ -311,14 +339,18 @@ router.post("/donation/verify", requireAuth, requireRegisteredUser, async (req: 
       return res.status(401).json({ error: "Unauthenticated" });
     }
 
-    const amount = Number(req.body?.amount);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      return res.status(400).json({ error: "amount must be greater than 0" });
-    }
-
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
       return res.status(400).json({ error: "Missing Razorpay verification fields" });
+    }
+
+    const { data: existingDonation } = await db
+      .from("payments")
+      .select("id")
+      .eq("transaction_id", razorpay_payment_id)
+      .maybeSingle();
+    if (existingDonation) {
+      return res.status(200).json({ status: "already_processed", payment_id: existingDonation.id });
     }
 
     const dashboard = await getCurrentMemberDashboard(req);
@@ -336,19 +368,55 @@ router.post("/donation/verify", requireAuth, requireRegisteredUser, async (req: 
       return res.status(400).json({ error: "Invalid signature" });
     }
 
+    // Use Razorpay order amount as the source of truth
+    const razorpayOrder = await fetchRazorpayOrder(razorpay_order_id, {
+      key_id: paymentConfig.key_id,
+      key_secret: paymentConfig.key_secret,
+    });
+    const verifiedAmount = razorpayOrder.amount;
+    if (!Number.isFinite(verifiedAmount) || verifiedAmount <= 0) {
+      return res.status(400).json({ error: "Could not verify donation amount with Razorpay" });
+    }
+
+    const fund = typeof req.body?.fund === "string" ? req.body.fund.trim().slice(0, 200) : "";
+
     const payment = await storePayment({
       member_id: dashboard.member.id,
       subscription_id: null,
-      amount,
+      church_id: req.user?.church_id || req.registeredProfile?.church_id || null,
+      amount: verifiedAmount,
       payment_method: "donation",
       transaction_id: razorpay_payment_id,
       payment_status: "success",
       payment_date: new Date().toISOString(),
+      fund_name: fund || null,
     });
+
+    // 3.1: Record platform fee for donation — use fee stored at order time
+    const churchId = req.user?.church_id || req.registeredProfile?.church_id;
+    if (churchId) {
+      const storedFee = Number(razorpayOrder.notes?.platform_fee || 0);
+      const storedPct = Number(razorpayOrder.notes?.platform_fee_pct || 0);
+      if (storedFee > 0) {
+        const baseAmount = verifiedAmount - storedFee;
+        const { error: feeErr } = await db.from("platform_fee_collections").insert({
+          church_id: churchId,
+          payment_id: payment.id,
+          member_id: dashboard.member.id,
+          base_amount: baseAmount,
+          fee_percentage: storedPct,
+          fee_amount: storedFee,
+          collected_at: new Date().toISOString(),
+        });
+        if (feeErr) {
+          logger.error({ err: feeErr, paymentId: payment.id }, "platform_fee_collections insert FAILED for donation");
+        }
+      }
+    }
 
     return res.json({ success: true, payment });
   } catch (err: any) {
-    return res.status(500).json({ error: err.message || "Failed to verify donation" });
+    return res.status(500).json({ error: safeErrorMessage(err, "Failed to verify donation") });
   }
 });
 
@@ -361,6 +429,14 @@ router.post("/subscription/order", requireAuth, requireRegisteredUser, async (re
 
     if (!req.user) {
       return res.status(401).json({ error: "Unauthenticated" });
+    }
+
+    // Enforce member_subscription_enabled SaaS setting
+    if (req.user.church_id) {
+      const saasSettings = await getChurchSaaSSettings(req.user.church_id);
+      if (!saasSettings.member_subscription_enabled) {
+        return res.status(403).json({ error: "Member subscriptions are disabled for this church" });
+      }
     }
 
     const dashboard = await getCurrentMemberDashboard(req);
@@ -376,9 +452,13 @@ router.post("/subscription/order", requireAuth, requireRegisteredUser, async (re
     }
 
     const selectedFromBody = normalizeSelectedSubscriptionIds(req.body?.subscription_ids);
-    const selectedIds = selectedFromBody.length
-      ? selectedFromBody
-      : [dueSubscriptions[0].subscription_id];
+    if (!selectedFromBody.length) {
+      return res.status(400).json({ error: "No subscriptions selected for payment" });
+    }
+    if (selectedFromBody.length > 50) {
+      return res.status(400).json({ error: "Cannot process more than 50 subscriptions at once" });
+    }
+    const selectedIds = selectedFromBody;
 
     const invalidSelection = selectedIds.find((id) => !dueSubscriptionById.has(id));
     if (invalidSelection) {
@@ -396,22 +476,30 @@ router.post("/subscription/order", requireAuth, requireRegisteredUser, async (re
       return res.status(400).json({ error: "Selected due amount is invalid" });
     }
 
+    // 3.1: Add platform fee ON TOP of subscription total
+    const churchId = req.user?.church_id || req.registeredProfile?.church_id;
+    const platformFee = await calculatePlatformFee(churchId, totalAmount);
+    const chargeAmount = totalAmount + platformFee.fee;
+
     const receipt = `subscription_multi_${Date.now()}`;
-    const order = await createPaymentOrder(totalAmount, "INR", receipt, {
+    const order = await createPaymentOrder(chargeAmount, "INR", receipt, {
       key_id: paymentConfig.key_id,
       key_secret: paymentConfig.key_secret,
-    });
+    }, { platform_fee: String(platformFee.fee), platform_fee_pct: String(platformFee.percentage) });
 
     return res.json({
       order,
       key_id: paymentConfig.key_id,
       member_id: dashboard.member.id,
       subscription_ids: selectedIds,
-      total_amount: totalAmount,
+      base_amount: totalAmount,
+      platform_fee: platformFee.fee,
+      platform_fee_percentage: platformFee.percentage,
+      total_amount: chargeAmount,
       selected_due_subscriptions: selectedDueSubscriptions,
     });
   } catch (err: any) {
-    return res.status(500).json({ error: err.message || "Failed to create subscription payment order" });
+    return res.status(500).json({ error: safeErrorMessage(err, "Failed to create subscription payment order") });
   }
 });
 
@@ -438,6 +526,15 @@ router.post("/subscription/verify", requireAuth, requireRegisteredUser, async (r
       return res.status(400).json({ error: "Missing verification fields" });
     }
 
+    const { data: existingBatch } = await db
+      .from("payments")
+      .select("id")
+      .eq("transaction_id", razorpay_payment_id)
+      .maybeSingle();
+    if (existingBatch) {
+      return res.status(200).json({ status: "already_processed", payment_id: existingBatch.id });
+    }
+
     const dashboard = await getCurrentMemberDashboard(req);
 
     const selectedIds = normalizeSelectedSubscriptionIds(subscription_ids);
@@ -461,6 +558,17 @@ router.post("/subscription/verify", requireAuth, requireRegisteredUser, async (r
       return res.status(403).json({ error: `Subscription does not belong to current member: ${missingSubscription}` });
     }
 
+    // PRE-VALIDATE: Check all subscription amounts BEFORE any DB writes
+    const subscriptionAmounts: Array<{ id: string; amount: number; subscription: DashboardSubscription }> = [];
+    for (const selectedId of normalizedSubscriptionIds) {
+      const ownedSubscription = subscriptionById.get(selectedId)!;
+      const numericAmount = Number(ownedSubscription.amount);
+      if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+        return res.status(400).json({ error: `Invalid subscription amount for ${selectedId}` });
+      }
+      subscriptionAmounts.push({ id: selectedId, amount: numericAmount, subscription: ownedSubscription });
+    }
+
     const isValid = await verifyPayment(
       razorpay_signature,
       razorpay_order_id,
@@ -474,84 +582,104 @@ router.post("/subscription/verify", requireAuth, requireRegisteredUser, async (r
       return res.status(400).json({ error: "Invalid signature" });
     }
 
-    const payments: Array<{ id: string }> = [];
-    const updatedSubscriptions: Array<{ subscription_id: string; next_payment_date: string }> = [];
-
-    for (const selectedId of normalizedSubscriptionIds) {
-      const ownedSubscription = subscriptionById.get(selectedId)!;
-      const numericAmount = Number(ownedSubscription.amount);
-      if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
-        return res.status(400).json({ error: `Invalid subscription amount for ${selectedId}` });
-      }
-
-      const payment = await storePayment({
-        member_id: dashboard.member.id,
-        subscription_id: selectedId,
-        amount: numericAmount,
-        payment_method: "subscription_paynow",
-        transaction_id: razorpay_payment_id,
-        payment_status: "success",
-        payment_date: new Date().toISOString(),
+    // Verify amount from Razorpay order matches the sum of subscription amounts + platform fee (from order notes)
+    const expectedTotal = subscriptionAmounts.reduce((sum, entry) => sum + entry.amount, 0);
+    const churchId = req.user?.church_id || req.registeredProfile?.church_id;
+    const razorpayOrder = await fetchRazorpayOrder(razorpay_order_id, {
+      key_id: paymentConfig.key_id,
+      key_secret: paymentConfig.key_secret,
+    });
+    const storedFee = Number(razorpayOrder.notes?.platform_fee || 0);
+    const storedPct = Number(razorpayOrder.notes?.platform_fee_pct || 0);
+    const expectedCharge = expectedTotal + storedFee;
+    if (Math.abs(razorpayOrder.amount - expectedCharge) > 1) {
+      return res.status(400).json({
+        error: `Payment amount mismatch: Razorpay charged ₹${razorpayOrder.amount} but expected ₹${expectedCharge}`,
       });
-      payments.push(payment);
+    }
 
-      const nextDue = computeNextDueDate(
-        ownedSubscription.next_payment_date,
-        ownedSubscription.billing_cycle
-      );
-
-      // One-time adjustment subscriptions get cancelled after payment
+    // Build batch items for the atomic RPC call
+    const paymentDate = new Date().toISOString();
+    const batchItems = subscriptionAmounts.map(({ id: selectedId, amount: numericAmount, subscription: ownedSubscription }) => {
+      const nextDue = computeNextDueDate(ownedSubscription.next_payment_date, ownedSubscription.billing_cycle);
       const isAdjustment = (ownedSubscription.plan_name || "").includes("Adjustment");
-      const newStatus = isAdjustment ? "cancelled" : "active";
+      const newStatus = isAdjustment ? "completed" : "active";
       const newNextDate = isAdjustment ? ownedSubscription.next_payment_date : nextDue;
 
-      const { error: updateSubscriptionError } = await supabaseAdmin
-        .from("subscriptions")
-        .update({
-          status: newStatus,
-          next_payment_date: newNextDate,
-        })
-        .eq("id", selectedId)
-        .eq("member_id", dashboard.member.id);
-
-      if (updateSubscriptionError) {
-        return res.status(500).json({ error: `Payment saved but failed to update subscription due date for ${selectedId}` });
-      }
-
-      updatedSubscriptions.push({
+      return {
         subscription_id: selectedId,
-        next_payment_date: newNextDate,
-      });
-
-      try {
-        await recordSubscriptionEvent({
+        amount: numericAmount,
+        receipt_number: createReceiptNumber({
           member_id: dashboard.member.id,
-          subscription_id: selectedId,
-          event_type: "subscription_due_paid",
-          status_before: ownedSubscription.status,
-          status_after: newStatus,
-          amount: numericAmount,
-          source: "payment_gateway",
-          metadata: {
-            paid_via: "pay_now",
-            next_payment_date: newNextDate,
-            transaction_id: razorpay_payment_id,
-            is_adjustment: isAdjustment,
-          },
-        });
-      } catch {
-        // Non-blocking event failure.
+          payment_date: paymentDate,
+          transaction_id: razorpay_payment_id,
+        }),
+        new_status: newStatus,
+        new_next_payment_date: newNextDate,
+        old_status: ownedSubscription.status,
+        is_adjustment: isAdjustment,
+      };
+    });
+
+    // Atomic: all payments + subscription updates + events in one DB transaction
+    const { data: rpcResult, error: rpcError } = await db.rpc(
+      "process_subscription_payments_batch",
+      {
+        p_member_id: dashboard.member.id,
+        p_transaction_id: razorpay_payment_id,
+        p_payment_date: paymentDate,
+        p_items: batchItems,
+      }
+    );
+
+    if (rpcError) {
+      logger.error({ rpcError, memberId: dashboard.member.id, txnId: razorpay_payment_id }, "process_subscription_payments_batch RPC failed");
+      return res.status(500).json({ error: safeErrorMessage(rpcError, "Failed to process subscription payments") });
+    }
+
+    const batchResult = rpcResult as {
+      success: boolean;
+      payment_count: number;
+      results: Array<{
+        payment_id: string;
+        receipt_number: string | null;
+        subscription_id: string;
+        already_existed: boolean;
+        next_payment_date: string;
+      }>;
+    };
+
+    const payments = batchResult.results.map((r) => ({ id: r.payment_id, receipt_number: r.receipt_number }));
+    const updatedSubscriptions = batchResult.results
+      .filter((r) => !r.already_existed)
+      .map((r) => ({ subscription_id: r.subscription_id, next_payment_date: r.next_payment_date }));
+
+    // 3.1: Record platform fee for subscription payments — use fee stored at order time
+    if (churchId && storedFee > 0 && payments.length > 0) {
+      const baseAmount = expectedTotal;
+      const { error: feeErr } = await db.from("platform_fee_collections").insert({
+        church_id: churchId,
+        payment_id: payments[0].id,
+        member_id: dashboard.member.id,
+        base_amount: baseAmount,
+        fee_percentage: storedPct,
+        fee_amount: storedFee,
+        collected_at: new Date().toISOString(),
+      });
+      if (feeErr) {
+        logger.error({ err: feeErr, paymentId: payments[0].id }, "platform_fee_collections insert FAILED for subscription");
       }
     }
 
     return res.json({
       success: true,
-      payment_count: payments.length,
+      payment_count: batchResult.payment_count,
       payments,
       updated_subscriptions: updatedSubscriptions,
     });
   } catch (err: any) {
-    return res.status(500).json({ error: err.message || "Failed to verify subscription payment" });
+    logger.error({ err, stack: err?.stack }, "subscription/verify failed");
+    return res.status(500).json({ error: safeErrorMessage(err, "Failed to verify subscription payment") });
   }
 });
 
@@ -566,50 +694,58 @@ router.get("/:paymentId/receipt", requireAuth, requireRegisteredUser, async (req
       return res.status(400).json({ error: "Invalid payment ID format" });
     }
 
-    const dashboard = await getCurrentMemberDashboard(req);
-
-    const withReceiptColumns = await supabaseAdmin
+    // Fetch payment first (no member filter yet)
+    const { data: payment, error: paymentError } = await db
       .from("payments")
       .select(
-        "id, member_id, subscription_id, amount, payment_method, transaction_id, payment_status, payment_date, receipt_number, receipt_generated_at"
+        "id, member_id, subscription_id, church_id, amount, payment_method, transaction_id, payment_status, payment_date, receipt_number, receipt_generated_at"
       )
       .eq("id", paymentId)
-      .eq("member_id", dashboard.member.id)
-      .maybeSingle<PaymentReceiptRow>();
+      .maybeSingle<PaymentReceiptRow & { church_id: string }>();
 
-    let payment: PaymentReceiptRow | null = null;
-
-    if (withReceiptColumns.error && isMissingReceiptMetadataColumnError(withReceiptColumns.error)) {
-      const legacyPayment = await supabaseAdmin
-        .from("payments")
-        .select(
-          "id, member_id, subscription_id, amount, payment_method, transaction_id, payment_status, payment_date"
-        )
-        .eq("id", paymentId)
-        .eq("member_id", dashboard.member.id)
-        .maybeSingle<
-          Omit<PaymentReceiptRow, "receipt_number" | "receipt_generated_at">
-        >();
-
-      if (legacyPayment.error) {
-        return res.status(500).json({ error: "Failed to load payment" });
-      }
-
-      payment = legacyPayment.data
-        ? {
-            ...legacyPayment.data,
-            receipt_number: null,
-            receipt_generated_at: null,
-          }
-        : null;
-    } else if (withReceiptColumns.error) {
+    if (paymentError) {
       return res.status(500).json({ error: "Failed to load payment" });
-    } else {
-      payment = withReceiptColumns.data || null;
     }
-
     if (!payment) {
       return res.status(404).json({ error: "Payment not found" });
+    }
+
+    // Authorization: allow (1) the member themselves, (2) church admin, (3) super admin, (4) family head
+    const isSuper = isSuperAdminEmail(req.user.email, req.user.phone);
+    const isChurchAdmin = req.user.role === "admin" && payment.church_id === req.user.church_id;
+
+    let authorized = isSuper || isChurchAdmin;
+
+    if (!authorized) {
+      // Check if the requesting user is the payment's member
+      const dashboard = await getCurrentMemberDashboard(req);
+      if (dashboard.member.id === payment.member_id) {
+        authorized = true;
+      } else {
+        // Check if the payment's member is a family member linked to the requesting user
+        const { data: familyLink } = await db
+          .from("family_members")
+          .select("id")
+          .eq("member_id", dashboard.member.id)
+          .eq("linked_to_member_id", payment.member_id)
+          .maybeSingle();
+        if (familyLink) authorized = true;
+
+        // Also check if the payment is linked to a subscription owned by the requesting user (family head)
+        if (!authorized && payment.subscription_id) {
+          const { data: ownedSub } = await db
+            .from("subscriptions")
+            .select("id")
+            .eq("id", payment.subscription_id)
+            .eq("member_id", dashboard.member.id)
+            .maybeSingle();
+          if (ownedSub) authorized = true;
+        }
+      }
+    }
+
+    if (!authorized) {
+      return res.status(403).json({ error: "You do not have permission to download this receipt" });
     }
 
     const status = (payment.payment_status || "").toLowerCase();
@@ -626,18 +762,13 @@ router.get("/:paymentId/receipt", requireAuth, requireRegisteredUser, async (req
       });
 
     if (!payment.receipt_number) {
-      const { error: updateError } = await supabaseAdmin
+      await db
         .from("payments")
         .update({
           receipt_number: receiptNumber,
           receipt_generated_at: new Date().toISOString(),
         })
-        .eq("id", payment.id)
-        .eq("member_id", payment.member_id);
-
-      if (updateError && !isMissingReceiptMetadataColumnError(updateError)) {
-        return res.status(500).json({ error: "Failed to link receipt with payment" });
-      }
+        .eq("id", payment.id);
     }
 
     const paymentAmount = Number(payment.amount);
@@ -645,25 +776,44 @@ router.get("/:paymentId/receipt", requireAuth, requireRegisteredUser, async (req
       return res.status(400).json({ error: "Invalid payment amount" });
     }
 
-    const subscription = payment.subscription_id
-      ? dashboard.subscriptions.find((row) => row.id === payment.subscription_id)
-      : null;
-    const memberName =
-      req.registeredProfile?.full_name || req.user.email || "Church Member";
+    // Fetch member + church info for the receipt
+    const { data: paymentMember } = await db
+      .from("members")
+      .select("full_name, email")
+      .eq("id", payment.member_id)
+      .maybeSingle<{ full_name: string | null; email: string | null }>();
+
+    const { data: church } = await db
+      .from("churches")
+      .select("name")
+      .eq("id", payment.church_id)
+      .maybeSingle<{ name: string }>();
+
+    let subscriptionName: string | null = null;
+    if (payment.subscription_id) {
+      const { data: sub } = await db
+        .from("subscriptions")
+        .select("plan_name")
+        .eq("id", payment.subscription_id)
+        .maybeSingle<{ plan_name: string }>();
+      subscriptionName = sub?.plan_name || null;
+    }
+
+    const memberName = paymentMember?.full_name || paymentMember?.email || req.user.email || "Church Member";
 
     const pdfBuffer = await generateReceiptPdfBuffer({
       receipt_number: receiptNumber,
       payment_id: payment.id,
       payment_date: payment.payment_date,
       amount: paymentAmount,
-      payment_method: payment.payment_method || "razorpay",
+      payment_method: payment.payment_method || "manual",
       payment_status: payment.payment_status || "success",
       transaction_id: payment.transaction_id,
       member_name: memberName,
-      member_email: req.user.email,
-      church_name: dashboard.church?.name || null,
+      member_email: paymentMember?.email || req.user.email,
+      church_name: church?.name || null,
       subscription_id: payment.subscription_id,
-      subscription_name: subscription?.plan_name || null,
+      subscription_name: subscriptionName,
     });
 
     const safeFileName = `receipt-${receiptNumber}.pdf`;
@@ -673,7 +823,175 @@ router.get("/:paymentId/receipt", requireAuth, requireRegisteredUser, async (req
 
     return res.status(200).send(pdfBuffer);
   } catch (err: any) {
-    return res.status(500).json({ error: err.message || "Failed to download receipt" });
+    return res.status(500).json({ error: safeErrorMessage(err, "Failed to download receipt") });
+  }
+});
+
+// ═══════════════════════════════════════════════════
+// PUBLIC DONATION ENDPOINTS (no auth required)
+// ═══════════════════════════════════════════════════
+
+router.get("/public/config", async (_req, res) => {
+  try {
+    const paymentConfig = await getEffectivePaymentConfig(null);
+    return res.json({
+      payments_enabled: paymentConfig.payments_enabled,
+      key_id: paymentConfig.payments_enabled ? paymentConfig.key_id : "",
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to load payment configuration") });
+  }
+});
+
+// BE-3: Rate-limit public donation endpoints (10 requests per minute per IP)
+const publicDonationLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests, please try again later" },
+});
+
+router.post("/public/donation/order", publicDonationLimiter, async (req, res) => {
+  try {
+    const paymentConfig = await getEffectivePaymentConfig(null);
+    if (!paymentConfig.payments_enabled) {
+      return res.status(503).json({ error: "Payments are currently disabled" });
+    }
+
+    const amount = Number(req.body?.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ error: "amount must be greater than 0" });
+    }
+
+    // Cap public donation at reasonable limit (₹500,000)
+    if (amount > 500000) {
+      return res.status(400).json({ error: "Donation amount exceeds the maximum allowed" });
+    }
+
+    const donorName = typeof req.body?.donor_name === "string" ? req.body.donor_name.trim().slice(0, 200) : "";
+    const donorEmail = typeof req.body?.donor_email === "string" ? req.body.donor_email.trim().slice(0, 254) : "";
+    const fund = typeof req.body?.fund === "string" ? req.body.fund.trim().slice(0, 200) : "";
+    const message = typeof req.body?.message === "string" ? req.body.message.trim().slice(0, 500) : "";
+
+    const receipt = `pub_donation_${Date.now()}`;
+    const order = await createPaymentOrder(amount, "INR", receipt, {
+      key_id: paymentConfig.key_id,
+      key_secret: paymentConfig.key_secret,
+    });
+
+    return res.json({
+      order,
+      key_id: paymentConfig.key_id,
+      donor_name: donorName,
+      donor_email: donorEmail,
+      fund,
+      message,
+      donation_amount: amount,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: safeErrorMessage(err, "Failed to create donation order") });
+  }
+});
+
+router.post("/public/donation/verify", publicDonationLimiter, async (req, res) => {
+  try {
+    const paymentConfig = await getEffectivePaymentConfig(null);
+    if (!paymentConfig.payments_enabled) {
+      return res.status(503).json({ error: "Payments are currently disabled" });
+    }
+
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).json({ error: "Missing Razorpay verification fields" });
+    }
+
+    const { data: existingPublic } = await db
+      .from("payments")
+      .select("id")
+      .eq("transaction_id", razorpay_payment_id)
+      .maybeSingle();
+    if (existingPublic) {
+      return res.status(200).json({ status: "already_processed", payment_id: existingPublic.id });
+    }
+
+    const isValid = await verifyPayment(
+      razorpay_signature,
+      razorpay_order_id,
+      razorpay_payment_id,
+      {
+        key_id: paymentConfig.key_id,
+        key_secret: paymentConfig.key_secret,
+      }
+    );
+    if (!isValid) {
+      return res.status(400).json({ error: "Invalid signature" });
+    }
+
+    // Use Razorpay order amount as source of truth
+    const razorpayOrder = await fetchRazorpayOrder(razorpay_order_id, {
+      key_id: paymentConfig.key_id,
+      key_secret: paymentConfig.key_secret,
+    });
+    const verifiedAmount = razorpayOrder.amount;
+    if (!Number.isFinite(verifiedAmount) || verifiedAmount <= 0) {
+      return res.status(400).json({ error: "Could not verify donation amount with Razorpay" });
+    }
+
+    const donorName = typeof req.body?.donor_name === "string" ? req.body.donor_name.trim().slice(0, 200) : "";
+    const donorEmail = typeof req.body?.donor_email === "string" ? req.body.donor_email.trim().slice(0, 254) : "";
+    const fund = typeof req.body?.fund === "string" ? req.body.fund.trim().slice(0, 200) : "";
+    const message = typeof req.body?.message === "string" ? req.body.message.trim().slice(0, 500) : "";
+
+    // Store public donation with member_id = null
+    const { data, error } = await db
+      .from("payments")
+      .insert([{
+        member_id: null,
+        subscription_id: null,
+        amount: verifiedAmount,
+        payment_method: "public_donation",
+        transaction_id: razorpay_payment_id,
+        payment_status: "success",
+        payment_date: new Date().toISOString(),
+        fund_name: fund || null,
+      }])
+      .select("id")
+      .single<{ id: string }>();
+
+    if (error) throw error;
+
+    // Store donor details in a notes-style metadata approach via a separate insert
+    // (We log donor info so admins can see who donated)
+    if (donorName || donorEmail || fund || message) {
+      try {
+        await db
+          .from("subscription_events")
+          .insert([{
+            member_id: null as any,
+            subscription_id: null,
+            church_id: null,
+            event_type: "public_donation",
+            status_after: "success",
+            amount: verifiedAmount,
+            source: "public_donation_page",
+            metadata: {
+              payment_id: data?.id,
+              donor_name: donorName,
+              donor_email: donorEmail,
+              fund,
+              message,
+              transaction_id: razorpay_payment_id,
+            },
+          }]);
+      } catch {
+        // Non-critical: don't fail the donation if event logging fails
+      }
+    }
+
+    return res.json({ success: true, payment_id: data?.id });
+  } catch (err: any) {
+    return res.status(500).json({ error: safeErrorMessage(err, "Failed to verify donation") });
   }
 });
 
