@@ -767,8 +767,8 @@ async function runMigrations() {
           CREATE INDEX IF NOT EXISTS ix_payments_member_date
             ON payments (member_id, payment_date DESC);
 
-          CREATE INDEX IF NOT EXISTS ix_audit_logs_church_time
-            ON audit_logs (church_id, created_at DESC);
+          CREATE INDEX IF NOT EXISTS ix_admin_audit_log_church_time
+            ON admin_audit_log (church_id, created_at DESC);
 
           -- 5) Job failures DLQ
           CREATE TABLE IF NOT EXISTS job_failures (
