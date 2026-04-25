@@ -7,10 +7,12 @@ import {
   addFamilyMemberSchema,
   updateFamilyMemberSchema,
   createFamilyRequestSchema,
+  batchReviewSchema,
   reviewDecisionSchema,
 } from "../utils/zodSchemas";
 import { Router } from "express";
 import jwt from "jsonwebtoken";
+import { randomUUID } from "crypto";
 import { AuthRequest, requireAuth } from "../middleware/requireAuth";
 import { requireRegisteredUser } from "../middleware/requireRegisteredUser";
 import { isSuperAdminEmail } from "../middleware/requireSuperAdmin";
@@ -21,6 +23,11 @@ import { JWT_SECRET } from "../config";
 import { logger } from "../utils/logger";
 import { normalizeIndianPhone } from "../utils/phone";
 import { rotateRefreshToken, revokeRefreshToken, revokeAllRefreshTokens } from "../services/refreshTokenService";
+import {
+  refreshCookieOptions,
+  clearRefreshCookieOptions,
+  clearLegacyRefreshCookieOptions,
+} from "../utils/refreshCookie";
 import { getChurchSaaSSettings } from "../services/churchSubscriptionService";
 import {
   addFamilyMemberForCurrentUser,
@@ -658,6 +665,45 @@ router.post("/family-requests/:id/review", requireAuth, requireRegisteredUser, v
   }
 });
 
+router.post("/family-requests/batch-review", requireAuth, requireRegisteredUser, validate(batchReviewSchema), async (req: AuthRequest, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: "Unauthenticated" });
+
+    const isAdmin = req.user.role === "admin" || isSuperAdminEmail(req.user.email, req.user.phone);
+    if (!isAdmin) {
+      return res.status(403).json({ error: "Only admins can review family requests" });
+    }
+
+    const { request_ids, decision, review_note } = req.body;
+    const results: Array<{ request_id: string; success: boolean; error?: string }> = [];
+
+    for (const requestId of request_ids as string[]) {
+      try {
+        await reviewFamilyMemberRequest(
+          requestId,
+          decision,
+          req.registeredProfile!.id,
+          review_note,
+          isSuperAdminEmail(req.user.email, req.user.phone) ? undefined : req.user.church_id,
+        );
+        await persistAuditLog(req, "family_request.review", "family_request", requestId, { decision, batch: true });
+        results.push({ request_id: requestId, success: true });
+      } catch (err: any) {
+        results.push({ request_id: requestId, success: false, error: safeErrorMessage(err, "Failed to review family request") });
+      }
+    }
+
+    return res.json({
+      processed: results.length,
+      succeeded: results.filter((result) => result.success).length,
+      failed: results.filter((result) => !result.success).length,
+      results,
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to review family requests") });
+  }
+});
+
 // ═══ Refresh Token ═══
 router.post("/refresh", async (req: AuthRequest, res) => {
   try {
@@ -672,18 +718,12 @@ router.post("/refresh", async (req: AuthRequest, res) => {
     }
 
     // Clean up stale cookies that may exist at the wrong path from a prior deploy
-    const isProduction = process.env.NODE_ENV === "production";
-    res.clearCookie("refresh_token", { path: "/api/auth", httpOnly: true, secure: isProduction, sameSite: "strict" });
+    res.clearCookie("refresh_token", clearLegacyRefreshCookieOptions());
 
     const result = await rotateRefreshToken(refreshToken);
     if (!result) {
       // Clear the invalid cookie
-      res.clearCookie("refresh_token", {
-        path: "/api/auth/refresh",
-        httpOnly: true,
-        secure: isProduction,
-        sameSite: "strict",
-      });
+      res.clearCookie("refresh_token", clearRefreshCookieOptions());
       return res.status(401).json({ error: "Invalid or expired refresh token" });
     }
 
@@ -707,12 +747,7 @@ router.post("/refresh", async (req: AuthRequest, res) => {
         .maybeSingle();
       if (church?.deleted_at || church?.service_enabled === false) {
         await revokeAllRefreshTokens(user.id);
-        res.clearCookie("refresh_token", {
-          path: "/api/auth/refresh",
-          httpOnly: true,
-          secure: isProduction,
-          sameSite: "strict",
-        });
+        res.clearCookie("refresh_token", clearRefreshCookieOptions());
         return res.status(403).json({ error: "Your church account has been deactivated" });
       }
     }
@@ -732,13 +767,7 @@ router.post("/refresh", async (req: AuthRequest, res) => {
       { expiresIn: "30m" },
     );
 
-    res.cookie("refresh_token", result.newToken, {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: "strict",
-      path: "/api/auth/refresh",
-      expires: result.expiresAt,
-    });
+    res.cookie("refresh_token", result.newToken, refreshCookieOptions({ expires: result.expiresAt }));
 
     return res.json({ access_token: accessToken });
   } catch (err: any) {
@@ -779,22 +808,159 @@ router.post("/join-church", requireAuth, validate(joinChurchSchema), async (req:
 // Mounted at /refresh/revoke so the httpOnly cookie (path=/api/auth/refresh) is sent by the browser
 router.post("/refresh/revoke", async (req: AuthRequest, res) => {
   try {
+    if (!req.headers["x-requested-with"]) {
+      return res.status(403).json({ error: "Missing X-Requested-With header" });
+    }
     const refreshToken = req.cookies?.refresh_token;
     if (refreshToken) {
       await revokeRefreshToken(refreshToken);
     }
-    const isProduction = process.env.NODE_ENV === "production";
-    res.clearCookie("refresh_token", {
-      path: "/api/auth/refresh",
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: "strict",
-    });
+    res.clearCookie("refresh_token", clearRefreshCookieOptions());
     // Also clear any stale cookie at the old path
-    res.clearCookie("refresh_token", { path: "/api/auth", httpOnly: true, secure: isProduction, sameSite: "strict" });
+    res.clearCookie("refresh_token", clearLegacyRefreshCookieOptions());
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: safeErrorMessage(err, "Logout failed") });
+  }
+});
+
+// ═══ Native → Web Handoff ═══
+// Mint a short-lived, single-use token the native app embeds in a deep link
+// to the website. The website exchanges it (POST /web-handoff/exchange) for
+// a real session cookie. Replay is prevented by the DB row's consumed_at flag.
+
+const WEB_HANDOFF_TTL_SECONDS = 120;
+const WEB_HANDOFF_AUD = "web-handoff";
+const WEB_HANDOFF_PURPOSES = new Set(["manage_subscription"]);
+
+router.post("/web-handoff/mint", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: "Unauthenticated" });
+    const purpose = typeof req.body?.purpose === "string" ? req.body.purpose : "";
+    if (!WEB_HANDOFF_PURPOSES.has(purpose)) {
+      return res.status(400).json({ error: "Invalid handoff purpose" });
+    }
+
+    // Admin-only guard for SaaS subscription management
+    if (purpose === "manage_subscription") {
+      if (req.user.role !== "admin" && !isSuperAdminEmail(req.user.email, req.user.phone)) {
+        return res.status(403).json({ error: "Only admins can manage subscription" });
+      }
+    }
+
+    const jti = randomUUID();
+    const expiresAt = new Date(Date.now() + WEB_HANDOFF_TTL_SECONDS * 1000);
+
+    const { error: insertErr } = await db.from("web_handoff_tokens").insert({
+      jti,
+      user_id: req.user.id,
+      church_id: req.user.church_id || null,
+      purpose,
+      expires_at: expiresAt.toISOString(),
+    });
+    if (insertErr) {
+      logger.error({ err: insertErr }, "Failed to persist web_handoff token");
+      return res.status(500).json({ error: "Failed to mint handoff token" });
+    }
+
+    const token = jwt.sign(
+      {
+        sub: req.user.id,
+        church_id: req.user.church_id || "",
+        purpose,
+        jti,
+        aud: WEB_HANDOFF_AUD,
+        iss: "shalom-app",
+      },
+      JWT_SECRET,
+      { expiresIn: WEB_HANDOFF_TTL_SECONDS },
+    );
+
+    return res.json({ token, expires_at: expiresAt.toISOString(), purpose });
+  } catch (err: any) {
+    return res.status(500).json({ error: safeErrorMessage(err, "Failed to mint handoff token") });
+  }
+});
+
+router.post("/web-handoff/exchange", async (req: AuthRequest, res) => {
+  try {
+    if (!req.headers["x-requested-with"]) {
+      return res.status(403).json({ error: "Missing X-Requested-With header" });
+    }
+    const token = typeof req.body?.token === "string" ? req.body.token : "";
+    if (!token) return res.status(400).json({ error: "Missing handoff token" });
+
+    let decoded: any;
+    try {
+      decoded = jwt.verify(token, JWT_SECRET, {
+        audience: WEB_HANDOFF_AUD,
+        issuer: "shalom-app",
+      });
+    } catch {
+      return res.status(401).json({ error: "Invalid or expired handoff token" });
+    }
+
+    const jti = typeof decoded?.jti === "string" ? decoded.jti : "";
+    const userId = typeof decoded?.sub === "string" ? decoded.sub : "";
+    const purpose = typeof decoded?.purpose === "string" ? decoded.purpose : "";
+    if (!jti || !userId || !WEB_HANDOFF_PURPOSES.has(purpose)) {
+      return res.status(400).json({ error: "Malformed handoff token" });
+    }
+
+    // Single-use guard: flip consumed_at atomically; abort if already consumed or expired.
+    const nowIso = new Date().toISOString();
+    const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.ip || "";
+    const { data: consumed, error: consumeErr } = await db
+      .from("web_handoff_tokens")
+      .update({ consumed_at: nowIso, consumed_ip: ip })
+      .eq("jti", jti)
+      .is("consumed_at", null)
+      .gt("expires_at", nowIso)
+      .select("user_id, church_id, purpose")
+      .maybeSingle();
+
+    if (consumeErr || !consumed) {
+      return res.status(401).json({ error: "Handoff token already used or expired" });
+    }
+    if (consumed.user_id !== userId) {
+      return res.status(401).json({ error: "Handoff token user mismatch" });
+    }
+
+    // Load the user so we can mint a standard access+refresh pair.
+    const { data: user } = await db
+      .from("users")
+      .select("id, email, phone_number, role, church_id")
+      .eq("id", userId)
+      .maybeSingle();
+    if (!user) return res.status(401).json({ error: "User not found" });
+
+    const churchId = consumed.church_id || user.church_id || "";
+    const accessToken = jwt.sign(
+      {
+        sub: user.id,
+        email: user.email || "",
+        phone: user.phone_number || "",
+        role: user.role || "member",
+        church_id: churchId,
+        aud: "authenticated",
+        iss: "shalom-app",
+      },
+      JWT_SECRET,
+      { expiresIn: "30m" },
+    );
+
+    const { createRefreshToken } = await import("../services/refreshTokenService");
+    const { token: refreshToken, expiresAt } = await createRefreshToken(user.id, churchId || undefined);
+    res.cookie("refresh_token", refreshToken, refreshCookieOptions({ expires: expiresAt }));
+
+    return res.json({
+      access_token: accessToken,
+      purpose: consumed.purpose,
+      church_id: churchId,
+      user: { id: user.id, email: user.email, phone: user.phone_number, role: user.role },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: safeErrorMessage(err, "Failed to exchange handoff token") });
   }
 });
 

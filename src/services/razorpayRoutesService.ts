@@ -14,6 +14,7 @@ export type LinkedAccount = {
   church_id: string;
   razorpay_account_id: string;
   account_status: string;
+  routes_enabled: boolean;
   business_name: string | null;
   contact_name: string | null;
   email: string | null;
@@ -171,7 +172,7 @@ export async function createLinkedAccount(input: CreateLinkedAccountInput): Prom
  */
 export async function listLinkedAccounts(): Promise<(LinkedAccount & { church_name?: string })[]> {
   const { rows } = await rawQuery<LinkedAccount & { church_name: string }>(
-    `SELECT la.*, c.name AS church_name
+    `SELECT la.*, c.name AS church_name, c.routes_enabled
      FROM church_linked_accounts la
      JOIN churches c ON c.id = la.church_id
      ORDER BY la.created_at DESC`,

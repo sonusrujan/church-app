@@ -632,6 +632,262 @@ async function runMigrations() {
             WHERE razorpay_transfer_id IS NOT NULL;
         `,
       },
+      {
+        name: "029_systemic_audit_fixes",
+        sql: `
+          -- Universal soft-delete: add deleted_at to entities that currently hard-delete
+          ALTER TABLE dioceses ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ DEFAULT NULL;
+          ALTER TABLE donation_funds ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ DEFAULT NULL;
+          ALTER TABLE ad_banners ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ DEFAULT NULL;
+          ALTER TABLE church_events ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ DEFAULT NULL;
+          ALTER TABLE announcements ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ DEFAULT NULL;
+
+          -- Partial indexes for soft-delete filtering
+          CREATE INDEX IF NOT EXISTS idx_dioceses_not_deleted ON dioceses (id) WHERE deleted_at IS NULL;
+          CREATE INDEX IF NOT EXISTS idx_donation_funds_not_deleted ON donation_funds (church_id) WHERE deleted_at IS NULL;
+          CREATE INDEX IF NOT EXISTS idx_ad_banners_not_deleted ON ad_banners (scope, scope_id) WHERE deleted_at IS NULL;
+          CREATE INDEX IF NOT EXISTS idx_church_events_not_deleted ON church_events (church_id) WHERE deleted_at IS NULL;
+          CREATE INDEX IF NOT EXISTS idx_announcements_not_deleted ON announcements (church_id) WHERE deleted_at IS NULL;
+
+          -- SaaS enforcement support
+          ALTER TABLE churches ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ DEFAULT NULL;
+          CREATE INDEX IF NOT EXISTS idx_churches_trial_ends_at ON churches (trial_ends_at) WHERE trial_ends_at IS NOT NULL AND deleted_at IS NULL;
+          CREATE INDEX IF NOT EXISTS idx_church_subscriptions_enforcement ON church_subscriptions (status, next_payment_date) WHERE status IN ('active', 'overdue');
+        `,
+      },
+      {
+        name: "030_refund_webhook_support",
+        sql: `
+          ALTER TABLE payment_refunds
+            ADD COLUMN IF NOT EXISTS razorpay_refund_id TEXT DEFAULT NULL,
+            ADD COLUMN IF NOT EXISTS refund_status TEXT DEFAULT 'processed';
+
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_refunds_razorpay_id
+            ON payment_refunds(razorpay_refund_id)
+            WHERE razorpay_refund_id IS NOT NULL;
+        `,
+      },
+      {
+        name: "031_saas_payment_hardening",
+        sql: `
+          CREATE UNIQUE INDEX IF NOT EXISTS church_subscription_payments_txn_unique
+            ON church_subscription_payments(transaction_id)
+            WHERE transaction_id IS NOT NULL;
+
+          CREATE TABLE IF NOT EXISTS church_subscription_pending_orders (
+            razorpay_order_id text PRIMARY KEY,
+            church_subscription_id uuid NOT NULL REFERENCES church_subscriptions(id) ON DELETE CASCADE,
+            church_id uuid NOT NULL REFERENCES churches(id) ON DELETE CASCADE,
+            expected_amount numeric(12,2) NOT NULL,
+            created_at timestamptz NOT NULL DEFAULT now(),
+            reconciled_at timestamptz
+          );
+
+          CREATE INDEX IF NOT EXISTS church_subscription_pending_orders_church_idx
+            ON church_subscription_pending_orders(church_id, created_at DESC);
+
+          CREATE TABLE IF NOT EXISTS web_handoff_tokens (
+            jti uuid PRIMARY KEY,
+            user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            church_id uuid REFERENCES churches(id) ON DELETE SET NULL,
+            purpose text NOT NULL,
+            expires_at timestamptz NOT NULL,
+            consumed_at timestamptz,
+            consumed_ip text,
+            created_at timestamptz NOT NULL DEFAULT now()
+          );
+
+          CREATE INDEX IF NOT EXISTS web_handoff_tokens_user_idx
+            ON web_handoff_tokens(user_id, created_at DESC);
+
+          CREATE INDEX IF NOT EXISTS web_handoff_tokens_expiry_idx
+            ON web_handoff_tokens(expires_at)
+            WHERE consumed_at IS NULL;
+        `,
+      },
+      {
+        name: "032_native_push_tokens",
+        sql: `
+          ALTER TABLE push_subscriptions
+            ADD COLUMN IF NOT EXISTS platform text DEFAULT 'web';
+
+          DO $$ BEGIN
+            ALTER TABLE push_subscriptions
+              ADD CONSTRAINT push_subscriptions_platform_check
+              CHECK (platform IN ('web', 'ios', 'android'));
+          EXCEPTION WHEN duplicate_object THEN NULL;
+          END $$;
+
+          ALTER TABLE push_subscriptions
+            ALTER COLUMN p256dh DROP NOT NULL,
+            ALTER COLUMN auth DROP NOT NULL;
+
+          ALTER TABLE push_subscriptions
+            ADD COLUMN IF NOT EXISTS app_id text;
+
+          CREATE INDEX IF NOT EXISTS idx_push_subscriptions_platform
+            ON push_subscriptions(platform)
+            WHERE platform IN ('ios', 'android');
+        `,
+      },
+      {
+        name: "033_payment_uniqueness_and_indexes",
+        sql: `
+          -- 1) Payment uniqueness: replace single-col UNIQUE(transaction_id) with composite partials
+          ALTER TABLE payments
+            DROP CONSTRAINT IF EXISTS uq_payments_transaction_id;
+
+          CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_txn_sub
+            ON payments (transaction_id, subscription_id)
+            WHERE transaction_id IS NOT NULL AND subscription_id IS NOT NULL;
+
+          CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_txn_nosub
+            ON payments (transaction_id)
+            WHERE transaction_id IS NOT NULL AND subscription_id IS NULL;
+
+          -- 2) Subscription reminder dedup (one per subscription+type per day)
+          CREATE UNIQUE INDEX IF NOT EXISTS uq_subscription_reminders_daily
+            ON subscription_reminders (subscription_id, reminder_type, (date_trunc('day', sent_at)))
+            WHERE subscription_id IS NOT NULL;
+
+          -- 3) Membership request approval race
+          CREATE INDEX IF NOT EXISTS ix_membership_requests_status
+            ON membership_requests (status);
+
+          -- 4) Scalability indexes
+          CREATE INDEX IF NOT EXISTS ix_subscriptions_status_next_due
+            ON subscriptions (status, next_payment_date)
+            WHERE status IN ('active', 'overdue', 'pending_first_payment');
+
+          CREATE INDEX IF NOT EXISTS ix_members_church_name
+            ON members (church_id, full_name)
+            WHERE deleted_at IS NULL;
+
+          CREATE INDEX IF NOT EXISTS ix_payments_member_date
+            ON payments (member_id, payment_date DESC);
+
+          CREATE INDEX IF NOT EXISTS ix_audit_logs_church_time
+            ON audit_logs (church_id, created_at DESC);
+
+          -- 5) Job failures DLQ
+          CREATE TABLE IF NOT EXISTS job_failures (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            job_name TEXT NOT NULL,
+            job_type TEXT,
+            payload JSONB,
+            last_error TEXT,
+            attempt_count INT NOT NULL DEFAULT 0,
+            first_failed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            last_failed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            resolved_at TIMESTAMPTZ,
+            resolved_by UUID,
+            resolution_note TEXT
+          );
+
+          CREATE INDEX IF NOT EXISTS ix_job_failures_unresolved
+            ON job_failures (first_failed_at DESC)
+            WHERE resolved_at IS NULL;
+
+          -- 6) Account recovery email fallback
+          ALTER TABLE users
+            ADD COLUMN IF NOT EXISTS recovery_email TEXT,
+            ADD COLUMN IF NOT EXISTS recovery_email_verified_at TIMESTAMPTZ;
+
+          CREATE INDEX IF NOT EXISTS ix_users_recovery_email
+            ON users (lower(recovery_email))
+            WHERE recovery_email IS NOT NULL;
+
+          -- 7) Trial grant history
+          CREATE TABLE IF NOT EXISTS trial_grant_history (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            church_id UUID NOT NULL REFERENCES churches(id) ON DELETE CASCADE,
+            trial_days INT NOT NULL,
+            granted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            granted_by UUID,
+            expires_at TIMESTAMPTZ NOT NULL,
+            reason TEXT
+          );
+
+          CREATE INDEX IF NOT EXISTS ix_trial_grant_history_church
+            ON trial_grant_history (church_id, granted_at DESC);
+
+          -- 8) Push notification idempotency
+          ALTER TABLE church_notifications
+            ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+
+          CREATE UNIQUE INDEX IF NOT EXISTS uq_church_notifications_idempotency
+            ON church_notifications (idempotency_key)
+            WHERE idempotency_key IS NOT NULL;
+
+          ALTER TABLE notification_batches
+            ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+
+          CREATE UNIQUE INDEX IF NOT EXISTS uq_notification_batches_idempotency
+            ON notification_batches (idempotency_key)
+            WHERE idempotency_key IS NOT NULL;
+
+          -- 9) Subscription paused status
+          DO $$
+          BEGIN
+            IF EXISTS (
+              SELECT 1 FROM pg_constraint
+              WHERE conname = 'subscriptions_status_check'
+            ) THEN
+              ALTER TABLE subscriptions DROP CONSTRAINT subscriptions_status_check;
+            END IF;
+            ALTER TABLE subscriptions
+              ADD CONSTRAINT subscriptions_status_check
+              CHECK (status IN ('active', 'overdue', 'cancelled', 'expired', 'pending_first_payment', 'paused'));
+          EXCEPTION WHEN OTHERS THEN
+            NULL;
+          END $$;
+
+          -- 10) OTP rate-limit table
+          CREATE TABLE IF NOT EXISTS otp_rate_limits (
+            key TEXT PRIMARY KEY,
+            window_start TIMESTAMPTZ NOT NULL,
+            request_count INT NOT NULL DEFAULT 0,
+            last_request_at TIMESTAMPTZ NOT NULL DEFAULT now()
+          );
+
+          CREATE INDEX IF NOT EXISTS ix_otp_rate_limits_window
+            ON otp_rate_limits (window_start);
+
+          -- 11) SaaS pending orders unique razorpay_order_id
+          DO $$
+          BEGIN
+            IF NOT EXISTS (
+              SELECT 1 FROM pg_indexes
+              WHERE tablename = 'church_subscription_pending_orders'
+                AND indexname = 'uq_saas_pending_order_id'
+            ) THEN
+              CREATE UNIQUE INDEX uq_saas_pending_order_id
+                ON church_subscription_pending_orders (razorpay_order_id);
+            END IF;
+          EXCEPTION WHEN OTHERS THEN
+            NULL;
+          END $$;
+
+          -- 12) Church legal/tax fields for receipts
+          ALTER TABLE churches
+            ADD COLUMN IF NOT EXISTS legal_name TEXT,
+            ADD COLUMN IF NOT EXISTS tax_80g_registration_number TEXT,
+            ADD COLUMN IF NOT EXISTS pan_number TEXT,
+            ADD COLUMN IF NOT EXISTS gstin TEXT,
+            ADD COLUMN IF NOT EXISTS receipt_signatory_name TEXT,
+            ADD COLUMN IF NOT EXISTS receipt_signatory_title TEXT,
+            ADD COLUMN IF NOT EXISTS registered_address TEXT,
+            ADD COLUMN IF NOT EXISTS timezone TEXT NOT NULL DEFAULT 'Asia/Kolkata';
+
+          -- 13) Refresh token suspicious flag
+          ALTER TABLE refresh_tokens
+            ADD COLUMN IF NOT EXISTS suspicious_at TIMESTAMPTZ;
+
+          -- 14) Prayer request anonymity
+          ALTER TABLE prayer_requests
+            ADD COLUMN IF NOT EXISTS is_anonymous BOOLEAN NOT NULL DEFAULT false;
+        `,
+      },
     ];
 
     for (const m of migrations) {

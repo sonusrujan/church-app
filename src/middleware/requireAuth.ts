@@ -171,12 +171,26 @@ export async function requireAuth(req: AuthRequest, res: Response, next: NextFun
     if (church_id) {
       const { data: churchRow } = await db
         .from("churches")
-        .select("deleted_at, service_enabled")
+        .select("deleted_at, service_enabled, trial_ends_at")
         .eq("id", church_id)
         .maybeSingle();
       if (churchRow && (churchRow.deleted_at || churchRow.service_enabled === false)) {
         logger.warn({ userId: decoded.sub, churchId: church_id }, "Auth: user's church is deactivated");
         return res.status(403).json({ error: "Your church account has been deactivated" });
+      }
+      // M1: Trial enforcement — block access when trial expired with no active subscription
+      if (churchRow?.trial_ends_at && new Date(churchRow.trial_ends_at) < new Date() && !isSuperAdmin) {
+        const { data: activeSub } = await db
+          .from("church_subscriptions")
+          .select("id")
+          .eq("church_id", church_id)
+          .eq("status", "active")
+          .limit(1)
+          .maybeSingle();
+        if (!activeSub) {
+          logger.warn({ userId: decoded.sub, churchId: church_id }, "Auth: church trial expired with no active subscription");
+          return res.status(403).json({ error: "Your church trial has expired. Please subscribe to continue." });
+        }
       }
     }
 

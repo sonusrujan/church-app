@@ -236,8 +236,8 @@ export default function LeadershipTab() {
                       <label>{t("adminTabs.leadership.bioLabel")} <textarea value={editLeaderBio} onChange={(e) => setEditLeaderBio(e.target.value)} rows={2} /></label>
                       {isEditOtherRole ? (
                         <>
-                          <label>Custom Role Name <input type="text" value={editCustomRoleName} onChange={(e) => setEditCustomRoleName(e.target.value)} placeholder={t("adminTabs.leadership.customRoleNamePlaceholder")} /></label>
-                          <label>Hierarchy Level <input type="number" min={1} max={20} value={editCustomHierarchyLevel} onChange={(e) => setEditCustomHierarchyLevel(e.target.value ? Number(e.target.value) : "")} placeholder={t("adminTabs.leadership.hierarchyLevelPlaceholder")} /></label>
+                          <label>{t("adminTabs.leadership.customRoleNameLabel")} <input type="text" value={editCustomRoleName} onChange={(e) => setEditCustomRoleName(e.target.value)} placeholder={t("adminTabs.leadership.customRoleNamePlaceholder")} /></label>
+                          <label>{t("adminTabs.leadership.hierarchyLevelLabel")} <input type="number" min={1} max={20} value={editCustomHierarchyLevel} onChange={(e) => setEditCustomHierarchyLevel(e.target.value ? Number(e.target.value) : "")} placeholder={t("adminTabs.leadership.hierarchyLevelPlaceholder")} /></label>
                         </>
                       ) : null}
                       <div className="actions-row">

@@ -15,13 +15,15 @@ import {
   CalendarDays,
   ChevronRight,
   Wallet,
+  Crown,
+  User,
 } from "lucide-react";
 import donationIcon from "../assets/donation-icon.png";
 import prayerIcon from "../assets/prayer-icon.png";
 import { useApp } from "../context/AppContext";
 import { apiRequest } from "../lib/api";
 import { openRazorpayCheckout } from "../lib/razorpayCheckout";
-import LoadingSkeleton from "../components/LoadingSkeleton";
+import { SkeletonStats, SkeletonList } from "../components/LoadingSkeleton";
 import CheckoutSummary from "../components/CheckoutSummary";
 
 import { useI18n } from "../i18n";
@@ -186,6 +188,17 @@ export default function DashboardPage() {
     if (saasPayBusy) return;
     setSaasPayBusy(true);
     try {
+      // Native (Capacitor) apps must not show in-app payment UI — hand off to
+      // the external browser where the user pays on the Shalom website.
+      const { isNativePlatform } = await import("../lib/native");
+      if (await isNativePlatform()) {
+        const { startManageSubscriptionHandoff } = await import("../lib/subscriptionHandoff");
+        if (!token) throw new Error("Not authenticated");
+        await startManageSubscriptionHandoff(token);
+        setNotice({ tone: "info", text: t("dashboard.openingBrowserForPayment") });
+        return;
+      }
+
       const orderPayload = await apiRequest<{
         order: { id: string; amount: number; currency: string };
         key_id: string;
@@ -395,7 +408,7 @@ export default function DashboardPage() {
         <article className="panel">
           <h3>{t("dashboard.growthMetrics")}</h3>
           {growthLoading && !growthMetrics ? (
-            <LoadingSkeleton lines={5} />
+            <SkeletonStats count={3} />
           ) : growthError && !growthMetrics ? (
             <div style={{ textAlign: "center", padding: "1rem 0" }}>
               <p className="muted">{t("dashboard.growthMetricsError")}</p>
@@ -513,7 +526,11 @@ export default function DashboardPage() {
       <div className="dash-page">
         {/* ── Loading skeleton while dashboard data is unavailable ── */}
         {!memberDashboard && !isChurchAdmin ? (
-          <LoadingSkeleton lines={8} />
+          <div className="fade-in">
+            <SkeletonStats count={4} />
+            <div style={{ height: "1rem" }} />
+            <SkeletonList rows={4} />
+          </div>
         ) : (
         <>
         {/* ── Onboarding card for new members ── */}
@@ -551,7 +568,7 @@ export default function DashboardPage() {
                 const activeSubs = allSubs.filter(
                   (s) => s.status === "active" || s.status === "overdue" || s.status === "pending_first_payment",
                 );
-                const totalMonthly = activeSubs.reduce((sum, s) => sum + Number(s.amount || 0), 0);
+                const totalMonthly = activeSubs.reduce((sum, s) => sum + Number((s as any).monthly_amount || s.amount || 0), 0);
                 return (
                   <div style={{ marginTop: "1rem", borderTop: "1px solid rgba(220,208,255,0.30)", paddingTop: "0.75rem" }}>
                     <div className="dash-sub-stats" style={{ marginBottom: "0.5rem" }}>
@@ -574,7 +591,7 @@ export default function DashboardPage() {
                           <div>
                             <strong>{sub.person_name || sub.plan_name}</strong>
                             <span className="dash-sub-detail">
-                              {formatAmount(sub.amount)} / {sub.billing_cycle} — <span className={`event-badge ${sub.status === "active" ? "badge-created" : sub.status === "overdue" ? "badge-overdue" : "badge-system"}`}>{sub.status === "active" ? t("dashboard.statusActive") : sub.status === "overdue" ? t("dashboard.statusOverdue") : sub.status === "pending_first_payment" ? t("dashboard.statusPending") : sub.status}</span>
+                              {formatAmount(Number((sub as any).monthly_amount || sub.amount || 0))} / {sub.billing_cycle} —<span className={`event-badge ${sub.status === "active" ? "badge-created" : sub.status === "overdue" ? "badge-overdue" : "badge-system"}`}>{sub.status === "active" ? t("dashboard.statusActive") : sub.status === "overdue" ? t("dashboard.statusOverdue") : sub.status === "pending_first_payment" ? t("dashboard.statusPending") : sub.status}</span>
                             </span>
                           </div>
                           <button
@@ -676,6 +693,36 @@ export default function DashboardPage() {
               </p>
             ) : null}
           </div>
+
+          {/* Diocese Leadership */}
+          {memberDashboard?.diocese && (memberDashboard.diocese_leaders?.length || 0) > 0 ? (
+            <div className="dash-card-leadership">
+              <div className="dash-card-head">
+                <div className="dash-card-head-left">
+                  <Crown size={20} strokeWidth={1.5} className="dash-card-head-icon" />
+                  <h3>{memberDashboard.diocese.name}</h3>
+                </div>
+                <Link to="/home" className="dash-card-see-all">{t("common.viewAll")}</Link>
+              </div>
+              <div className="dash-leadership-grid">
+                {(memberDashboard.diocese_leaders || []).slice(0, 6).map((leader) => (
+                  <div key={leader.id} className="dash-leader-card">
+                    <div className="dash-leader-avatar">
+                      {leader.photo_url ? (
+                        <img src={leader.photo_url} alt={leader.full_name} loading="lazy" decoding="async" />
+                      ) : (
+                        <User size={28} strokeWidth={1.5} />
+                      )}
+                    </div>
+                    <div className="dash-leader-info">
+                      <p className="dash-leader-role">{leader.role}</p>
+                      <p className="dash-leader-name">{leader.full_name}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           {/* Prayer Request */}
           <div className="dash-card-prayer">

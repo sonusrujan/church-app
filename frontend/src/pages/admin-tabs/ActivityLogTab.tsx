@@ -5,23 +5,38 @@ import { useApp } from "../../context/AppContext";
 import Pagination, { paginate, totalPages } from "../../components/Pagination";
 import LoadingSkeleton from "../../components/LoadingSkeleton";
 import EmptyState from "../../components/EmptyState";
-import type { SubscriptionEventRow } from "../../types";
+import SearchSelect, { type SearchSelectOption } from "../../components/SearchSelect";
+import type { SubscriptionEventRow, MemberRow } from "../../types";
 import { formatAmount, formatDate, toReadableEvent } from "../../types";
 import { useI18n } from "../../i18n";
 
 export default function ActivityLogTab() {
   const { t } = useI18n();
-  const { token, setNotice } = useApp();
+  const { token, setNotice, authContext, isSuperAdmin, churches } = useApp();
 
   const [events, setEvents] = useState<SubscriptionEventRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
+  const [filterMemberId, setFilterMemberId] = useState("");
+  const [filterMemberName, setFilterMemberName] = useState("");
 
-  const loadEvents = useCallback(async () => {
+  const searchMembers = useCallback(async (query: string): Promise<SearchSelectOption[]> => {
+    const churchId = isSuperAdmin ? (churches[0]?.id || "") : (authContext?.auth.church_id || "");
+    if (!churchId) return [];
+    const rows = await apiRequest<MemberRow[]>(
+      `/api/members/search?church_id=${encodeURIComponent(churchId)}&query=${encodeURIComponent(query)}`,
+      { token },
+    );
+    return rows.map((m) => ({ id: m.id, label: m.full_name || m.email, sub: m.phone_number || m.email }));
+  }, [token, isSuperAdmin, churches, authContext]);
+
+  const loadEvents = useCallback(async (memberId?: string) => {
     if (!token) return;
     setLoading(true);
     try {
-      const data = await apiRequest<SubscriptionEventRow[]>("/api/subscriptions/activity?limit=200", { token });
+      const params = new URLSearchParams({ limit: "200" });
+      if (memberId) params.set("member_id", memberId);
+      const data = await apiRequest<SubscriptionEventRow[]>(`/api/subscriptions/activity?${params.toString()}`, { token });
       setEvents(data);
     } catch {
       setNotice({ tone: "error", text: t("adminTabs.activityLog.errorLoadEvents") });
@@ -36,8 +51,26 @@ export default function ActivityLogTab() {
     <article className="panel">
       <h3>{t("adminTabs.activityLog.title")}</h3>
       <p className="muted">{t("adminTabs.activityLog.description")}</p>
-      <div className="actions-row" style={{ marginBottom: "1rem" }}>
-        <button className="btn" onClick={() => void loadEvents()} disabled={loading}>
+      <div className="actions-row" style={{ marginBottom: "1rem", flexWrap: "wrap", gap: "0.5rem" }}>
+        <div style={{ minWidth: 220, flex: 1, maxWidth: 320 }}>
+          <SearchSelect
+            placeholder={t("adminTabs.activityLog.filterByMember")}
+            onSearch={searchMembers}
+            value={filterMemberName}
+            onSelect={(opt) => {
+              setFilterMemberId(opt.id);
+              setFilterMemberName(opt.label);
+              setPage(1);
+              void loadEvents(opt.id);
+            }}
+            onClear={() => {
+              setFilterMemberId("");
+              setFilterMemberName("");
+              void loadEvents();
+            }}
+          />
+        </div>
+        <button className="btn" onClick={() => void loadEvents(filterMemberId || undefined)} disabled={loading}>
           {loading ? t("common.loading") : t("common.refresh")}
         </button>
       </div>

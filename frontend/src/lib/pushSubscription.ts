@@ -1,4 +1,5 @@
 import { apiRequest } from "./api";
+import { isNativePlatform } from "./native";
 
 /**
  * Check the current push notification status.
@@ -11,6 +12,49 @@ export function getPushStatus(): "subscribed" | "prompt" | "denied" | "unsupport
   if (Notification.permission === "denied") return "denied";
   if (Notification.permission === "granted") return "prompt"; // granted but might not be subscribed yet
   return "prompt";
+}
+
+/**
+ * Native (Capacitor) push subscription. Registers for APNs/FCM via the
+ * @capacitor/push-notifications plugin and forwards the device token to the
+ * backend. The service worker path is skipped entirely in the WebView.
+ */
+async function subscribeNative(token: string): Promise<boolean> {
+  try {
+    // Dynamic imports keep the web bundle clean when Capacitor isn't installed.
+    const { PushNotifications } = await import("@capacitor/push-notifications");
+    const { Capacitor } = await import("@capacitor/core");
+
+    const perm = await PushNotifications.requestPermissions();
+    if (perm.receive !== "granted") return false;
+
+    return await new Promise<boolean>((resolve) => {
+      const regListenerP = PushNotifications.addListener("registration", async (t: { value: string }) => {
+        try {
+          const platform = Capacitor.getPlatform() === "ios" ? "ios" : "android";
+          await apiRequest<{ success: true }>("/api/push/subscribe-native", {
+            method: "POST",
+            token,
+            body: { platform, token: t.value, app_id: "app.shalom.church" },
+          });
+          resolve(true);
+        } catch {
+          resolve(false);
+        } finally {
+          try { (await regListenerP).remove(); } catch { /* ignore */ }
+        }
+      });
+
+      const errListenerP = PushNotifications.addListener("registrationError", async () => {
+        resolve(false);
+        try { (await errListenerP).remove(); } catch { /* ignore */ }
+      });
+
+      PushNotifications.register().catch(() => resolve(false));
+    });
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -33,6 +77,10 @@ export async function isSubscribed(): Promise<boolean> {
  */
 export async function subscribeToPush(token: string): Promise<boolean> {
   try {
+    if (await isNativePlatform()) {
+      return await subscribeNative(token);
+    }
+
     if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
       return false;
     }

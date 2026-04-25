@@ -53,14 +53,7 @@
     "photoUpdated": "Photo updated",
     "photoUploaded": "Photo uploaded",
     "sessionExpired": "Session expired",
-    "unexpectedError": "An unexpected error occurred.",
-    "done": "முடிந்தது",
-    "member": "உறுப்பினர்",
-    "change": "மாற்று",
-    "copy": "நகல்",
-    "copied": "நகலெடுக்கப்பட்டது!",
-    "prev": "முந்தைய",
-    "name": "பெயர்"
+    "unexpectedError": "An unexpected error occurred."
   },
   "auth": {
     "welcome": "ஷாலோமுக்கு வரவேற்கிறோம்",
@@ -86,6 +79,9 @@
     "familyMemberAccount": "குடும்ப உறுப்பினர் கணக்கு",
     "familyMemberDescription": "{{name}} இன் கீழ் குடும்ப உறுப்பினராக நீங்கள் பதிவு செய்யப்பட்டுள்ளீர்கள்.",
     "familyMemberHint": "இந்த ஆப்பை சுயாதீனமாக பயன்படுத்த, {{name}} இடம் அவர்களின் குடும்ப உறுப்பினர் பட்டியலில் இருந்து உங்களை நீக்கச் சொல்லுங்கள்.",
+    "familyStep1": "{{name}} இடம் தொடர்பு கொண்டு அவர்களின் ஆப்பை திறக்கச் சொல்லுங்கள்.",
+    "familyStep2": "அவர்கள் அமைப்புகள் → குடும்ப உறுப்பினர்கள் என்பதில் உங்களை நீக்கலாம்.",
+    "familyStep3": "நீக்கப்பட்ட பிறகு, தொடர கீழே 'மீண்டும் முயற்சி' என்பதை தட்டவும்.",
     "yourFamilyHead": "உங்கள் குடும்பத் தலைவர்",
     "workspaceError": "ஏதோ தவறு ஏற்பட்டது",
     "preparingWorkspace": "பணியிடம் தயாரிக்கிறது",
@@ -114,16 +110,7 @@
     "memberDashboardReady": "Welcome back. Member dashboard is ready.",
     "otpSentSuccess": "OTP sent! Check your phone and enter the code below.",
     "pleaseSignInFirst": "Please sign in first.",
-    "signedOut": "You have been signed out.",
-    "familyWhatCanYouDo": "நீங்கள் என்ன செய்யலாம்?",
-    "familyTipContactHead": "உங்கள் குடும்பத் தலைவரைத் தொடர்பு கொள்ளுங்கள்.",
-    "familyTipContactAdmin": "மேலும் உதவிக்கு உங்கள் சர்ச் நிர்வாகியைத் தொடர்பு கொள்ளுங்கள்.",
-    "phoneInvalid10Digits": "தொலைபேசி எண் சரியாக 10 இலக்கங்களாக இருக்க வேண்டும்.",
-    "resendOtp": "OTP மீண்டும் அனுப்பு",
-    "resendOtpIn": "{{seconds}}s இல் OTP மீண்டும் அனுப்பு",
-    "paymentConfigCheckFailed": "Payment config check failed: {{message}}",
-    "paymentsDisabledFallback": "Payments are disabled for this church.",
-    "workspaceLoadError": "Something went wrong while loading your workspace. Please try again."
+    "signedOut": "You have been signed out."
   },
   "nav": {
     "dashboard": "டாஷ்போர்டு",
@@ -144,8 +131,7 @@
     "shalomSuperAdmin": "ஷாலோம் சூப்பர் நிர்வாக கன்சோல்",
     "shalomChurchAdmin": "ஷாலோம் தேவாலய நிர்வாக பணியிடம்",
     "shalomMember": "ஷாலோம் உறுப்பினர் பணியிடம்",
-    "toggleNavigation": "Toggle navigation",
-    "switchChurch": "தேவாலயம் மாற்று"
+    "toggleNavigation": "Toggle navigation"
   },
   "dashboard": {
     "welcomeUser": "வணக்கம், {{name}}.",
@@ -247,21 +233,7 @@
     "subscriptionDuePayment": "Subscription Due Payment",
     "month": "மாதம்",
     "months": "மாதங்கள்",
-    "pendingMonths": "நிலுவை மாதங்கள்",
-    "paymentSuccessTitle": "பணம் செலுத்தப்பட்டது!",
-    "amountPaid": "செலுத்திய தொகை",
-    "transactionId": "பரிவர்த்தனை ஐடி",
-    "paidOn": "செலுத்திய தேதி",
-    "paymentSuccessHint": "ரசீது உங்கள் பணம் செலுத்திய வரலாற்றில் சேமிக்கப்பட்டுள்ளது.",
-    "requestCancellation": "ரத்து கோரிக்கை",
-    "cancelWarning": "சமர்ப்பித்த பிறகு, உங்கள் நிர்வாகி ரத்து கோரிக்கையை மதிப்பாய்வு செய்வார். ஏற்கப்படும் வரை உங்கள் சந்தா செயலில் இருக்கும்.",
-    "selectSubscriptionsToPay": "செலுத்த சந்தாக்களைத் தேர்ந்தெடுக்கவும்.",
-    "noDueSubscriptions": "நிலுவை சந்தாக்கள் இல்லை.",
-    "statusActive": "செயலில்",
-    "statusOverdue": "தாமதம்",
-    "statusPending": "நிலுவையில்",
-    "growthMetricsError": "Failed to load growth metrics.",
-    "openingPaymentGateway": "Opening payment gateway..."
+    "pendingMonths": "நிலுவை மாதங்கள்"
   },
   "profile": {
     "tabPersonal": "சொந்த",
@@ -406,24 +378,7 @@
     "subscriptionAmount": "சந்தா தொகை",
     "memberDetails": "இணைக்கப்பட்ட உறுப்பினர் விவரங்கள்",
     "manualFamilyMember": "இந்த உறுப்பினர் பதிவு செய்த சுயவிவரத்துடன் இணைக்கப்படவில்லை.",
-    "verifyPhoneBeforeSave": "சேமிப்பதற்கு முன் புதிய தொலைபேசி எண்ணை OTP மூலம் சரிபார்க்கவும்",
-    "deleteSpecialDateTitle": "Delete Special Date",
-    "head": "Head",
-    "occupationBusiness": "Business",
-    "occupationFarmer": "Farmer",
-    "occupationGovEmployee": "Govt. Employee",
-    "occupationHomemaker": "Homemaker",
-    "occupationOther": "Other",
-    "occupationPastor": "Pastor",
-    "occupationPrivEmployee": "Private Employee",
-    "occupationRetired": "Retired",
-    "occupationSelfEmployed": "Self-Employed",
-    "occupationStudent": "Student",
-    "occupationTeacher": "Teacher",
-    "phoneChangeVerifyFirst": "Verify the new phone number before saving.",
-    "photoRemovedSaveProfile": "Photo removed. Click Save Profile to apply.",
-    "photoSelectedSaveProfile": "Photo selected. Click Save Profile to apply.",
-    "unsaved": "Unsaved"
+    "verifyPhoneBeforeSave": "சேமிப்பதற்கு முன் புதிய தொலைபேசி எண்ணை OTP மூலம் சரிபார்க்கவும்"
   },
   "history": {
     "heading": "வரலாறு",
@@ -478,11 +433,7 @@
     "prayerPlaceholder": "போதகர்கள் எதற்காக பிரார்த்திக்க வேண்டும் என்பதைப் பகிரவும்",
     "sendPrayerRequest": "பிரார்த்தனை கோரிக்கை அனுப்பு",
     "prayerCallToAction": "பிரார்த்தனை தேவையா? ஒரு பிரார்த்தனை கோரிக்கையை சமர்ப்பிக்கவும், ஒரு போதகர் உங்களுக்காக பிரார்த்திப்பார்.",
-    "goToPrayerRequests": "பிரார்த்தனை கோரிக்கைகளுக்குச் செல்",
-    "addToCalendar": "நாட்காட்டியில் சேர்",
-    "markAllRead": "அனைத்தும் படிக்கப்பட்டதாக",
-    "going": "Going",
-    "interested": "Interested"
+    "goToPrayerRequests": "பிரார்த்தனை கோரிக்கைகளுக்குச் செல்"
   },
   "prayer": {
     "selectPastor": "போதகரைத் தேர்வுசெய்",
@@ -558,25 +509,7 @@
     "errorVerificationFailed": "Verification failed",
     "offeringDonation": "Offering / Donation",
     "scriptureRef": "— 2 Corinthians 9:7",
-    "scriptureVerse": "\"Each of you should give what you have decided in your heart to give, not reluctantly or under compulsion, for God loves a cheerful giver.\"",
-    "selectChurch": "தேவாலயம் தேர்வு",
-    "chooseDiocese": "மறைமாவட்டம் தேர்வு",
-    "selectDiocesePlaceholder": "— மறைமாவட்டம் தேர்வு —",
-    "noChurchesInDiocese": "இந்த மறைமாவட்டத்தில் தேவாலயங்கள் இல்லை.",
-    "churchSelected": "தேவாலயம் தேர்வு செய்யப்பட்டது",
-    "invalidEmail": "தவறான மின்னஞ்சல் முகவரி",
-    "phoneNumber": "தொலைபேசி எண்",
-    "selectedChurch": "தேர்ந்தெடுக்கப்பட்ட தேவாலயம்",
-    "donateToAnotherChurch": "Donate to another church",
-    "donateToYourChurch": "Donate to Your Church",
-    "fundBuildingFund": "Building Fund",
-    "fundCommunityAid": "Community Aid",
-    "fundGeneralOffering": "General Offering",
-    "fundMissionOutreach": "Mission & Outreach",
-    "fundOther": "Other",
-    "fundYouthMinistry": "Youth Ministry",
-    "receiptWarning": "Please save your receipt now. As a guest donor, this receipt will not be available once you leave this page.",
-    "saveReceipt": "Save Receipt"
+    "scriptureVerse": "\"Each of you should give what you have decided in your heart to give, not reluctantly or under compulsion, for God loves a cheerful giver.\""
   },
   "home": {
     "title": "ஷாலோமுக்கு வரவேற்கிறோம்",
@@ -607,9 +540,7 @@
     "codeRequired": "தேவாலய குறியீடு தேவை. குறியீட்டிற்கு உங்கள் தேவாலய நிர்வாகியிடம் கேளுங்கள்.",
     "codeMustBe8Digits": "தேவாலய குறியீடு சரியாக 8 இலக்கங்களாக இருக்க வேண்டும்.",
     "joinButton": "தேவாலயத்தில் சேர",
-    "errorJoinFailed": "Failed to join church.",
-    "noCodeHint": "குறியீடு இல்லையா? உங்கள் சர்ச் நிர்வாகியிடம் கேளுங்கள்.",
-    "exploreChurches": "தேவாலயங்களை ஆராயுங்கள்"
+    "errorJoinFailed": "Failed to join church."
   },
   "admin": {
     "console": "கன்சோல்",
@@ -668,9 +599,7 @@
     "pushSms": "Push / SMS",
     "refundRequests": "Refund Requests",
     "saasPlatform": "SaaS Platform",
-    "specialDates": "Special Dates",
-    "donationLinksQR": "Donation Links & QR",
-    "searchTools": "Search tools..."
+    "specialDates": "Special Dates"
   },
   "relations": {
     "spouse": "கணவன்/மனைவி",
@@ -696,7 +625,6 @@
   },
   "settings": {
     "title": "அமைப்புகள்",
-    "editProfile": "ப்ரொபைலை திருத்துக",
     "lightMode": "லைட் மோட்",
     "darkMode": "டார்க் மோட்",
     "switchToLight": "லைட்டுக்கு மாறு",
@@ -723,26 +651,7 @@
     "deleteWarning2": "செயலில் உள்ள சந்தாக்கள் உடனடியாக ரத்து செய்யப்படும்.",
     "deleteWarning3": "உங்கள் கணக்குடன் இணைக்கப்பட்ட குடும்ப உறுப்பினர்கள் இணைப்பு நீக்கப்படுவர்.",
     "deleteWarning4": "நிர்வாகி அங்கீகரித்த பிறகு இந்த செயலை மாற்றியமைக்க முடியாது.",
-    "deleteWarningTitle": "எச்சரிக்கை: இந்த செயலுக்கு தீவிர விளைவுகள் உள்ளன",
-    "typeDeleteToConfirm": "உறுதிப்படுத்த DELETE தட்டச்சு செய்யவும்",
-    "signOutConfirmTitle": "வெளியேறவா?",
-    "signOutConfirmDesc": "உங்கள் கணக்கிலிருந்து வெளியேற விரும்புகிறீர்களா?",
-    "deleteReasonMinLength": "Please provide at least 10 characters.",
-    "goToProfile": "Go to Profile",
-    "exportMyData": "Export My Data",
-    "exportMyDataHint": "Download all your personal data (profile, subscriptions, payments) as a JSON file.",
-    "downloadData": "Download",
-    "exportSuccess": "Your data has been downloaded successfully.",
-    "exportFailed": "Failed to export data. Please try again.",
-    "pushBlockedInstructions": "To enable: open your browser settings → Site Settings → Notifications → allow this site.",
-    "notifyCat_announcements": "Announcements",
-    "notifyCat_events": "Events & Calendar",
-    "notifyCat_family": "Family & Membership",
-    "notifyCat_payments": "Payments & Subscriptions",
-    "notifyCat_prayer": "Prayer Requests",
-    "notifyCategories": "Notification Categories",
-    "off": "Off",
-    "on": "On"
+    "deleteWarningTitle": "எச்சரிக்கை: இந்த செயலுக்கு தீவிர விளைவுகள் உள்ளன"
   },
   "banner": {
     "pushPrompt": "🔔 அறிவிப்புகள் மற்றும் நினைவூட்டல்களைப் பெற புஷ் அறிவிப்புகளை இயக்கவும்.",
@@ -937,10 +846,7 @@
       "impactEvents": "Events:",
       "impactNotifications": "Notifications:",
       "impactPrayerRequests": "Prayer Requests:",
-      "impactPayments": "Payments:",
-      "downloadQr": "Download QR",
-      "generateJoinQr": "Generate Join QR Code",
-      "joinQrHint": "Members can scan this QR code with their phone camera to join your church."
+      "impactPayments": "Payments:"
     },
     "createChurch": {
       "title": "Create Church",
@@ -1115,7 +1021,13 @@
       "errorNoField": "At least one field to update is required.",
       "errorNoSubscriptions": "This member has no subscriptions.",
       "errorLoadFailed": "Failed to load member subscriptions",
-      "successUpdated": "Subscription updated."
+      "successUpdated": "Subscription updated.",
+      "pauseSubButton": "Pause",
+      "pausing": "Pausing…",
+      "pauseSubscriptionTitle": "Pause subscription?",
+      "pauseSubscriptionMessage": "This will temporarily stop reminders and due tracking. You can resume it anytime.",
+      "pauseKeyword": "PAUSE",
+      "successPaused": "Subscription paused."
     },
     "events": {
       "title": "Events & Notifications",
@@ -1128,16 +1040,16 @@
       "addressHeader": "Address",
       "selectButton": "Select",
       "eventsToggle": "Events",
-      "notificationsToggle": "அறிவிப்புகள்",
+      "notificationsToggle": "Notifications",
       "newEvent": "New Event",
-      "newNotification": "புதிய அறிவிப்பு",
+      "newNotification": "New Notification",
       "editEvent": "Edit Event",
-      "editNotification": "அறிவிப்பைத் திருத்து",
+      "editNotification": "Edit Notification",
       "createEvent": "Create Event",
-      "createNotification": "அறிவிப்பு உருவாக்கு",
+      "createNotification": "Create Notification",
       "titleLabel": "Title",
       "titlePlaceholderEvent": "Sunday Service",
-      "titlePlaceholderNotification": "முக்கிய அறிவிப்பு",
+      "titlePlaceholderNotification": "Important Notice",
       "messageLabel": "Message",
       "messagePlaceholder": "Details...",
       "eventDateLabel": "Event Date",
@@ -1152,21 +1064,15 @@
       "createdHeader": "Created",
       "actionsHeader": "Actions",
       "noEventsYet": "No events yet.",
-      "noNotificationsYet": "இதுவரை அறிவிப்புகள் இல்லை.",
+      "noNotificationsYet": "No notifications yet.",
       "errorTitleMessageRequired": "Title and message are required.",
       "errorUploadFailed": "Failed to upload image",
       "successEventCreated": "Event created.",
       "successEventUpdated": "Event updated.",
       "successEventDeleted": "Event deleted.",
-      "successNotificationCreated": "அறிவிப்பு உருவாக்கப்பட்டது.",
-      "successNotificationUpdated": "அறிவிப்பு புதுப்பிக்கப்பட்டது.",
-      "successNotificationDeleted": "அறிவிப்பு நீக்கப்பட்டது.",
-      "confirmDeleteEvent": "இந்த நிகழ்வை நிச்சயமாக நீக்க விரும்புகிறீர்களா?",
-      "confirmDeleteNotification": "இந்த அறிவிப்பை நீக்க வேண்டுமா?",
-      "endTimeLabel": "End Time",
-      "locationHeader": "Location",
-      "locationLabel": "Location",
-      "locationPlaceholder": "e.g. Church Main Hall, 123 Main St"
+      "successNotificationCreated": "Notification created.",
+      "successNotificationUpdated": "Notification updated.",
+      "successNotificationDeleted": "Notification deleted."
     },
     "export": {
       "title": "Data Export",
@@ -1197,9 +1103,7 @@
       "emptyDescription": "Family member addition requests will appear here.",
       "errorLoadFailed": "Failed to load family requests",
       "successApproved": "Family request approved.",
-      "successRejected": "Family request rejected.",
-      "memberIdLabel": "உறுப்பினர் ஐடி:",
-      "familyCountLabel": "குடும்ப உறுப்பினர்கள்:"
+      "successRejected": "Family request rejected."
     },
     "incomeDashboard": {
       "title": "Income Dashboard",
@@ -1468,10 +1372,7 @@
       "emptyTitle": "No payments found",
       "emptyDescription": "This member has no recorded payments yet.",
       "errorSelectMember": "Please select a member first.",
-      "errorDownloadFailed": "Failed to download receipt",
-      "filterByPerson": "நபர் பெயரால் வடிகட்டு",
-      "paginationInfo": "இறங்கு வரிசையில் பக்கத்திற்கு 10 உள்ளீடுகள்.",
-      "loadFailed": "பணம் செலுத்திய வரலாற்றை ஏற்ற முடியவில்லை"
+      "errorDownloadFailed": "Failed to download receipt"
     },
     "platformRazorpay": {
       "title": "Platform Razorpay Configuration",
@@ -1486,9 +1387,7 @@
       "configLoadedSuccess": "Platform config loaded.",
       "configSavedSuccess": "Platform Razorpay config saved.",
       "statusConfigured": "Configured — churches can pay platform fees online",
-      "statusNotConfigured": "Not configured — set both Key ID and Key Secret to enable online SaaS payments",
-      "donationFeeLabel": "பொது நன்கொடை தளக் கட்டணம் (%)",
-      "donationFeeHint": "பொது (உறுப்பினர் அல்லாத) நன்கொடைகளில் வசூலிக்கப்படும் கட்டண சதவீதம். முடக்க 0 இடவும்."
+      "statusNotConfigured": "Not configured — set both Key ID and Key Secret to enable online SaaS payments"
     },
     "preRegister": {
       "title": "Pre-register Member",
@@ -1585,12 +1484,7 @@
       "pillSent": "Sent",
       "pillFailed": "Failed",
       "pillCancelled": "Cancelled",
-      "charsCount": "{{count}}/320 characters",
-      "confirmSend": "இந்த அறிவிப்பை {{target}} க்கு அனுப்பவா?",
-      "confirmTargetMember": "தேர்ந்தெடுக்கப்பட்ட உறுப்பினர்",
-      "confirmTargetChurch": "தேர்ந்தெடுக்கப்பட்ட தேவாலயத்தின் அனைத்து உறுப்பினர்கள்",
-      "confirmTargetDiocese": "தேர்ந்தெடுக்கப்பட்ட மறைமாவட்டத்தின் அனைத்து உறுப்பினர்கள்",
-      "confirmTargetAll": "அனைத்து உறுப்பினர்களும் உலகளவில்"
+      "charsCount": "{{count}}/320 characters"
     },
     "refundRequests": {
       "title": "Refund Requests",
@@ -1689,8 +1583,7 @@
       "grantPhoneLabel": "Phone Number",
       "grantPhoneRequired": "Phone number is required.",
       "revokePhoneLabel": "Phone Number",
-      "revokePhoneRequired": "Phone number is required.",
-      "alreadyAdmin": "This user is already an admin."
+      "revokePhoneRequired": "Phone number is required."
     },
     "saasSettings": {
       "title": "Platform Settings",
@@ -1810,18 +1703,6 @@
       "successReviewed": "Deletion request {{decision}}.",
       "title": "Account Deletion Requests",
       "unknownMember": "Unknown Member"
-    },
-    "donationLinks": {
-      "title": "நன்கொடை இணைப்புகள் & QR குறியீடுகள்",
-      "description": "உங்கள் தேவாலயத்திற்கான பகிரக்கூடிய நன்கொடை இணைப்புகள் மற்றும் QR குறியீடுகளை உருவாக்கவும்.",
-      "diocese": "மறைமாவட்டம்",
-      "selectDiocese": "— மறைமாவட்டம் தேர்வு —",
-      "church": "தேவாலயம்",
-      "selectChurch": "— தேவாலயம் தேர்வு —",
-      "fund": "நிதி",
-      "donationLink": "நன்கொடை இணைப்பு",
-      "qrCode": "QR குறியீடு",
-      "downloadQR": "QR குறியீடு பதிவிறக்கம்"
     }
   },
   "photo": {
@@ -1909,50 +1790,14 @@
     "shalomHelpsYou": "Shalom helps you to",
     "signInToJoin": "Sign in to join →",
     "whyIntro": "Shalom is an all-in-one church management app that helps your church stay connected, organized, and future-ready. Built to bring your entire congregation closer together.",
-    "whyShalom": "Why Shalom?",
-    "churchCode": "Church Code",
-    "members": "members"
+    "whyShalom": "Why Shalom?"
   },
   "historyPage": {
-    "errorDownloadReceiptFailed": "ரசீது பதிவிறக்கத்தில் தோல்வி.",
-    "title": "பணம் செலுத்திய வரலாறு",
-    "subtitle": "உங்கள் குடும்பத்தின் பணம் செலுத்திய பதிவுகளைக் காணவும்.",
-    "allFamilyMembers": "அனைத்து குடும்ப உறுப்பினர்கள்",
-    "selectPerson": "நபரைத் தேர்வு",
-    "newerEntries": "புதிய",
-    "olderEntries": "பழைய",
-    "monthAndYear": "மாதம் & ஆண்டு",
-    "paidAmount": "செலுத்திய தொகை",
-    "paidBy": "செலுத்தியவர்",
-    "paidDate": "செலுத்திய தேதி",
-    "downloadReceipt": "ரசீது பதிவிறக்கம்",
-    "downloadBtn": "பதிவிறக்கம்",
-    "receipt": "ரசீது",
-    "noEntries": "பணம் செலுத்திய வரலாறு இல்லை.",
-    "paginationInfo": "{{start}}–{{end}} / {{total}} காட்டுகிறது",
-    "errorLoadFailed": "பணம் செலுத்திய வரலாற்றை ஏற்ற முடியவில்லை.",
-    "goToDashboard": "டாஷ்போர்டுக்குச் செல்",
-    "refundHint": "பணத்திரும்பப்பெற, உங்கள் சர்ச் நிர்வாகியைத் தொடர்பு கொள்ளுங்கள்.",
-    "adminNote": "Admin Note",
-    "myRefundRequests": "My Refund Requests",
-    "refund": "Refund",
-    "refundReasonLabel": "Reason for refund",
-    "refundReasonPlaceholder": "Please explain why you want a refund...",
-    "refundRequestFailed": "Failed to submit refund request.",
-    "refundRequestInfo": "Your request will be reviewed by the church administrator. Refunds are subject to approval.",
-    "refundRequestSubmitted": "Refund request submitted successfully.",
-    "requestRefund": "Request Refund",
-    "requestRefundTitle": "Request a Refund",
-    "submitRefundRequest": "Submit Refund Request",
-    "status": "நிலை",
-    "statusPaid": "செலுத்தப்பட்டது",
-    "statusUnpaid": "நிலுவை",
-    "statusImported": "இறக்குமதி"
+    "errorDownloadReceiptFailed": "ரசீது பதிவிறக்கத்தில் தோல்வி."
   },
   "checkout": {
     "title": "பணம் செலுத்தல் சுருக்கம்",
     "subtotal": "உட்கூட்டு",
-    "feeExplanation": "நீங்கள் கொடுக்கும்போது, ஒரு சிறிய பகுதி உங்கள் காணிக்கையை முன்னோக்கி கொண்டு செல்லும் வழிகளை ஆதரிக்கிறது, உங்கள் பரிசு தேவாலயத்தை முழுமையாகவும் தடையின்றியும் சென்றடைவதை உறுதிசெய்கிறது.",
     "processingFee": "செயலாக்கக் கட்டணம் ({{percent}}%)",
     "waived": "தள்ளுபடி",
     "total": "மொத்த தொகை",
@@ -1973,12 +1818,5 @@
   },
   "offline": {
     "message": "நீங்கள் ஆஃப்லைனில் உள்ளீர்கள். சில அம்சங்கள் கிடைக்காமல் போகலாம்."
-  },
-  "churchPicker": {
-    "title": "உங்கள் தேவாலயத்தைத் தேர்ந்தெடுக்கவும்",
-    "subtitle": "நீங்கள் பல தேவாலயங்களில் உறுப்பினர். தொடர ஒன்றைத் தேர்வு செய்யவும்.",
-    "unnamedChurch": "பெயரிடப்படாத தேவாலயம்",
-    "admin": "நிர்வாகி",
-    "member": "உறுப்பினர்"
   }
 }

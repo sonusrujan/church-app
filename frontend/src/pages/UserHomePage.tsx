@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { Crown, Church, User, Phone, ExternalLink, Filter, AlertCircle, UserCheck } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import { apiRequest } from "../lib/api";
-import LoadingSkeleton from "../components/LoadingSkeleton";
+import { SkeletonList } from "../components/LoadingSkeleton";
 import { useI18n } from "../i18n";
 import { useNavigate } from "react-router-dom";
 import type {
@@ -183,8 +183,12 @@ export default function UserHomePage() {
 
   if (loading && !isSuperAdmin) {
     return (
-      <div className="home-page">
-        <LoadingSkeleton lines={8} />
+      <div className="home-page route-enter">
+        <div className="panel" style={{ marginBottom: "1rem" }}>
+          <div className="skeleton-line" style={{ width: "60%", height: "1.25rem" }} />
+          <div className="skeleton-line" style={{ width: "40%", height: "0.85rem", marginTop: "0.5rem" }} />
+        </div>
+        <SkeletonList rows={4} withAvatar />
       </div>
     );
   }
@@ -234,7 +238,7 @@ export default function UserHomePage() {
       {/* If superadmin hasn't selected a church yet, show prompt */}
       {isSuperAdmin && !activeChurchId ? null : (
       <>
-      {loading ? <LoadingSkeleton lines={8} /> : (
+      {loading ? <SkeletonList rows={6} withAvatar /> : (
       <>
       {/* ── Contextual Action Cards (members only) ── */}
       {!isSuperAdmin && memberDashboard && (
@@ -282,7 +286,7 @@ export default function UserHomePage() {
         <section className="home-diocese-hero">
           {diocese.banner_url ? (
             <div className="home-diocese-banner">
-              <img src={diocese.banner_url} alt={diocese.name} />
+              <img src={diocese.banner_url} alt={diocese.name} loading="lazy" decoding="async" />
             </div>
           ) : null}
 
@@ -292,31 +296,31 @@ export default function UserHomePage() {
               <div className={`home-diocese-logos home-diocese-logos-${logoCount}`}>
                 {logoCount === 2 ? (
                   <>
-                    <img src={logoUrls[0]} alt={`${diocese.name} logo 1`} className="home-diocese-logo" />
+                    <img src={logoUrls[0]} alt={`${diocese.name} logo 1`} className="home-diocese-logo" loading="lazy" decoding="async" />
                     <div className="home-diocese-header-text">
                       <h3 className="home-diocese-name">{diocese.name}</h3>
                     </div>
-                    <img src={logoUrls[1]} alt={`${diocese.name} logo 2`} className="home-diocese-logo" />
+                    <img src={logoUrls[1]} alt={`${diocese.name} logo 2`} className="home-diocese-logo" loading="lazy" decoding="async" />
                   </>
                 ) : logoCount === 3 ? (
                   <>
-                    <img src={logoUrls[0]} alt={`${diocese.name} logo 1`} className="home-diocese-logo" />
+                    <img src={logoUrls[0]} alt={`${diocese.name} logo 1`} className="home-diocese-logo" loading="lazy" decoding="async" />
                     <div className="home-diocese-center-group">
-                      <img src={logoUrls[1]} alt={`${diocese.name} logo 2`} className="home-diocese-logo" />
+                      <img src={logoUrls[1]} alt={`${diocese.name} logo 2`} className="home-diocese-logo" loading="lazy" decoding="async" />
                       <h3 className="home-diocese-name">{diocese.name}</h3>
                     </div>
-                    <img src={logoUrls[2]} alt={`${diocese.name} logo 3`} className="home-diocese-logo" />
+                    <img src={logoUrls[2]} alt={`${diocese.name} logo 3`} className="home-diocese-logo" loading="lazy" decoding="async" />
                   </>
                 ) : (
                   <>
                     {logoUrls.map((url, i) => (
-                      <img key={i} src={url} alt={`${diocese.name} logo ${i + 1}`} className="home-diocese-logo" />
+                      <img key={i} src={url} alt={`${diocese.name} logo ${i + 1}`} className="home-diocese-logo" loading="lazy" decoding="async" />
                     ))}
                   </>
                 )}
               </div>
             ) : diocese.logo_url ? (
-              <img src={diocese.logo_url} alt={diocese.name} className="home-diocese-logo" />
+              <img src={diocese.logo_url} alt={diocese.name} className="home-diocese-logo" loading="lazy" decoding="async" />
             ) : null}
             {/* Text shown inline for 0 or 1 logo only */}
             {logoCount <= 1 ? (
@@ -341,7 +345,7 @@ export default function UserHomePage() {
                 <div className="home-leader-badge">{t("home.bishop")}</div>
                 <div className="home-leader-avatar home-avatar-lg">
                   {bishop.photo_url ? (
-                    <img src={bishop.photo_url} alt={bishop.full_name} />
+                    <img src={bishop.photo_url} alt={bishop.full_name} loading="lazy" decoding="async" />
                   ) : (
                     <User size={52} />
                   )}
@@ -354,7 +358,7 @@ export default function UserHomePage() {
                 <div className="home-leader-badge">{shortTitle(leader.role)}</div>
                 <div className="home-leader-avatar home-avatar-md">
                   {leader.photo_url ? (
-                    <img src={leader.photo_url} alt={leader.full_name} />
+                    <img src={leader.photo_url} alt={leader.full_name} loading="lazy" decoding="async" />
                   ) : (
                     <User size={40} />
                   )}
@@ -371,7 +375,7 @@ export default function UserHomePage() {
         <section className="home-church-card">
           <div className="home-church-header">
             {church.logo_url ? (
-              <img src={church.logo_url} alt={church.name} className="home-church-logo" />
+              <img src={church.logo_url} alt={church.name} className="home-church-logo" loading="lazy" decoding="async" />
             ) : (
               <div className="home-church-logo-placeholder">
                 <Church size={36} strokeWidth={1.5} />
@@ -408,7 +412,7 @@ export default function UserHomePage() {
                 <div className="home-leader-badge">{shortTitle(leader.role_name || "Leader")}</div>
                 <div className="home-leader-avatar home-avatar-md">
                   {leader.photo_url ? (
-                    <img src={leader.photo_url} alt={leader.full_name} />
+                    <img src={leader.photo_url} alt={leader.full_name} loading="lazy" decoding="async" />
                   ) : (
                     <User size={40} />
                   )}
@@ -432,7 +436,7 @@ export default function UserHomePage() {
               <div key={m.id} className="home-committee-row">
                 <div className="home-committee-photo">
                   {m.photo_url ? (
-                    <img src={m.photo_url} alt={m.full_name} />
+                    <img src={m.photo_url} alt={m.full_name} loading="lazy" decoding="async" />
                   ) : (
                     <User size={16} />
                   )}
@@ -464,7 +468,7 @@ export default function UserHomePage() {
               <div key={m.id} className="home-committee-row">
                 <div className="home-committee-photo">
                   {m.photo_url ? (
-                    <img src={m.photo_url} alt={m.full_name} />
+                    <img src={m.photo_url} alt={m.full_name} loading="lazy" decoding="async" />
                   ) : (
                     <User size={16} />
                   )}
@@ -492,7 +496,7 @@ export default function UserHomePage() {
               const inner = banner.media_type === "video" ? (
                 <video src={banner.image_url} autoPlay muted loop playsInline className="home-ad-media" />
               ) : (
-                <img src={banner.image_url} alt="Ad" />
+                <img src={banner.image_url} alt="Ad" loading="lazy" decoding="async" />
               );
               return banner.link_url ? (
                 <a key={banner.id} href={banner.link_url} target="_blank" rel="noopener noreferrer" className="home-ad-item">

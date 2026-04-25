@@ -20,6 +20,8 @@ export default function EditSubscriptionTab() {
   const [nextDate, setNextDate] = useState("");
   const [status, setStatus] = useState("");
   const [planName, setPlanName] = useState("");
+  const [history, setHistory] = useState<Array<{ id: string; event_type: string; details: string; created_at: string; source: string }>>([]);
+  const [showHistory, setShowHistory] = useState(false);
 
   const searchMembers = useCallback(async (query: string): Promise<SearchSelectOption[]> => {
     const churchId = isSuperAdmin ? (churches[0]?.id || "") : (authContext?.auth.church_id || "");
@@ -67,6 +69,61 @@ export default function EditSubscriptionTab() {
     setNextDate("");
     setStatus("");
     setPlanName("");
+    setHistory([]);
+    setShowHistory(false);
+  }
+
+  const selectedSub = memberSubs.find((s) => s.id === subId);
+
+  async function reactivateSub() {
+    if (!subId) return;
+    await withAuthRequest("reactivate-subscription", async () => {
+      await apiRequest(`/api/ops/subscriptions/${encodeURIComponent(subId)}/reactivate`, { method: "POST", token, body: {} });
+      clearSelection();
+    }, t("adminTabs.editSubscription.successReactivated"));
+  }
+
+  async function cancelSub() {
+    if (!subId) return;
+    openOperationConfirmDialog(
+      t("adminTabs.editSubscription.cancelSubscriptionTitle"),
+      t("adminTabs.editSubscription.cancelSubscriptionMessage"),
+      t("adminTabs.editSubscription.cancelKeyword"),
+      async () => {
+        await withAuthRequest("cancel-subscription", async () => {
+          await apiRequest(`/api/ops/subscriptions/${encodeURIComponent(subId)}`, { method: "PATCH", token, body: { status: "cancelled" } });
+          clearSelection();
+        }, t("adminTabs.editSubscription.successCancelled"));
+      },
+    );
+  }
+
+  async function pauseSub() {
+    if (!subId) return;
+    openOperationConfirmDialog(
+      t("adminTabs.editSubscription.pauseSubscriptionTitle"),
+      t("adminTabs.editSubscription.pauseSubscriptionMessage"),
+      t("adminTabs.editSubscription.pauseKeyword"),
+      async () => {
+        await withAuthRequest("pause-subscription", async () => {
+          await apiRequest(`/api/ops/subscriptions/${encodeURIComponent(subId)}`, { method: "PATCH", token, body: { status: "paused" } });
+          clearSelection();
+        }, t("adminTabs.editSubscription.successPaused"));
+      },
+    );
+  }
+
+  async function loadHistory() {
+    if (!subId) return;
+    try {
+      const rows = await apiRequest<Array<{ id: string; event_type: string; details: string; created_at: string; source: string }>>(
+        `/api/ops/subscriptions/${encodeURIComponent(subId)}/history`, { token },
+      );
+      setHistory(rows || []);
+      setShowHistory(true);
+    } catch {
+      setNotice({ tone: "error", text: t("adminTabs.editSubscription.errorLoadHistoryFailed") });
+    }
   }
 
   async function doUpdate() {
@@ -124,24 +181,26 @@ export default function EditSubscriptionTab() {
           <div>
             <p className="muted" style={{ fontSize: "0.85rem", marginBottom: "0.5rem" }}>{t("adminTabs.editSubscription.selectSubscriptionPrompt")}</p>
             {memberSubs.map((sub) => (
-              <div
+              <button
                 key={sub.id}
+                type="button"
                 onClick={() => selectSub(sub)}
                 style={{
+                  display: "block", width: "100%", textAlign: "left",
                   padding: "0.75rem", marginBottom: "0.5rem", cursor: "pointer",
                   border: "1px solid var(--outline-variant)", borderRadius: "var(--radius-md)",
                   background: "var(--surface-container-lowest)",
                 }}
               >
-                <strong>{sub.plan_name || "Default Plan"}</strong>
+                <strong>{sub.plan_name || t("adminTabs.editSubscription.defaultPlan")}</strong>
                 {sub.person_name ? <span className="muted"> — {sub.person_name}</span> : null}
                 <div style={{ fontSize: "0.85rem", color: "var(--on-surface-variant)", marginTop: "0.25rem" }}>
-                  {formatAmount(sub.amount)} / {sub.billing_cycle} · Status: {sub.status}
+                  {formatAmount(sub.amount)} / {sub.billing_cycle} · {t("adminTabs.editSubscription.statusInfo", { status: sub.status })}
                 </div>
                 <div style={{ fontSize: "0.75rem", fontFamily: "monospace", color: "var(--on-surface-variant)" }}>
                   ID: {sub.id}
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         )}
@@ -149,7 +208,7 @@ export default function EditSubscriptionTab() {
         {subId && (
           <>
             <div style={{ padding: "0.5rem 0.75rem", background: "var(--surface-container)", borderRadius: "var(--radius-md)", fontSize: "0.85rem", marginBottom: "0.25rem" }}>
-              {t("adminTabs.editSubscription.editingLabel")} <strong>{planName || "Subscription"}</strong> — <span style={{ fontFamily: "monospace", fontSize: "0.78rem" }}>{subId}</span>
+              {t("adminTabs.editSubscription.editingLabel")} <strong>{planName || t("adminTabs.editSubscription.defaultPlan")}</strong> — <span style={{ fontFamily: "monospace", fontSize: "0.78rem" }}>{subId}</span>
               <button className="btn btn-ghost btn-sm" style={{ marginLeft: "0.5rem" }} onClick={() => { setSubId(""); setAmount(""); setBillingCycle(""); setNextDate(""); setStatus(""); setPlanName(""); }}>{t("adminTabs.editSubscription.changeButton")}</button>
             </div>
             <label>{t("adminTabs.editSubscription.amountLabel")} <span className="muted">{t("adminTabs.editSubscription.amountHint")}</span><input type="number" min={0} value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={t("adminTabs.editSubscription.amountHint")} /></label>
@@ -174,9 +233,48 @@ export default function EditSubscriptionTab() {
             </label>
             <label>{t("adminTabs.editSubscription.nextPaymentDateLabel")}<input type="date" value={nextDate} onChange={(e) => setNextDate(e.target.value)} /></label>
             <label>{t("adminTabs.editSubscription.planNameLabel")}<input value={planName} onChange={(e) => setPlanName(e.target.value)} placeholder={t("adminTabs.editSubscription.planNamePlaceholder")} /></label>
-            <button className="btn btn-primary" onClick={() => void update()} disabled={busyKey === "update-subscription"}>
-              {busyKey === "update-subscription" ? t("adminTabs.editSubscription.updating") : t("adminTabs.editSubscription.updateButton")}
-            </button>
+            <div className="actions-row" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
+              <button className="btn btn-primary" onClick={() => void update()} disabled={busyKey === "update-subscription"}>
+                {busyKey === "update-subscription" ? t("adminTabs.editSubscription.updating") : t("adminTabs.editSubscription.updateButton")}
+              </button>
+              {selectedSub && (selectedSub.status === "cancelled" || selectedSub.status === "paused") && (
+                <button className="btn btn-primary" onClick={() => void reactivateSub()} disabled={busyKey === "reactivate-subscription"} style={{ background: "var(--success)" }}>
+                  {busyKey === "reactivate-subscription" ? t("adminTabs.editSubscription.reactivating") : t("adminTabs.editSubscription.reactivateButton")}
+                </button>
+              )}
+              {selectedSub && selectedSub.status === "active" && (
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => void pauseSub()}
+                  disabled={busyKey === "pause-subscription"}
+                >
+                  {busyKey === "pause-subscription" ? t("adminTabs.editSubscription.pausing") : t("adminTabs.editSubscription.pauseSubButton")}
+                </button>
+              )}
+              {selectedSub && selectedSub.status === "active" && (
+                <button className="btn btn-danger" onClick={() => void cancelSub()} disabled={busyKey === "cancel-subscription"}>
+                  {t("adminTabs.editSubscription.cancelButton")}
+                </button>
+              )}
+              <button className="btn btn-sm" onClick={() => void loadHistory()}>{t("adminTabs.editSubscription.historyButton")}</button>
+            </div>
+
+            {showHistory && (
+              <div style={{ marginTop: "0.75rem" }}>
+                <h4 style={{ fontSize: "0.9rem", marginBottom: "0.5rem" }}>{t("adminTabs.editSubscription.historyTitle")}</h4>
+                {history.length === 0 ? <p className="muted">{t("adminTabs.editSubscription.historyEmpty")}</p> : (
+                  <div style={{ maxHeight: "15rem", overflowY: "auto" }}>
+                    {history.map((h) => (
+                      <div key={h.id} style={{ padding: "0.5rem", borderBottom: "1px solid var(--outline-variant)", fontSize: "0.82rem" }}>
+                        <strong>{h.event_type}</strong> <span className="muted">({h.source})</span>
+                        <div className="muted">{h.details}</div>
+                        <div className="muted">{new Date(h.created_at).toLocaleString()}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </>
         )}
       </div>

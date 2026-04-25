@@ -31,6 +31,7 @@ export async function getAnnouncements(church_id: string, limit = 100, offset = 
     .from("announcements")
     .select("*")
     .eq("church_id", church_id)
+    .is("deleted_at", null)
     .order("created_at", { ascending: false })
     .range(safeOffset, safeOffset + safeLimit - 1);
 
@@ -73,9 +74,10 @@ export async function updateAnnouncement(id: string, church_id: string, title?: 
 export async function deleteAnnouncement(id: string, church_id: string) {
   const { error } = await db
     .from("announcements")
-    .delete()
+    .update({ deleted_at: new Date().toISOString() })
     .eq("id", id)
-    .eq("church_id", church_id);
+    .eq("church_id", church_id)
+    .is("deleted_at", null);
 
   if (error) {
     logger.error({ err: error }, "deleteAnnouncement failed");
@@ -87,8 +89,9 @@ export async function deleteAnnouncement(id: string, church_id: string) {
 export async function clearAllAnnouncements(church_id: string) {
   const { error } = await db
     .from("announcements")
-    .delete()
-    .eq("church_id", church_id);
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("church_id", church_id)
+    .is("deleted_at", null);
 
   if (error) {
     logger.error({ err: error }, "clearAllAnnouncements failed");

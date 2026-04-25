@@ -146,6 +146,8 @@ export default function EventsPage() {
                     <img
                       src={eventItem.image_url}
                       alt={eventItem.title}
+                      loading="lazy"
+                      decoding="async"
                       style={{ width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: "var(--radius-md)", marginBottom: "0.75rem" }}
                     />
                   ) : null}
@@ -221,6 +223,8 @@ export default function EventsPage() {
                     <img
                       src={notification.image_url}
                       alt={notification.title}
+                      loading="lazy"
+                      decoding="async"
                       style={{ width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: "var(--radius-md)", marginBottom: "0.75rem" }}
                     />
                   ) : null}

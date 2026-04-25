@@ -86,33 +86,43 @@ export async function processSubscriptionReminders(): Promise<{ sent: number; sk
 
   if (!candidates.length) return { sent: 0, skipped: 0 };
 
-  // Pass 2: batch-check which reminders were already sent today
-  const candidateSubIds = candidates.map(c => c.sub.id);
-  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString();
-  const { data: existingReminders } = await db
-    .from("subscription_reminders")
-    .select("subscription_id, reminder_type")
-    .in("subscription_id", candidateSubIds)
-    .gte("sent_at", todayStart);
-
-  const alreadySent = new Set(
-    (existingReminders || []).map((r: any) => `${r.subscription_id}:${r.reminder_type}`)
-  );
-
-  // Pass 3: send reminders and batch-insert records
-  const toInsert: Array<Record<string, unknown>> = [];
-
+  // Pass 2: race-safe "claim then send". Insert the reminder row FIRST; only
+  // send notifications if the insert succeeded (unique-index dedup handles
+  // concurrent cron runs — duplicates return 23505 and we skip).
   for (const { sub, reminderType } of candidates) {
-    if (alreadySent.has(`${sub.id}:${reminderType}`)) {
-      skipped++;
-      continue;
-    }
-
     const member = sub.members;
     if (!member?.email && !member?.phone_number && !member?.user_id) {
       skipped++;
       continue;
     }
+
+    // Claim the reminder slot by inserting the row. The uq_subscription_reminders_daily
+    // partial unique index on (subscription_id, reminder_type, date_trunc('day', sent_at))
+    // ensures only one worker wins.
+    const claim = await db
+      .from("subscription_reminders")
+      .insert({
+        subscription_id: sub.id,
+        member_id: sub.member_id,
+        church_id: member.church_id,
+        reminder_type: reminderType,
+        channels_sent: [],
+      })
+      .select("id")
+      .maybeSingle();
+
+    if (claim.error) {
+      if ((claim.error as any).code === "23505") {
+        // Another worker already claimed this reminder today
+        skipped++;
+        continue;
+      }
+      logger.warn({ err: claim.error, subId: sub.id, reminderType }, "reminder claim insert failed");
+      skipped++;
+      continue;
+    }
+
+    const claimedRowId = (claim.data as any)?.id;
 
     const subject = reminderType === "upcoming"
       ? `${APP_NAME}: Subscription payment due in 3 days`
@@ -166,28 +176,18 @@ export async function processSubscriptionReminders(): Promise<{ sent: number; sk
         } catch (_) { /* sms failure is non-fatal */ }
       }
 
-      toInsert.push({
-        subscription_id: sub.id,
-        member_id: sub.member_id,
-        church_id: member.church_id,
-        reminder_type: reminderType,
-        channels_sent: channelsSent,
-      });
+      // Update the claimed row with the actual channels we sent on
+      if (claimedRowId && channelsSent.length > 0) {
+        await db
+          .from("subscription_reminders")
+          .update({ channels_sent: channelsSent })
+          .eq("id", claimedRowId);
+      }
 
       sent++;
     } catch (err) {
       logger.warn({ err, subId: sub.id, reminderType }, "Failed to send subscription reminder");
       skipped++;
-    }
-  }
-
-  // Batch insert all reminder records
-  if (toInsert.length) {
-    const { error: insertErr } = await db
-      .from("subscription_reminders")
-      .insert(toInsert);
-    if (insertErr) {
-      logger.warn({ err: insertErr }, "Batch subscription_reminders insert failed");
     }
   }
 

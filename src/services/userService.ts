@@ -12,6 +12,7 @@ import { createSubscription } from "./subscriptionService";
 import { buildPaymentReceiptDownloadPath } from "./receiptService";
 import { getChurchSubscription, getChurchSaaSSettings } from "./churchSubscriptionService";
 import { monthLabel } from "./subscriptionMonthlyDuesService";
+import { getDioceseByChurchId, listDioceseLeaders } from "./dioceseService";
 
 export interface SyncUserProfileInput {
   id: string;
@@ -791,6 +792,8 @@ export async function getMemberDashboardByEmail(email: string, phone?: string) {
 
   const dueSubscriptions: DueSubscriptionRow[] = subscriptions
     .filter((subscription) => {
+      const status = (subscription.status || "").toLowerCase();
+      if (status === "cancelled" || status === "expired") return false;
       const pendingMonths = pendingDueRowsBySubscription.get(subscription.id) || [];
       if (pendingMonths.length > 0) return true;
       return isDueSubscription(subscription);
@@ -849,6 +852,33 @@ export async function getMemberDashboardByEmail(email: string, phone?: string) {
   const currentSubscriptionStatus = deriveSubscriptionStatus(subscriptions);
   const latestSubscription = subscriptions[0] || null;
 
+  // Fetch diocese info + leaders so members can see them on the dashboard.
+  // Visible to ALL members of a church mapped to a diocese (LOW-010 admin-only
+  // listing endpoint stays restricted; this surfaces a read-only view via the
+  // member dashboard).
+  let diocese: { id: string; name: string; logo_url: string | null; banner_url: string | null } | null = null;
+  let dioceseLeaders: Array<{ id: string; role: string; full_name: string; phone_number: string | null; email: string | null; bio: string | null; photo_url: string | null }> = [];
+  if (profile.church_id) {
+    try {
+      const dio = await getDioceseByChurchId(profile.church_id);
+      if (dio) {
+        diocese = { id: dio.id, name: dio.name, logo_url: dio.logo_url, banner_url: dio.banner_url };
+        const leaders = await listDioceseLeaders(dio.id, true);
+        dioceseLeaders = leaders.map((l) => ({
+          id: l.id,
+          role: l.role,
+          full_name: l.full_name,
+          phone_number: l.phone_number,
+          email: l.email,
+          bio: l.bio,
+          photo_url: l.photo_url,
+        }));
+      }
+    } catch (e) {
+      logger.warn({ err: e, churchId: profile.church_id }, "Failed to fetch diocese leadership for member dashboard");
+    }
+  }
+
   // Fetch church SaaS subscription and settings for admins
   let churchSubscription: { amount: number | string; billing_cycle: string; status: string; next_payment_date: string | null; start_date: string | null } | null = null;
   let churchSaaSSettings: { member_subscription_enabled: boolean; church_subscription_enabled: boolean; church_subscription_amount: number; service_enabled: boolean } | null = null;
@@ -900,6 +930,8 @@ export async function getMemberDashboardByEmail(email: string, phone?: string) {
     },
     church_subscription: churchSubscription,
     church_saas_settings: churchSaaSSettings,
+    diocese,
+    diocese_leaders: dioceseLeaders,
     _warnings,
   };
 }

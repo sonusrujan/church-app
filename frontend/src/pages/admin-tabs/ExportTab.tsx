@@ -3,7 +3,9 @@ import { Download } from "lucide-react";
 import { apiRequest, apiBlobRequest } from "../../lib/api";
 import { useApp } from "../../context/AppContext";
 import { useI18n } from "../../i18n";
+import { formatDate } from "../../types";
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 type DioceseOption = { id: string; name: string };
 type ChurchOption = { id: string; name: string; diocese_id: string | null };
 
@@ -89,6 +91,98 @@ export default function ExportTab() {
           <Download size={16} /> {busyKey === "export-monthly-dues" ? t("adminTabs.export.exporting") : t("adminTabs.export.monthlyDuesCsv")}
         </button>
       </div>
+
+      {/* Super Admin: platform-level exports */}
+      {isSuperAdmin && (
+        <div style={{ marginTop: "2rem", borderTop: "1px solid var(--outline-variant)", paddingTop: "1.25rem" }}>
+          <h4 style={{ marginBottom: "0.75rem" }}>{t("adminTabs.export.platformExportsTitle")}</h4>
+          <SuperAdminExports token={token} busyKey={busyKey} withAuthRequest={withAuthRequest} selectedChurch={selectedChurch} />
+        </div>
+      )}
     </article>
+  );
+}
+
+function SuperAdminExports({ token, busyKey, withAuthRequest, selectedChurch }: {
+  token: string | null;
+  busyKey: string | null;
+  withAuthRequest: (key: string, fn: () => Promise<unknown>, successMsg?: string) => Promise<unknown>;
+  selectedChurch: string;
+}) {
+  const { setNotice } = useApp();
+  const { t } = useI18n();
+  const [auditLimit, setAuditLimit] = useState("1000");
+
+  async function downloadAdminAudit() {
+    await withAuthRequest("export-audit-log", async () => {
+      const params = new URLSearchParams({ limit: auditLimit });
+      const blob = await apiBlobRequest(`/api/ops/audit-logs/export?${params.toString()}`, { token: token ?? undefined, accept: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `audit-log-${new Date().toISOString().split("T")[0]}.csv`; a.click();
+      URL.revokeObjectURL(url);
+    }, t("adminTabs.export.auditDownloaded"));
+  }
+
+  async function downloadSaasBilling() {
+    await withAuthRequest("export-saas-billing", async () => {
+      const blob = await apiBlobRequest(`/api/ops/saas-billing/export?limit=${auditLimit}`, { token: token ?? undefined, accept: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `saas-billing-${new Date().toISOString().split("T")[0]}.csv`; a.click();
+      URL.revokeObjectURL(url);
+    }, t("adminTabs.export.saasDownloaded"));
+  }
+
+  async function downloadIncomeReport() {
+    if (!selectedChurch) { setNotice({ tone: "error", text: t("adminTabs.export.selectChurchFirst") }); return; }
+    await withAuthRequest("export-income-report", async () => {
+      const blob = await apiBlobRequest(`/api/admins/income-report?church_id=${encodeURIComponent(selectedChurch)}&period=monthly`, { token: token ?? undefined, accept: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `income-report-${new Date().toISOString().split("T")[0]}.csv`; a.click();
+      URL.revokeObjectURL(url);
+    }, t("adminTabs.export.incomeDownloaded"));
+  }
+
+  return (
+    <div className="field-stack">
+      {/* Audit Log Export */}
+      <div style={{ background: "var(--surface-container)", borderRadius: "var(--radius-md)", padding: "0.75rem" }}>
+        <p style={{ fontWeight: 600, marginBottom: "0.5rem" }}>{t("adminTabs.export.adminAuditTitle")}</p>
+        <p className="muted" style={{ marginBottom: "0.5rem" }}>{t("adminTabs.export.adminAuditDescription")}</p>
+        <div className="actions-row" style={{ flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ flex: "0 0 auto" }}>
+            {t("adminTabs.export.rowsLabel")}
+            <select value={auditLimit} onChange={(e) => setAuditLimit(e.target.value)} style={{ marginLeft: 4 }}>
+              {["500", "1000", "2000", "5000", "10000"].map((v) => <option key={v} value={v}>{v}</option>)}
+            </select>
+          </label>
+          <button className="btn" onClick={() => void downloadAdminAudit()} disabled={busyKey === "export-audit-log"}>
+            <Download size={14} /> {busyKey === "export-audit-log" ? t("adminTabs.export.exporting") : t("adminTabs.export.downloadAuditLog")}
+          </button>
+        </div>
+      </div>
+
+      {/* SaaS Billing Export */}
+      <div style={{ background: "var(--surface-container)", borderRadius: "var(--radius-md)", padding: "0.75rem" }}>
+        <p style={{ fontWeight: 600, marginBottom: "0.5rem" }}>{t("adminTabs.export.saasExportTitle")}</p>
+        <p className="muted" style={{ marginBottom: "0.5rem" }}>{t("adminTabs.export.saasExportDescription")}</p>
+        <button className="btn" onClick={() => void downloadSaasBilling()} disabled={busyKey === "export-saas-billing"}>
+          <Download size={14} /> {busyKey === "export-saas-billing" ? t("adminTabs.export.exporting") : t("adminTabs.export.downloadSaasBilling")}
+        </button>
+      </div>
+
+      {/* Income Report (church-scoped) */}
+      <div style={{ background: "var(--surface-container)", borderRadius: "var(--radius-md)", padding: "0.75rem" }}>
+        <p style={{ fontWeight: 600, marginBottom: "0.5rem" }}>{t("adminTabs.export.incomeReportTitle")}</p>
+        <p className="muted" style={{ marginBottom: "0.5rem" }}>{t("adminTabs.export.incomeReportDescription")}</p>
+        <button className="btn" onClick={() => void downloadIncomeReport()} disabled={!selectedChurch || busyKey === "export-income-report"}>
+          <Download size={14} /> {busyKey === "export-income-report" ? t("adminTabs.export.exporting") : t("adminTabs.export.downloadIncomeReport")}
+        </button>
+      </div>
+
+      <p className="muted" style={{ fontSize: "0.75rem" }}>Last generated: {formatDate(new Date().toISOString())}</p>
+    </div>
   );
 }

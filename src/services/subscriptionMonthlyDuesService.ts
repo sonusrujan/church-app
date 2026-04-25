@@ -165,43 +165,77 @@ export async function listMonthlyHistoryForMember(input: {
   const safeLimit = Math.min(Math.max(input.limit || 10, 1), 100);
   const safeOffset = Math.max(input.offset || 0, 0);
 
-  // Query subscription_monthly_dues to get the full ledger (paid + unpaid months)
-  // Left-join with payment_month_allocations and payments for paid-month details
+  // Unified history: subscription dues ledger UNION donation payments.
+  // Donations have no subscription_id, so they appear as standalone rows
+  // keyed by their payment_date.
   try {
-    let sql = `
-      SELECT smd.id,
-             smd.due_month AS covered_month,
-             smd.status AS due_status,
-             smd.subscription_id,
-             s.amount AS subscription_amount,
-             COALESCE(fm.full_name, m.full_name, 'Member') AS person_name,
-             pma.payment_id,
-             pma.monthly_amount AS paid_amount,
-             p.payment_date,
-             p.receipt_number,
-             p.payment_status
-      FROM subscription_monthly_dues smd
-      JOIN subscriptions s ON s.id = smd.subscription_id
-      LEFT JOIN members m ON m.id = smd.member_id
-      LEFT JOIN family_members fm ON fm.id = s.family_member_id
-      LEFT JOIN payment_month_allocations pma ON pma.due_id = smd.id
-      LEFT JOIN payments p ON p.id = pma.payment_id
-      WHERE smd.member_id = $1`;
     const params: unknown[] = [input.member_id];
+    const personFilterDues = input.person_name && input.person_name !== "all"
+      ? ` AND COALESCE(fm.full_name, m.full_name) = $${params.push(input.person_name)}`
+      : "";
+    const fromDateFilterDues = input.from_date
+      ? ` AND smd.due_month >= $${params.push(input.from_date)}`
+      : "";
 
-    if (input.person_name && input.person_name !== "all") {
-      params.push(input.person_name);
-      sql += ` AND COALESCE(fm.full_name, m.full_name) = $${params.length}`;
-    }
+    // Donation rows reuse the same param array (member_id stays at $1).
+    const personFilterDonations = input.person_name && input.person_name !== "all"
+      ? ` AND COALESCE(m.full_name, 'Member') = $${params.push(input.person_name)}`
+      : "";
+    const fromDateFilterDonations = input.from_date
+      ? ` AND p.payment_date >= $${params.push(input.from_date)}`
+      : "";
 
-    if (input.from_date) {
-      params.push(input.from_date);
-      sql += ` AND smd.due_month >= $${params.length}`;
-    }
+    const limitIdx = params.push(safeLimit);
+    const offsetIdx = params.push(safeOffset);
 
-    sql += ` ORDER BY smd.due_month DESC`;
-    params.push(safeLimit, safeOffset);
-    sql += ` LIMIT $${params.length - 1} OFFSET $${params.length}`;
+    const sql = `
+      WITH dues AS (
+        SELECT smd.id::text AS id,
+               smd.due_month::date AS month_year,
+               smd.status AS due_status,
+               smd.subscription_id,
+               COALESCE(fm.full_name, m.full_name, 'Member') AS person_name,
+               pma.payment_id,
+               COALESCE(pma.monthly_amount, s.amount)::numeric AS paid_amount,
+               p.payment_date::timestamptz AS payment_date,
+               p.receipt_number,
+               p.payment_status,
+               'subscription'::text AS kind,
+               NULL::text AS fund_name
+        FROM subscription_monthly_dues smd
+        JOIN subscriptions s ON s.id = smd.subscription_id
+        LEFT JOIN members m ON m.id = smd.member_id
+        LEFT JOIN family_members fm ON fm.id = s.family_member_id
+        LEFT JOIN payment_month_allocations pma ON pma.due_id = smd.id
+        LEFT JOIN payments p ON p.id = pma.payment_id
+        WHERE smd.member_id = $1${personFilterDues}${fromDateFilterDues}
+      ),
+      donations AS (
+        SELECT p.id::text AS id,
+               p.payment_date::date AS month_year,
+               'paid'::text AS due_status,
+               NULL::uuid AS subscription_id,
+               COALESCE(m.full_name, 'Member') AS person_name,
+               p.id AS payment_id,
+               p.amount::numeric AS paid_amount,
+               p.payment_date::timestamptz AS payment_date,
+               p.receipt_number,
+               p.payment_status,
+               'donation'::text AS kind,
+               p.fund_name AS fund_name
+        FROM payments p
+        LEFT JOIN members m ON m.id = p.member_id
+        WHERE p.member_id = $1
+          AND p.subscription_id IS NULL
+          AND p.payment_status = 'success'${personFilterDonations}${fromDateFilterDonations}
+      )
+      SELECT * FROM (
+        SELECT * FROM dues
+        UNION ALL
+        SELECT * FROM donations
+      ) merged
+      ORDER BY month_year DESC NULLS LAST, payment_date DESC NULLS LAST
+      LIMIT $${limitIdx} OFFSET $${offsetIdx}`;
 
     const result = await rawQuery<any>(sql, params);
 
@@ -209,8 +243,8 @@ export async function listMonthlyHistoryForMember(input: {
       id: row.id,
       payment_id: row.payment_id || null,
       subscription_id: row.subscription_id,
-      month_year: row.covered_month,
-      paid_amount: Number(row.paid_amount || row.subscription_amount || 0),
+      month_year: row.month_year,
+      paid_amount: Number(row.paid_amount || 0),
       person_name: row.person_name || "Member",
       paid_date: row.payment_date || null,
       receipt_number: row.receipt_number || null,
@@ -218,6 +252,8 @@ export async function listMonthlyHistoryForMember(input: {
         : row.due_status === "imported_paid" ? "imported"
         : "pending",
       due_status: row.due_status || "pending",
+      kind: row.kind || "subscription",
+      fund_name: row.fund_name || null,
     }));
   } catch (dueErr) {
     logger.warn({ err: dueErr }, "subscription_monthly_dues ledger query failed, trying allocation fallback");

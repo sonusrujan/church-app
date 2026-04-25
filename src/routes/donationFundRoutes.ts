@@ -49,7 +49,7 @@ router.get("/public", async (req, res) => {
       return res.status(400).json({ error: "church_id query parameter is required" });
     }
     const { rows } = await pool.query(
-      `SELECT name, description FROM donation_funds WHERE church_id = $1 AND is_active = true ORDER BY sort_order, name LIMIT 100`,
+      `SELECT name, description FROM donation_funds WHERE church_id = $1 AND is_active = true ORDER BY sort_order, name`,
       [churchId]
     );
     if (rows.length === 0) {
@@ -84,8 +84,7 @@ router.get("/", requireAuth, requireRegisteredUser, async (req: AuthRequest, res
       `SELECT id, church_id, name, description, is_active, sort_order, created_at, updated_at
        FROM donation_funds
        WHERE church_id = $1
-       ORDER BY sort_order, name
-       LIMIT 100`,
+       ORDER BY sort_order, name`,
       [churchId]
     );
     return res.json(rows);

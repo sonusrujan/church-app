@@ -1,22 +1,6 @@
 import { db, rawQuery } from "./dbClient";
 import { logger } from "../utils/logger";
-
-function escapeCsvField(value: unknown): string {
-  const str = value == null ? "" : String(value);
-  // Neutralize CSV formula injection
-  let safe = str;
-  if (/^[=+\-@\t\r]/.test(safe)) {
-    safe = "'" + safe;
-  }
-  if (safe.includes(",") || safe.includes('"') || safe.includes("\n")) {
-    return `"${safe.replace(/"/g, '""')}"`;
-  }
-  return safe;
-}
-
-function toCsvRow(fields: unknown[]): string {
-  return fields.map(escapeCsvField).join(",");
-}
+import { toCsvRow } from "../utils/csv";
 
 export async function exportMembersCsv(churchId: string): Promise<string> {
   const { data, error } = await db

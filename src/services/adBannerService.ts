@@ -26,6 +26,7 @@ export async function listAdBanners(
     .select("*")
     .eq("scope", scope)
     .eq("scope_id", scopeId)
+    .is("deleted_at", null)
     .order("sort_order", { ascending: true });
 
   if (activeOnly) query = query.eq("is_active", true);
@@ -108,11 +109,26 @@ export async function updateAdBanner(
 export async function deleteAdBanner(id: string): Promise<{ success: boolean }> {
   const { error } = await db
     .from("ad_banners")
-    .delete()
-    .eq("id", id);
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", id)
+    .is("deleted_at", null);
 
   if (error) {
     logger.error({ err: error }, "deleteAdBanner failed");
+    throw error;
+  }
+  return { success: true };
+}
+
+export async function restoreAdBanner(id: string): Promise<{ success: boolean }> {
+  const { error } = await db
+    .from("ad_banners")
+    .update({ deleted_at: null })
+    .eq("id", id)
+    .not("deleted_at", "is", null);
+
+  if (error) {
+    logger.error({ err: error }, "restoreAdBanner failed");
     throw error;
   }
   return { success: true };

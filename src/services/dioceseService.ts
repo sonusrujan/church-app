@@ -61,6 +61,7 @@ export async function listDioceses(): Promise<DioceseRow[]> {
   const { data, error } = await db
     .from("dioceses")
     .select("id, name, logo_url, banner_url, logo_urls, created_by, created_at, updated_at")
+    .is("deleted_at", null)
     .order("name", { ascending: true });
 
   if (error) {
@@ -127,11 +128,27 @@ export async function updateDiocese(id: string, name: string): Promise<DioceseRo
 export async function deleteDiocese(id: string): Promise<{ success: boolean }> {
   const { error } = await db
     .from("dioceses")
-    .delete()
-    .eq("id", id);
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", id)
+    .is("deleted_at", null);
 
   if (error) {
     logger.error({ err: error }, "deleteDiocese failed");
+    throw error;
+  }
+
+  return { success: true };
+}
+
+export async function restoreDiocese(id: string): Promise<{ success: boolean }> {
+  const { error } = await db
+    .from("dioceses")
+    .update({ deleted_at: null })
+    .eq("id", id)
+    .not("deleted_at", "is", null);
+
+  if (error) {
+    logger.error({ err: error }, "restoreDiocese failed");
     throw error;
   }
 
@@ -179,6 +196,7 @@ export async function getDioceseByChurchId(churchId: string): Promise<DioceseRow
     .from("dioceses")
     .select("id, name, logo_url, banner_url, logo_urls, created_by, created_at, updated_at")
     .eq("id", mapping.diocese_id)
+    .is("deleted_at", null)
     .single();
 
   if (error) {

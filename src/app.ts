@@ -34,6 +34,7 @@ import { FRONTEND_URL } from "./config";
 import { rlsStorage } from "./middleware/rlsContext";
 import { sanitizeHtml } from "./middleware/inputSanitizer";
 import { requireActiveChurch } from "./middleware/requireActiveChurch";
+import { autoAudit } from "./middleware/autoAudit";
 
 const app = express();
 
@@ -57,15 +58,18 @@ if (isDev) {
   const base = FRONTEND_URL.replace(/:\d+$/, "");
   for (let p = 5173; p <= 5180; p++) allowedOrigins.push(`${base}:${p}`);
 }
+// Capacitor native WebView origins (iOS uses capacitor://, Android uses https://localhost).
+const nativeOrigins = ["capacitor://localhost", "https://localhost", "http://localhost"];
+for (const o of nativeOrigins) allowedOrigins.push(o);
 
 app.use(
   cors({
-    origin: isDev
-      ? (origin, cb) => {
-          if (!origin || allowedOrigins.includes(origin)) cb(null, true);
-          else cb(new Error("CORS: origin not allowed"));
-        }
-      : FRONTEND_URL,
+    origin: (origin, cb) => {
+      // Allow same-origin/no-origin requests (curl, health checks).
+      if (!origin) return cb(null, true);
+      if (allowedOrigins.includes(origin)) return cb(null, true);
+      return cb(new Error("CORS: origin not allowed"));
+    },
     credentials: true,
   })
 );
@@ -219,6 +223,21 @@ const uploadLimiter = rateLimit({
   },
 });
 
+// Spam guard for prayer-request creation: prevent leadership inbox flooding.
+// Authenticated, but per-IP cap stops a single account/device from spraying.
+const prayerCreateLimiter = rateLimit({
+  windowMs: 60 * 60_000, // 1 hour
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "You're submitting prayer requests too quickly. Please try again later." },
+  handler: (req, res) => {
+    logger.warn({ ip: req.ip, path: req.path }, "Rate limit exceeded (prayer create)");
+    res.status(429).json({ error: "You're submitting prayer requests too quickly. Please try again later." });
+  },
+  skip: (req) => req.method !== "POST",
+});
+
 app.use("/api/payments", paymentLimiter);
 app.use("/api/auth", authLimiter);
 app.use("/api/otp/send", otpSendLimiter);
@@ -228,9 +247,14 @@ app.use("/api/members/list", sensitiveLimiter);
 app.use("/api/members/search", sensitiveLimiter);
 app.use("/api/members/link", sensitiveLimiter);
 app.use("/api/donation-funds/public", publicEndpointLimiter);
+app.use("/api/engagement/prayer-requests", prayerCreateLimiter);
 app.use("/api/uploads", uploadLimiter);
 app.use("/api/", generalLimiter);
 app.use(pinoHttp({ logger, genReqId: (req) => (req as any).id }));
+
+// Auto-audit: log all mutation requests (POST/PUT/PATCH/DELETE) to admin_audit_log
+// This is a systemic safety net — manual persistAuditLog calls still provide richer details
+app.use("/api", autoAudit as any);
 
 // Lightweight ping for external uptime monitors (UptimeRobot, BetterStack, etc.)
 app.get("/ping", (_req, res) => {

@@ -200,6 +200,21 @@ export type MemberDashboard = {
     church_subscription_amount: number;
     service_enabled: boolean;
   } | null;
+  diocese?: {
+    id: string;
+    name: string;
+    logo_url: string | null;
+    banner_url: string | null;
+  } | null;
+  diocese_leaders?: Array<{
+    id: string;
+    role: string;
+    full_name: string;
+    phone_number: string | null;
+    email: string | null;
+    bio: string | null;
+    photo_url: string | null;
+  }>;
   _warnings?: string[];
 };
 
@@ -582,7 +597,7 @@ export type PaymentHistoryRow = {
 
 export type MonthlyPaymentHistoryRow = {
   id: string;
-  payment_id: string | null;
+  payment_id: string;
   subscription_id: string;
   month_year: string;
   paid_amount: number;
@@ -590,7 +605,9 @@ export type MonthlyPaymentHistoryRow = {
   paid_date: string | null;
   receipt_number: string | null;
   payment_status: string | null;
-  due_status: "paid" | "pending" | "imported_paid" | string;
+  due_status?: string;
+  kind?: "subscription" | "donation";
+  fund_name?: string | null;
 };
 
 // ── Scheduled Reports ──

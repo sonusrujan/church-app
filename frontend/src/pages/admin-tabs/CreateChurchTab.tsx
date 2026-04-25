@@ -102,7 +102,13 @@ export default function CreateChurchTab() {
           {t("adminTabs.createChurch.enablePlatformFee")}
         </label>
         {platformFeeEnabled ? (
-          <label>{t("adminTabs.createChurch.labelPlatformFeePercent")}<input type="number" min="0" max="100" step="0.5" value={platformFeePercent} onChange={(e) => setPlatformFeePercent(e.target.value)} placeholder={t("adminTabs.createChurch.placeholderFeePercent")} /></label>
+          <label>{t("adminTabs.createChurch.labelPlatformFeePercent")}<input type="number" min="0" max="10" step="0.5" value={platformFeePercent} onChange={(e) => {
+            const raw = e.target.value;
+            if (raw === "") { setPlatformFeePercent(""); return; }
+            const n = parseFloat(raw);
+            if (Number.isNaN(n)) return;
+            setPlatformFeePercent(String(Math.max(0, Math.min(10, n))));
+          }} placeholder={t("adminTabs.createChurch.placeholderFeePercent")} /></label>
         ) : null}
       </div>
       <button className="btn btn-primary" onClick={createChurch} disabled={busyKey === "create-church"}>

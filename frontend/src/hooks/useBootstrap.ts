@@ -253,6 +253,18 @@ export function useBootstrap(deps: UseBootstrapDeps) {
     if (hasBootstrappedRef.current) return;
     let cancelled = false;
 
+    // Clear per-tenant state on every re-bootstrap (e.g., church switch) to prevent
+    // wrong-church data flicker before the new /me resolves.
+    setAuthContext(null);
+    setMemberDashboard(null);
+    setPastors([]);
+    setEvents([]);
+    setNotifications([]);
+    setIncomeSummary(null);
+    setAdminCounts(null);
+    setChurches([]);
+    setAdmins([]);
+
     async function bootstrap() {
       setBusyKey("bootstrap");
       setBootstrapError("");
@@ -320,7 +332,8 @@ export function useBootstrap(deps: UseBootstrapDeps) {
           message.toLowerCase().includes("managed by a family member")
         ) {
           if (!cancelled) {
-            const headName = message.includes(":") ? message.split(":").slice(1).join(":").trim() : "";
+            const match = message.match(/family_dependent\s*:\s*(.+)$/i);
+            const headName = match ? match[1].trim() : "";
             setFamilyHeadName(headName);
             setBootstrapError("family_dependent");
             setNotice({ tone: "error", text: t("auth.familyMemberBlocked") });
@@ -335,10 +348,15 @@ export function useBootstrap(deps: UseBootstrapDeps) {
           const refreshedToken = await tryRefreshToken();
           if (!cancelled && refreshedToken) {
             hasBootstrappedRef.current = false;
+            let decodedUser = { id: "", email: "", phone: "" };
+            try {
+              const p = JSON.parse(atob(refreshedToken.split(".")[1]));
+              decodedUser = { id: p.sub || "", email: p.email || "", phone: p.phone || "" };
+            } catch { /* ignore decode error */ }
             setSession((prev: any) =>
               prev
                 ? { ...prev, access_token: refreshedToken }
-                : { access_token: refreshedToken, user: { id: "", email: "", phone: "" } },
+                : { access_token: refreshedToken, user: decodedUser },
             );
             setCustomAuth(null);
             setBootstrapRetry((v: number) => v + 1);
@@ -376,6 +394,26 @@ export function useBootstrap(deps: UseBootstrapDeps) {
       void loadAdminCounts();
     }
   }, [token, authContext?.profile.role, authContext?.auth.church_id, isSuperAdmin, isAdminUser]);
+
+  // Poll /me every 90s to catch role / super-admin changes (drops admin UI when demoted)
+  useEffect(() => {
+    if (!token || !authContext) return;
+    const id = setInterval(async () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        const fresh = await apiRequest<AuthContextData>("/api/auth/me", { token });
+        const prevRole = authContext.profile.role;
+        const prevSuper = Boolean(authContext.is_super_admin);
+        if (fresh.profile.role !== prevRole || Boolean(fresh.is_super_admin) !== prevSuper) {
+          hasBootstrappedRef.current = false;
+          setBootstrapRetry((v) => v + 1);
+        } else {
+          setAuthContext(fresh);
+        }
+      } catch { /* silent */ }
+    }, 90_000);
+    return () => clearInterval(id);
+  }, [token, authContext?.profile.role, authContext?.is_super_admin]);
 
   // Poll admin counts every 60s for live badge updates (M-9: skip when tab is hidden)
   useEffect(() => {

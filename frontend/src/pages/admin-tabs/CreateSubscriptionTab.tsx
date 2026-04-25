@@ -85,14 +85,14 @@ export default function CreateSubscriptionTab() {
         </label>
 
         {existingSubs.length > 0 && (
-          <div style={{ padding: "0.75rem", background: "#fff8e1", border: "1px solid #f9a825", borderRadius: "var(--radius-md)", fontSize: "0.85rem" }}>
-            <strong style={{ color: "#b8860b" }}>{t("adminTabs.createSubscription.existingSubsWarning", { count: existingSubs.length })}</strong>
+          <div style={{ padding: "0.75rem", background: "var(--color-warning-bg, #fff8e1)", border: "1px solid var(--color-warning-border, #f9a825)", borderRadius: "var(--radius-md)", fontSize: "0.85rem" }}>
+            <strong style={{ color: "var(--color-warning, #b8860b)" }}>{t("adminTabs.createSubscription.existingSubsWarning", { count: existingSubs.length })}</strong>
             <ul style={{ margin: "0.35rem 0 0 1.25rem", padding: 0 }}>
               {existingSubs.map((s) => (
                 <li key={s.id}>{s.plan_name || "Default"} — {formatAmount(s.amount)} / {s.billing_cycle} ({s.status})</li>
               ))}
             </ul>
-            <p style={{ marginTop: "0.35rem", color: "#b8860b" }}>{t("adminTabs.createSubscription.existingSubsHint")}</p>
+            <p style={{ marginTop: "0.35rem", color: "var(--color-warning, #b8860b)" }}>{t("adminTabs.createSubscription.existingSubsHint")}</p>
           </div>
         )}
 

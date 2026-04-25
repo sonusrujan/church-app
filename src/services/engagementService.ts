@@ -108,6 +108,7 @@ export async function createChurchNotification(input: {
   message: string;
   image_url?: string;
   created_by?: string;
+  idempotency_key?: string;
 }) {
   const title = String(input.title || "").trim().replace(/<[^>]*>/g, "");
   const message = String(input.message || "").trim().replace(/<[^>]*>/g, "");
@@ -120,21 +121,42 @@ export async function createChurchNotification(input: {
     ? input.image_url.trim()
     : null;
 
+  // Idempotency: if a key is provided and a row already exists for it, return that row
+  // rather than creating a duplicate. Prevents double-fires from retried fetch calls.
+  if (input.idempotency_key) {
+    const { data: existing } = await db
+      .from("church_notifications")
+      .select("id, church_id, title, message, image_url, created_by, created_at")
+      .eq("idempotency_key", input.idempotency_key)
+      .maybeSingle();
+    if (existing) return existing;
+  }
+
+  const insertRow: Record<string, any> = {
+    church_id: input.church_id,
+    title,
+    message,
+    image_url: imageUrl,
+    created_by: input.created_by || null,
+  };
+  if (input.idempotency_key) insertRow.idempotency_key = input.idempotency_key;
+
   const { data, error } = await db
     .from("church_notifications")
-    .insert([
-      {
-        church_id: input.church_id,
-        title,
-        message,
-        image_url: imageUrl,
-        created_by: input.created_by || null,
-      },
-    ])
+    .insert([insertRow])
     .select("id, church_id, title, message, image_url, created_by, created_at")
     .single();
 
   if (error) {
+    // Race: another concurrent call won the unique-index; fetch and return it.
+    if (input.idempotency_key && (error as any).code === "23505") {
+      const { data: winner } = await db
+        .from("church_notifications")
+        .select("id, church_id, title, message, image_url, created_by, created_at")
+        .eq("idempotency_key", input.idempotency_key)
+        .maybeSingle();
+      if (winner) return winner;
+    }
     logger.error({ err: error, churchId: input.church_id }, "createChurchNotification failed");
     throw error;
   }
@@ -314,6 +336,7 @@ export async function createPrayerRequest(input: {
   member_user_id?: string;
   leader_ids: unknown;
   details: string;
+  is_anonymous?: boolean;
 }) {
   const details = String(input.details || "").trim().replace(/<[^>]*>/g, "");
   if (!details) {
@@ -392,19 +415,21 @@ export async function createPrayerRequest(input: {
     throw new Error("Member profile not found for prayer request");
   }
 
+  const isAnonymous = !!input.is_anonymous;
   const { data: prayerRequest, error: prayerRequestError } = await db
     .from("prayer_requests")
     .insert([
       {
         church_id: input.church_id,
         member_id: member.id,
-        member_name: member.full_name,
-        member_email: member.email,
+        member_name: isAnonymous ? "Anonymous" : member.full_name,
+        member_email: isAnonymous ? null : member.email,
         details,
         status: "sent",
+        is_anonymous: isAnonymous,
       },
     ])
-    .select("id, church_id, member_id, member_name, member_email, details, status, created_at")
+    .select("id, church_id, member_id, member_name, member_email, details, status, created_at, is_anonymous")
     .single();
 
   if (prayerRequestError) {
@@ -434,10 +459,11 @@ export async function createPrayerRequest(input: {
       continue;
     }
 
-    const subject = `${APP_NAME.toUpperCase} Prayer Request from ${member.full_name}`;
-    const memberContact = member.email || "phone user";
+    const displayName = isAnonymous ? "an anonymous member" : member.full_name;
+    const subject = `${APP_NAME.toUpperCase} Prayer Request from ${displayName}`;
+    const memberContact = isAnonymous ? "[identity withheld]" : (member.email || "phone user");
     const text = [
-      `Prayer request from ${member.full_name} (${memberContact})`,
+      `Prayer request from ${displayName} (${memberContact})`,
       "",
       details,
       "",
@@ -472,7 +498,7 @@ export async function createPrayerRequest(input: {
     // Also send SMS if leader has phone number
     if (recipient.phone_number) {
       try {
-        const smsBody = `${APP_NAME}: Prayer request from ${member.full_name} — "${details.slice(0, 120)}${details.length > 120 ? "..." : ""}"`;
+        const smsBody = `${APP_NAME}: Prayer request from ${displayName} — "${details.slice(0, 120)}${details.length > 120 ? "..." : ""}"`;
         const { sendSmsNow } = await import("./notificationService");
         const smsResult = await sendSmsNow(recipient.phone_number, smsBody);
         if (!smsResult.success) {
@@ -628,47 +654,6 @@ export async function deleteChurchNotification(notificationId: string, churchId:
     throw error;
   }
   return { deleted: true, id: notificationId };
-}
-
-export async function updatePrayerRequest(requestId: string, memberId: string, details: string) {
-  const sanitized = String(details || "").trim().replace(/<[^>]*>/g, "");
-  if (!sanitized) throw new Error("Prayer request details are required");
-
-  const { data, error } = await db
-    .from("prayer_requests")
-    .update({ details: sanitized })
-    .eq("id", requestId)
-    .eq("member_id", memberId)
-    .select("id, details, status, created_at")
-    .single();
-
-  if (error) {
-    logger.error({ err: error, requestId, memberId }, "updatePrayerRequest failed");
-    throw error;
-  }
-  if (!data) throw new Error("Prayer request not found or you are not the author");
-  return data;
-}
-
-export async function deletePrayerRequestByMember(requestId: string, memberId: string) {
-  // Verify ownership
-  const { data: pr } = await db
-    .from("prayer_requests")
-    .select("id, church_id")
-    .eq("id", requestId)
-    .eq("member_id", memberId)
-    .single();
-
-  if (!pr) throw new Error("Prayer request not found or you are not the author");
-
-  // Delete recipients first (FK constraint)
-  await db.from("prayer_request_recipients").delete().eq("prayer_request_id", requestId);
-  const { error } = await db.from("prayer_requests").delete().eq("id", requestId);
-  if (error) {
-    logger.error({ err: error, requestId, memberId }, "deletePrayerRequestByMember failed");
-    throw error;
-  }
-  return { deleted: true, id: requestId };
 }
 
 export async function deletePrayerRequest(requestId: string, churchId: string) {

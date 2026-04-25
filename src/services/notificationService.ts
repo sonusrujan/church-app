@@ -376,12 +376,36 @@ export async function savePushSubscription(
   const { error } = await db
     .from("push_subscriptions")
     .upsert(
-      { user_id: userId, endpoint, p256dh, auth },
+      { user_id: userId, endpoint, p256dh, auth, platform: "web" },
       { onConflict: "user_id,endpoint" }
     );
 
   if (error) {
     logger.error({ err: error }, "savePushSubscription failed");
+    throw error;
+  }
+}
+
+/**
+ * Save or update a native (Capacitor) push token for a user. iOS/Android
+ * rows use endpoint = "apns://<token>" or "fcm://<token>" and have
+ * p256dh/auth NULL. Delivery workers branch on endpoint prefix.
+ */
+export async function saveNativePushToken(
+  userId: string,
+  platform: "ios" | "android",
+  nativeToken: string,
+  appId: string | null,
+): Promise<void> {
+  const endpoint = `${platform === "ios" ? "apns" : "fcm"}://${nativeToken}`;
+  const { error } = await db
+    .from("push_subscriptions")
+    .upsert(
+      { user_id: userId, endpoint, platform, app_id: appId, p256dh: null, auth: null },
+      { onConflict: "user_id,endpoint" }
+    );
+  if (error) {
+    logger.error({ err: error, platform }, "saveNativePushToken failed");
     throw error;
   }
 }

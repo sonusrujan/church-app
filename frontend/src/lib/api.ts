@@ -25,11 +25,17 @@ export function getActiveChurchId(): string | null {
 
 // ── Token refresh plumbing ──
 let _onTokenRefreshed: ((newToken: string) => void) | null = null;
+let _onAuthFailure: (() => void) | null = null;
 let _refreshPromise: Promise<string | null> | null = null;
 
 /** App.tsx calls this once to wire up the token update callback */
 export function setTokenRefreshCallback(cb: (newToken: string) => void) {
   _onTokenRefreshed = cb;
+}
+
+/** Called when auth is definitively lost (refresh failed) — clears client session */
+export function setAuthFailureCallback(cb: () => void) {
+  _onAuthFailure = cb;
 }
 
 export async function tryRefreshToken(): Promise<string | null> {
@@ -77,6 +83,7 @@ export async function apiRequest<T>(
 
   const requestHeaders = new Headers(headers);
   requestHeaders.set("Accept", "application/json");
+  requestHeaders.set("X-Requested-With", "XMLHttpRequest");
 
   if (token) {
     requestHeaders.set("Authorization", `Bearer ${token}`);
@@ -153,6 +160,7 @@ export async function apiRequest<T>(
           return (ct.includes("application/json") ? await retryRes.json() : await retryRes.text()) as T;
         }
       }
+      if (_onAuthFailure) _onAuthFailure();
       throw new Error("Session expired. Please sign in again.");
     }
     if (response.status === 402) {

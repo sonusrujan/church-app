@@ -1,0 +1,17 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appIDs": ["REPLACE_WITH_APPLE_TEAM_ID.app.shalom.church"],
+        "components": [
+          { "/": "/subscribe/*", "comment": "Subscription management handoff" },
+          { "/": "/auth/*", "comment": "Auth deep links" }
+        ]
+      }
+    ]
+  },
+  "webcredentials": {
+    "apps": ["REPLACE_WITH_APPLE_TEAM_ID.app.shalom.church"]
+  }
+}

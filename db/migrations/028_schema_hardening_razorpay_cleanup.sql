@@ -48,15 +48,14 @@ END $$;
 DROP INDEX IF EXISTS pastors_email_key;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_pastors_email_per_church
   ON pastors(church_id, email)
-  WHERE email IS NOT NULL AND deleted_at IS NULL;
+  WHERE email IS NOT NULL AND is_active = true;
 
 -- ── 6. Missing performance indexes on high-query tables ──
 CREATE INDEX IF NOT EXISTS idx_prayer_requests_church_created
   ON prayer_requests(church_id, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_announcements_church_created
-  ON announcements(church_id, created_at DESC)
-  WHERE deleted_at IS NULL;
+  ON announcements(church_id, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_payments_member_date
   ON payments(member_id, payment_date DESC);

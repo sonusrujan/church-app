@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { CreditCard, Download, Edit2, Check, X } from "lucide-react";
+import { Check, CreditCard, Download, Edit2, X } from "lucide-react";
 import { apiRequest, apiBlobRequest } from "../../lib/api";
 import { useApp } from "../../context/AppContext";
 import SearchSelect, { type SearchSelectOption } from "../../components/SearchSelect";
@@ -9,7 +9,6 @@ import { isUuid, formatAmount, formatDate } from "../../types";
 import { useI18n } from "../../i18n";
 
 const PAGE_SIZE = 10;
-const DUE_STATUSES = ["pending", "paid", "imported_paid", "waived"] as const;
 
 function monthYearLabel(monthIso?: string | null) {
   if (!monthIso) return "-";
@@ -20,7 +19,7 @@ function monthYearLabel(monthIso?: string | null) {
 
 export default function PaymentHistoryTab() {
   const { t } = useI18n();
-  const { token, authContext, isSuperAdmin, setNotice, churches, withAuthRequest } = useApp();
+  const { token, authContext, isSuperAdmin, setNotice, churches, withAuthRequest, busyKey, openOperationConfirmDialog } = useApp();
 
   const [memberId, setMemberId] = useState("");
   const [memberName, setMemberName] = useState("");
@@ -30,8 +29,8 @@ export default function PaymentHistoryTab() {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
-  const [editingDueId, setEditingDueId] = useState<string | null>(null);
-  const [editDueStatus, setEditDueStatus] = useState("");
+  const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
+  const [editPayFields, setEditPayFields] = useState<{ amount: string; method: string; date: string; note: string }>({ amount: "", method: "", date: "", note: "" });
 
   async function downloadReceipt(paymentId: string, receiptNumber: string | null) {
     if (!token || downloadingIds.has(paymentId)) return;
@@ -91,22 +90,44 @@ export default function PaymentHistoryTab() {
     }
   }
 
-  async function toggleDueStatus(dueId: string) {
-    if (!editDueStatus) return;
-    const churchId = isSuperAdmin ? (churches[0]?.id || "") : (authContext?.auth.church_id || "");
-    const result = await withAuthRequest(
-      "toggle-due",
-      () => apiRequest(`/api/ops/monthly-dues/${dueId}`, {
-        method: "PATCH",
-        token,
-        body: { new_status: editDueStatus, church_id: churchId },
-      }),
-      t("adminTabs.paymentHistory.dueStatusUpdated"),
+  function startEditPayment(paymentId: string, row: MonthlyPaymentHistoryRow) {
+    setEditingPaymentId(paymentId);
+    setEditPayFields({ amount: String(row.paid_amount || ""), method: "", date: row.paid_date || "", note: "" });
+  }
+
+  async function saveEditPayment(paymentId: string) {
+    const body: Record<string, unknown> = {};
+    if (editPayFields.amount) body.amount = Number(editPayFields.amount);
+    if (editPayFields.method) body.payment_method = editPayFields.method;
+    if (editPayFields.date) body.payment_date = editPayFields.date;
+    if (editPayFields.note) body.note = editPayFields.note;
+    if (!Object.keys(body).length) {
+      setNotice({ tone: "error", text: t("adminTabs.paymentHistory.noChangesToSave") });
+      return;
+    }
+    const result = await withAuthRequest("edit-payment", () =>
+      apiRequest(`/api/ops/payments/${encodeURIComponent(paymentId)}`, { method: "PATCH", token, body }),
+      t("adminTabs.paymentHistory.paymentUpdated"),
     );
     if (result) {
-      setEditingDueId(null);
+      setEditingPaymentId(null);
       void load(undefined, page);
     }
+  }
+
+  function voidPayment(paymentId: string) {
+    openOperationConfirmDialog(
+      t("adminTabs.paymentHistory.voidTitle"),
+      t("adminTabs.paymentHistory.voidMessage"),
+      t("adminTabs.paymentHistory.voidKeyword"),
+      async () => {
+        const result = await withAuthRequest("void-payment", () =>
+          apiRequest(`/api/ops/payments/${encodeURIComponent(paymentId)}/void`, { method: "POST", token, body: {} }),
+          t("adminTabs.paymentHistory.paymentVoided"),
+        );
+        if (result) void load(undefined, page);
+      },
+    );
   }
 
   return (
@@ -161,57 +182,54 @@ export default function PaymentHistoryTab() {
               <thead>
                 <tr>
                   <th>{t("historyPage.monthAndYear")}</th>
-                  <th>{t("historyPage.status")}</th>
                   <th>{t("common.amount")}</th>
                   <th>{t("common.name")}</th>
                   <th>{t("common.date")}</th>
                   <th>{t("adminTabs.paymentHistory.receiptHeader")}</th>
-                  <th>{t("common.actions")}</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
                 {history.map((p) => (
                   <tr key={p.id}>
                     <td>{monthYearLabel(p.month_year)}</td>
-                    <td>
-                      {editingDueId === p.id ? (
-                        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                          <select
-                            value={editDueStatus}
-                            onChange={(e) => setEditDueStatus(e.target.value)}
-                            style={{ fontSize: "0.8rem", padding: "2px 4px", borderRadius: 4 }}
-                          >
-                            {DUE_STATUSES.map((s) => (
-                              <option key={s} value={s}>{s}</option>
-                            ))}
-                          </select>
-                          <button className="btn btn-ghost btn-sm" onClick={() => void toggleDueStatus(p.id)} title={t("common.save")}><Check size={14} /></button>
-                          <button className="btn btn-ghost btn-sm" onClick={() => setEditingDueId(null)} title={t("common.cancel")}><X size={14} /></button>
-                        </div>
-                      ) : (
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                          <span className={`history-status-badge ${p.due_status === "paid" ? "badge-paid" : p.due_status === "imported_paid" ? "badge-imported" : p.due_status === "waived" ? "badge-imported" : "badge-pending"}`}>
-                            {p.due_status || "pending"}
-                          </span>
-                          <button className="btn btn-ghost btn-sm" onClick={() => { setEditingDueId(p.id); setEditDueStatus(p.due_status || "pending"); }} title={t("adminTabs.paymentHistory.editDueStatus")}><Edit2 size={12} /></button>
-                        </span>
-                      )}
-                    </td>
                     <td>{formatAmount(p.paid_amount)}</td>
                     <td>{p.person_name || t("common.member")}</td>
                     <td>{p.paid_date ? formatDate(p.paid_date) : "-"}</td>
                     <td>{p.receipt_number || "—"}</td>
                     <td>
-                      {p.payment_id ? (
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        title={t("adminTabs.paymentHistory.downloadReceipt")}
-                        disabled={downloadingIds.has(p.payment_id)}
-                        onClick={() => downloadReceipt(p.payment_id!, p.receipt_number)}
-                      >
-                        <Download size={14} />
-                      </button>
-                      ) : <span className="muted">-</span>}
+                      <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          title={t("adminTabs.paymentHistory.downloadReceipt")}
+                          disabled={!p.payment_id || downloadingIds.has(p.payment_id)}
+                          onClick={() => { if (p.payment_id) downloadReceipt(p.payment_id, p.receipt_number); }}
+                        >
+                          <Download size={14} />
+                        </button>
+                        {p.payment_id ? (
+                          <>
+                            <button className="btn btn-ghost btn-sm" title={t("adminTabs.paymentHistory.editPaymentTitle")} onClick={() => startEditPayment(p.payment_id!, p)}><Edit2 size={14} /></button>
+                            <button className="btn btn-ghost btn-sm" title={t("adminTabs.paymentHistory.voidPaymentTitle")} onClick={() => voidPayment(p.payment_id!)} disabled={busyKey === "void-payment"}>✕</button>
+                          </>
+                        ) : null}
+                      </div>
+                      {editingPaymentId === p.payment_id && p.payment_id && (
+                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4 }}>
+                          <input type="number" placeholder={t("adminTabs.paymentHistory.amountPlaceholder")} value={editPayFields.amount} onChange={(e) => setEditPayFields((f) => ({ ...f, amount: e.target.value }))} style={{ width: 80 }} />
+                          <select value={editPayFields.method} onChange={(e) => setEditPayFields((f) => ({ ...f, method: e.target.value }))}>
+                            <option value="">{t("adminTabs.paymentHistory.methodOption")}</option>
+                            <option value="cash">{t("adminTabs.paymentHistory.methodCash")}</option>
+                            <option value="upi">{t("adminTabs.paymentHistory.methodUpi")}</option>
+                            <option value="bank_transfer">{t("adminTabs.paymentHistory.methodBankTransfer")}</option>
+                            <option value="cheque">{t("adminTabs.paymentHistory.methodCheque")}</option>
+                          </select>
+                          <input type="date" value={editPayFields.date} onChange={(e) => setEditPayFields((f) => ({ ...f, date: e.target.value }))} />
+                          <input placeholder={t("adminTabs.paymentHistory.notePlaceholder")} value={editPayFields.note} onChange={(e) => setEditPayFields((f) => ({ ...f, note: e.target.value }))} />
+                          <button className="btn btn-ghost btn-sm" onClick={() => { if (p.payment_id) void saveEditPayment(p.payment_id); }} disabled={busyKey === "edit-payment"}><Check size={14} /></button>
+                          <button className="btn btn-ghost btn-sm" onClick={() => setEditingPaymentId(null)}><X size={14} /></button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}

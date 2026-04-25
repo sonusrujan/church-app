@@ -172,12 +172,26 @@ export default function HistoryPage() {
                   const isPaid = row.due_status === "paid";
                   const isImported = row.due_status === "imported_paid";
                   const isPending = !isPaid && !isImported;
+                  const isDonation = row.kind === "donation";
                   return (
                   <tr key={row.id} className={`history-row ${isPending ? "history-row-pending" : ""}`}>
-                    <td>{monthYearLabel(row.month_year)}</td>
+                    <td>
+                      {isDonation ? (
+                        <>
+                          <span style={{ display: "block", fontWeight: 600 }}>
+                            {row.fund_name || t("historyPage.donationLabel")}
+                          </span>
+                          <span className="muted" style={{ fontSize: "0.78rem" }}>
+                            {monthYearLabel(row.month_year)}
+                          </span>
+                        </>
+                      ) : (
+                        monthYearLabel(row.month_year)
+                      )}
+                    </td>
                     <td>
                       <span className={`history-status-badge ${isPaid ? "badge-paid" : isImported ? "badge-imported" : "badge-pending"}`}>
-                        {isPaid ? t("historyPage.statusPaid") : isImported ? t("historyPage.statusImported") : t("historyPage.statusUnpaid")}
+                        {isDonation ? t("historyPage.statusDonation") : isPaid ? t("historyPage.statusPaid") : isImported ? t("historyPage.statusImported") : t("historyPage.statusUnpaid")}
                       </span>
                     </td>
                     <td className="history-cell-amount">{isPending ? "-" : formatAmount(row.paid_amount)}</td>

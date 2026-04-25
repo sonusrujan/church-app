@@ -332,6 +332,7 @@ export default function MemberOpsTab() {
         </div>
 
         {/* Results list */}
+        {(
           <div className="list-stack">
             {results.length ? (
               <>
@@ -362,6 +363,7 @@ export default function MemberOpsTab() {
               </>
             ) : <EmptyState icon={<Users size={32} />} title={t("adminTabs.memberOps.emptyTitle")} description={t("adminTabs.memberOps.emptyDescription")} />}
           </div>
+        )}
 
         {/* Edit Member Form */}
         {mode === "edit" && selectedId && canWrite ? (

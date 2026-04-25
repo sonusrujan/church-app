@@ -2,7 +2,7 @@ import { Router } from "express";
 import { requireAuth, AuthRequest } from "../middleware/requireAuth";
 import { requireRegisteredUser } from "../middleware/requireRegisteredUser";
 import { requireSuperAdmin, isSuperAdminEmail } from "../middleware/requireSuperAdmin";
-import { savePushSubscription, removePushSubscription, queueNotification, sendSmsNow } from "../services/notificationService";
+import { savePushSubscription, removePushSubscription, queueNotification, sendSmsNow, saveNativePushToken } from "../services/notificationService";
 import { db } from "../services/dbClient";
 import { logger } from "../utils/logger";
 import { safeErrorMessage } from "../utils/safeError";
@@ -45,6 +45,28 @@ router.post("/subscribe", requireAuth, validate(pushSubscribeSchema), async (req
   } catch (err: any) {
     logger.error({ err }, "push subscribe failed");
     return res.status(500).json({ error: safeErrorMessage(err, "Failed to save subscription") });
+  }
+});
+
+// ── POST /subscribe-native — save native APNs/FCM device token ──
+router.post("/subscribe-native", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: "Unauthenticated" });
+
+    const { platform, token, app_id } = req.body || {};
+    if (platform !== "ios" && platform !== "android") {
+      return res.status(400).json({ error: "platform must be 'ios' or 'android'" });
+    }
+    if (!token || typeof token !== "string" || token.length < 16 || token.length > 1024) {
+      return res.status(400).json({ error: "Invalid native token" });
+    }
+
+    await saveNativePushToken(userId, platform, token, typeof app_id === "string" ? app_id : null);
+    return res.json({ success: true });
+  } catch (err: any) {
+    logger.error({ err }, "subscribe-native failed");
+    return res.status(500).json({ error: safeErrorMessage(err, "Failed to register device token") });
   }
 });
 
@@ -121,7 +143,7 @@ const sendNotificationLimiter = rateLimit({
 
 router.post("/send-notification", requireAuth, requireRegisteredUser, requireSuperAdmin, sendNotificationLimiter, validate(sendNotificationSchema), async (req: AuthRequest, res) => {
   try {
-    const { diocese_id, church_id, member_id, channel, title, message, url } = req.body;
+    const { diocese_id, church_id, member_id, channel, title, message, url, idempotency_key } = req.body;
 
     if (!channel || !["push", "sms"].includes(channel)) {
       return res.status(400).json({ error: "channel must be 'push' or 'sms'" });
@@ -131,6 +153,22 @@ router.post("/send-notification", requireAuth, requireRegisteredUser, requireSup
     }
     if (channel === "push" && (!title || typeof title !== "string" || !title.trim())) {
       return res.status(400).json({ error: "title is required for push notifications" });
+    }
+
+    // Idempotency: reject duplicate submissions (e.g. double-click, retried POST).
+    if (typeof idempotency_key === "string" && idempotency_key.trim()) {
+      const { data: dupBatch } = await db
+        .from("notification_batches")
+        .select("id, total_count")
+        .eq("idempotency_key", idempotency_key.trim())
+        .maybeSingle();
+      if (dupBatch) {
+        return res.json({
+          queued: (dupBatch as any).total_count || 0,
+          batch_id: (dupBatch as any).id,
+          message: "Duplicate request — returning existing batch.",
+        });
+      }
     }
 
     // ── Resolve recipient members ──
@@ -211,18 +249,23 @@ router.post("/send-notification", requireAuth, requireRegisteredUser, requireSup
     const scopeId = member_id || church_id || diocese_id || null;
 
     // Create a batch record for tracking
+    const batchInsert: Record<string, any> = {
+      channel,
+      scope,
+      scope_id: scopeId,
+      title: channel === "push" ? title : null,
+      body: message,
+      total_count: 0,
+      status: "sending",
+      created_by: req.user?.id || null,
+    };
+    if (typeof idempotency_key === "string" && idempotency_key.trim()) {
+      batchInsert.idempotency_key = idempotency_key.trim();
+    }
+
     const { data: batchRow, error: batchErr } = await db
       .from("notification_batches")
-      .insert({
-        channel,
-        scope,
-        scope_id: scopeId,
-        title: channel === "push" ? title : null,
-        body: message,
-        total_count: 0,
-        status: "sending",
-        created_by: req.user?.id || null,
-      })
+      .insert(batchInsert)
       .select("id")
       .single();
 

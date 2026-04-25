@@ -8,18 +8,32 @@ type Props = {
     label: string;
     onClick: () => void;
   };
+  secondaryAction?: {
+    label: string;
+    onClick: () => void;
+  };
+  compact?: boolean;
 };
 
-export default function EmptyState({ icon, title, description, action }: Props) {
+export default function EmptyState({ icon, title, description, action, secondaryAction, compact }: Props) {
   return (
-    <div className="empty-state-block">
-      {icon ? <div className="empty-state-icon">{icon}</div> : null}
+    <div className={`empty-state-block${compact ? " empty-state-compact" : ""}`} role="status">
+      {icon ? <div className="empty-state-icon" aria-hidden="true">{icon}</div> : null}
       <p className="empty-state-title">{title}</p>
       {description ? <p className="empty-state-desc">{description}</p> : null}
-      {action ? (
-        <button className="btn btn-primary" onClick={action.onClick} style={{ marginTop: "0.75rem" }}>
-          {action.label}
-        </button>
+      {(action || secondaryAction) ? (
+        <div className="actions-row" style={{ justifyContent: "center", marginTop: "1rem" }}>
+          {action ? (
+            <button type="button" className="btn btn-primary" onClick={action.onClick}>
+              {action.label}
+            </button>
+          ) : null}
+          {secondaryAction ? (
+            <button type="button" className="btn" onClick={secondaryAction.onClick}>
+              {secondaryAction.label}
+            </button>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );

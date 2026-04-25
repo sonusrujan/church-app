@@ -1,13 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Mock all DB & external dependencies
-const mockInsertSelect = vi.fn();
+// Mock DB client / transaction surface
+const mockClientQuery = vi.fn();
+const mockClientRelease = vi.fn();
+const mockGetClient = vi.fn().mockResolvedValue({
+  query: (...args: any[]) => mockClientQuery(...args),
+  release: () => mockClientRelease(),
+});
 const mockDbFrom = vi.fn();
+
 vi.mock("./dbClient", () => ({
-  db: {
-    from: (...args: any[]) => mockDbFrom(...args),
-  },
+  db: { from: (...args: any[]) => mockDbFrom(...args) },
   rawQuery: vi.fn(),
+  getClient: (...args: any[]) => mockGetClient(...args),
 }));
 
 vi.mock("../utils/logger", () => ({
@@ -26,13 +31,13 @@ vi.mock("../config", () => ({
   VAPID_PUBLIC_KEY: "",
   VAPID_PRIVATE_KEY: "",
   VAPID_SUBJECT: "",
+  TWILIO_ACCOUNT_SID: "",
+  TWILIO_AUTH_TOKEN: "",
+  TWILIO_MESSAGING_SERVICE_SID: "",
 }));
 
 vi.mock("web-push", () => ({
-  default: {
-    setVapidDetails: vi.fn(),
-    sendNotification: vi.fn(),
-  },
+  default: { setVapidDetails: vi.fn(), sendNotification: vi.fn() },
 }));
 
 vi.mock("@aws-sdk/client-sns", () => ({
@@ -41,23 +46,26 @@ vi.mock("@aws-sdk/client-sns", () => ({
 }));
 
 import { queueNotification } from "./notificationService";
-import { enqueueJob } from "./jobQueueService";
+
+function stubTxn(deliveryId: string | null, insertError?: Error) {
+  mockClientQuery.mockImplementation(async (sql: string) => {
+    if (sql.startsWith("BEGIN") || sql.startsWith("COMMIT") || sql.startsWith("ROLLBACK")) return {};
+    if (sql.includes("INSERT INTO notification_deliveries")) {
+      if (insertError) throw insertError;
+      return { rows: [{ id: deliveryId }] };
+    }
+    if (sql.includes("INSERT INTO job_queue")) return { rows: [] };
+    return { rows: [] };
+  });
+}
 
 describe("queueNotification", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("creates a delivery record and enqueues a job", async () => {
-    // Mock insert to return delivery ID
-    mockDbFrom.mockReturnValue({
-      insert: vi.fn().mockReturnValue({
-        select: vi.fn().mockReturnValue({
-          single: vi.fn().mockResolvedValue({ data: { id: "delivery-1" }, error: null }),
-        }),
-      }),
-    });
-
+  it("creates a delivery record and inserts a job_queue row (push channel)", async () => {
+    stubTxn("delivery-1");
     const result = await queueNotification({
       church_id: "c1",
       recipient_user_id: "u1",
@@ -66,29 +74,19 @@ describe("queueNotification", () => {
       body: "Hello!",
       subject: "Test",
     });
-
     expect(result).toBe("delivery-1");
-    expect(mockDbFrom).toHaveBeenCalledWith("notification_deliveries");
-    expect(enqueueJob).toHaveBeenCalledWith(
-      expect.objectContaining({
-        job_type: "send_push",
-        payload: expect.objectContaining({
-          delivery_id: "delivery-1",
-          body: "Hello!",
-        }),
-      })
+    const jobInsert = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("INSERT INTO job_queue"),
     );
+    expect(jobInsert).toBeTruthy();
+    expect(jobInsert![1][0]).toBe("send_push");
+    const payload = JSON.parse(jobInsert![1][1]);
+    expect(payload.delivery_id).toBe("delivery-1");
+    expect(payload.body).toBe("Hello!");
   });
 
   it("enqueues send_email for email channel", async () => {
-    mockDbFrom.mockReturnValue({
-      insert: vi.fn().mockReturnValue({
-        select: vi.fn().mockReturnValue({
-          single: vi.fn().mockResolvedValue({ data: { id: "delivery-2" }, error: null }),
-        }),
-      }),
-    });
-
+    stubTxn("delivery-2");
     await queueNotification({
       church_id: "c1",
       recipient_email: "test@test.com",
@@ -97,21 +95,14 @@ describe("queueNotification", () => {
       body: "Email body",
       subject: "Sub",
     });
-
-    expect(enqueueJob).toHaveBeenCalledWith(
-      expect.objectContaining({ job_type: "send_email" })
+    const jobInsert = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("INSERT INTO job_queue"),
     );
+    expect(jobInsert![1][0]).toBe("send_email");
   });
 
   it("enqueues send_sms for sms channel", async () => {
-    mockDbFrom.mockReturnValue({
-      insert: vi.fn().mockReturnValue({
-        select: vi.fn().mockReturnValue({
-          single: vi.fn().mockResolvedValue({ data: { id: "delivery-3" }, error: null }),
-        }),
-      }),
-    });
-
+    stubTxn("delivery-3");
     await queueNotification({
       church_id: "c1",
       recipient_phone: "+919999999999",
@@ -119,40 +110,28 @@ describe("queueNotification", () => {
       notification_type: "test_sms",
       body: "SMS body",
     });
-
-    expect(enqueueJob).toHaveBeenCalledWith(
-      expect.objectContaining({ job_type: "send_sms" })
+    const jobInsert = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("INSERT INTO job_queue"),
     );
+    expect(jobInsert![1][0]).toBe("send_sms");
   });
 
-  it("throws when DB insert fails", async () => {
-    mockDbFrom.mockReturnValue({
-      insert: vi.fn().mockReturnValue({
-        select: vi.fn().mockReturnValue({
-          single: vi.fn().mockResolvedValue({ data: null, error: new Error("DB insert failed") }),
-        }),
-      }),
-    });
-
+  it("rolls back and throws when delivery insert fails", async () => {
+    stubTxn(null, new Error("DB insert failed"));
     await expect(
       queueNotification({
         church_id: "c1",
         channel: "push",
         notification_type: "test",
         body: "fail",
-      })
+      }),
     ).rejects.toThrow("DB insert failed");
+    expect(mockClientQuery).toHaveBeenCalledWith("ROLLBACK");
+    expect(mockClientRelease).toHaveBeenCalled();
   });
 
   it("passes url from metadata into job payload", async () => {
-    mockDbFrom.mockReturnValue({
-      insert: vi.fn().mockReturnValue({
-        select: vi.fn().mockReturnValue({
-          single: vi.fn().mockResolvedValue({ data: { id: "delivery-4" }, error: null }),
-        }),
-      }),
-    });
-
+    stubTxn("delivery-4");
     await queueNotification({
       church_id: "c1",
       recipient_user_id: "u1",
@@ -161,11 +140,10 @@ describe("queueNotification", () => {
       body: "Click me",
       metadata: { url: "/payments" },
     });
-
-    expect(enqueueJob).toHaveBeenCalledWith(
-      expect.objectContaining({
-        payload: expect.objectContaining({ url: "/payments" }),
-      })
+    const jobInsert = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("INSERT INTO job_queue"),
     );
+    const payload = JSON.parse(jobInsert![1][1]);
+    expect(payload.url).toBe("/payments");
   });
 });

@@ -294,6 +294,17 @@ export async function updateMember(memberId: string, churchId: string, input: Up
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
       throw new Error("Invalid email address format");
     }
+    const { data: emailDup } = await db
+      .from("members")
+      .select("id")
+      .ilike("email", value)
+      .eq("church_id", churchId)
+      .neq("id", memberId)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (emailDup) {
+      throw new Error(`A member with email "${value}" already exists in this church.`);
+    }
     patch.email = value;
   }
 
@@ -491,6 +502,27 @@ export async function deleteMember(memberId: string, churchId: string) {
 }
 
 // ── Restore soft-deleted member ──
+
+export async function listDeletedMembers(churchId: string, limit = 50) {
+  if (!churchId) throw new Error("churchId is required");
+
+  const safeLimit = Math.min(Math.max(limit, 1), 200);
+
+  const { data, error } = await db
+    .from("members")
+    .select("id, full_name, email, phone_number, membership_id, deleted_at")
+    .eq("church_id", churchId)
+    .not("deleted_at", "is", null)
+    .order("deleted_at", { ascending: false })
+    .limit(safeLimit);
+
+  if (error) {
+    logger.error({ err: error, churchId }, "listDeletedMembers failed");
+    throw error;
+  }
+
+  return data || [];
+}
 
 export async function restoreMember(memberId: string, churchId: string) {
   if (!churchId) throw new Error("churchId is required");

@@ -1,10 +1,12 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { apiRequest } from "../../lib/api";
 import { useApp } from "../../context/AppContext";
 import SearchSelect, { type SearchSelectOption } from "../../components/SearchSelect";
 import type { MemberRow } from "../../types";
-import { isUuid } from "../../types";
+import { isUuid, formatDate } from "../../types";
 import { useI18n } from "../../i18n";
+
+type DeletedMember = { id: string; full_name: string; email?: string; phone_number?: string; membership_id?: string; deleted_at: string };
 
 export default function RestoreTab() {
   const { t } = useI18n();
@@ -14,9 +16,30 @@ export default function RestoreTab() {
   const [restoreId, setRestoreId] = useState("");
   const [relinkMemberId, setRelinkMemberId] = useState("");
   const [relinkIdentifier, setRelinkIdentifier] = useState("");
+  const [deletedMembers, setDeletedMembers] = useState<DeletedMember[]>([]);
+  const [deletedLoading, setDeletedLoading] = useState(false);
+
+  const churchId = isSuperAdmin ? (churches[0]?.id || "") : (authContext?.auth.church_id || "");
+
+  const loadDeletedMembers = useCallback(async () => {
+    if (!token || !churchId) return;
+    setDeletedLoading(true);
+    try {
+      const data = await apiRequest<DeletedMember[]>(
+        `/api/ops/members/deleted?church_id=${encodeURIComponent(churchId)}`,
+        { token },
+      );
+      setDeletedMembers(data || []);
+    } catch {
+      // silently ignore
+    } finally {
+      setDeletedLoading(false);
+    }
+  }, [token, churchId]);
+
+  useEffect(() => { void loadDeletedMembers(); }, [loadDeletedMembers]);
 
   const searchMembers = useCallback(async (query: string): Promise<SearchSelectOption[]> => {
-    const churchId = isSuperAdmin ? (churches[0]?.id || "") : (authContext?.auth.church_id || "");
     if (!churchId) return [];
     const rows = await apiRequest<MemberRow[]>(
       `/api/members/search?church_id=${encodeURIComponent(churchId)}&query=${encodeURIComponent(query)}`,
@@ -25,14 +48,18 @@ export default function RestoreTab() {
     return rows.map((m) => ({ id: m.id, label: m.full_name || m.phone_number || m.email, sub: m.phone_number || m.email }));
   }, [token, isSuperAdmin, churches, authContext]);
 
-  async function handleRestore() {
-    if (!restoreId.trim() || !isUuid(restoreId.trim())) { setNotice({ tone: "error", text: t("adminTabs.restore.errorValidIdRequired") }); return; }
-    const endpoint = restoreType === "member"
-      ? `/api/ops/members/${encodeURIComponent(restoreId.trim())}/restore`
-      : `/api/ops/churches/${encodeURIComponent(restoreId.trim())}/restore`;
+  async function handleRestore(id?: string) {
+    const targetId = id || restoreId.trim();
+    if (!targetId || !isUuid(targetId)) { setNotice({ tone: "error", text: t("adminTabs.restore.errorValidIdRequired") }); return; }
+    const endpoint = restoreType === "member" || id
+      ? `/api/ops/members/${encodeURIComponent(targetId)}/restore`
+      : `/api/ops/churches/${encodeURIComponent(targetId)}/restore`;
     await withAuthRequest("restore-entity", async () => {
-      await apiRequest(endpoint, { method: "POST", token });
+      await apiRequest(endpoint, { method: "POST", token, body: { church_id: churchId } });
       setRestoreId("");
+      if (id) {
+        setDeletedMembers((prev) => prev.filter((m) => m.id !== id));
+      }
     }, t("adminTabs.restore.successRestored"));
   }
 
@@ -53,6 +80,30 @@ export default function RestoreTab() {
     <article className="panel">
       <h3>{t("adminTabs.restore.titleRestore")}</h3>
       <p className="muted">{t("adminTabs.restore.descriptionRestore")}</p>
+
+      {/* Recently Deleted Members List */}
+      {deletedMembers.length > 0 && (
+        <div style={{ marginBottom: "1.5rem" }}>
+          <h4 style={{ marginBottom: "0.5rem" }}>{t("adminTabs.restore.recentlyDeletedTitle")}</h4>
+          <div style={{ maxHeight: "300px", overflowY: "auto" }}>
+            {deletedMembers.map((m) => (
+              <div key={m.id} className="activity-event-row" style={{ padding: "8px 0", borderBottom: "1px solid var(--border-color, #eee)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <strong>{m.full_name}</strong>
+                  <span className="muted" style={{ marginLeft: 8 }}>{m.phone_number || m.email || ""}</span>
+                  {m.membership_id ? <span className="muted" style={{ marginLeft: 8 }}>#{m.membership_id}</span> : null}
+                  <span className="muted" style={{ marginLeft: 8, fontSize: "0.8rem" }}>{t("adminTabs.restore.deletedLabel")} {formatDate(m.deleted_at)}</span>
+                </div>
+                <button className="btn btn-primary btn-sm" onClick={() => void handleRestore(m.id)} disabled={busyKey === "restore-entity"}>
+                  {t("adminTabs.restore.restoreShort")}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {deletedLoading && <p className="muted">{t("adminTabs.restore.loadingDeleted")}</p>}
+
       <div className="field-stack">
         <label>
           {t("adminTabs.restore.entityTypeLabel")}

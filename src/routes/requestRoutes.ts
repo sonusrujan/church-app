@@ -27,10 +27,33 @@ import {
 import { safeErrorMessage } from "../utils/safeError";
 import { persistAuditLog } from "../utils/auditLog";
 import { queueNotification } from "../services/notificationService";
-import { validate, membershipRequestSchema, reviewDecisionSchema, cancellationRequestSchema, familyCreateRequestSchema, accountDeletionRequestSchema } from "../utils/zodSchemas";
+import { validate, membershipRequestSchema, reviewDecisionSchema, cancellationRequestSchema, familyCreateRequestSchema, accountDeletionRequestSchema, batchReviewSchema } from "../utils/zodSchemas";
 import { logger } from "../utils/logger";
 
 const router = Router();
+
+async function runBatchReview(
+  requestIds: string[],
+  handler: (requestId: string) => Promise<unknown>,
+) {
+  const results: Array<{ request_id: string; success: boolean; error?: string }> = [];
+
+  for (const requestId of requestIds) {
+    try {
+      await handler(requestId);
+      results.push({ request_id: requestId, success: true });
+    } catch (err: any) {
+      results.push({ request_id: requestId, success: false, error: safeErrorMessage(err, "Request review failed") });
+    }
+  }
+
+  return {
+    processed: results.length,
+    succeeded: results.filter((result) => result.success).length,
+    failed: results.filter((result) => !result.success).length,
+    results,
+  };
+}
 
 // ═══ Membership Requests ═══
 
@@ -166,6 +189,32 @@ router.post("/membership-requests/:id/review", requireAuth, requireRegisteredUse
   }
 });
 
+router.post("/membership-requests/batch-review", requireAuth, requireRegisteredUser, validate(batchReviewSchema), async (req: AuthRequest, res: Response) => {
+  try {
+    const role = req.user?.role;
+    const isSuperAdmin = isSuperAdminEmail(req.user?.email, req.user?.phone);
+
+    if (role !== "admin" && !isSuperAdmin) {
+      return res.status(403).json({ error: "Admin access required." });
+    }
+
+    const { request_ids, decision, review_note } = req.body;
+    const callerChurchId = isSuperAdmin ? undefined : req.user?.church_id;
+    const summary = await runBatchReview(request_ids, async (requestId) => {
+      await reviewMembershipRequest(requestId, decision, req.user!.id, review_note, callerChurchId);
+      await persistAuditLog(req, `membership_request.${decision}`, "membership_request", requestId, {
+        decision,
+        review_note,
+        batch: true,
+      });
+    });
+
+    return res.json(summary);
+  } catch (err: any) {
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to review membership requests.") });
+  }
+});
+
 // ═══ Cancellation Requests ═══
 
 // Member: request subscription cancellation
@@ -281,6 +330,32 @@ router.post("/cancellation-requests/:id/review", requireAuth, requireRegisteredU
     return res.json(result);
   } catch (err: any) {
     return res.status(400).json({ error: safeErrorMessage(err, "Failed to review request.") });
+  }
+});
+
+router.post("/cancellation-requests/batch-review", requireAuth, requireRegisteredUser, validate(batchReviewSchema), async (req: AuthRequest, res: Response) => {
+  try {
+    const role = req.user?.role;
+    const isSuperAdmin = isSuperAdminEmail(req.user?.email, req.user?.phone);
+
+    if (role !== "admin" && !isSuperAdmin) {
+      return res.status(403).json({ error: "Admin access required." });
+    }
+
+    const { request_ids, decision, review_note } = req.body;
+    const callerChurchId = isSuperAdmin ? undefined : req.user?.church_id;
+    const summary = await runBatchReview(request_ids, async (requestId) => {
+      await reviewCancellationRequest(requestId, decision, req.user!.id, review_note, callerChurchId);
+      await persistAuditLog(req, `cancellation_request.${decision}`, "cancellation_request", requestId, {
+        decision,
+        review_note,
+        batch: true,
+      });
+    });
+
+    return res.json(summary);
+  } catch (err: any) {
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to review cancellation requests.") });
   }
 });
 
@@ -523,6 +598,32 @@ router.post("/account-deletion-requests/:id/review", requireAuth, requireRegiste
     return res.json(result);
   } catch (err: any) {
     return res.status(400).json({ error: safeErrorMessage(err, "Failed to review deletion request.") });
+  }
+});
+
+router.post("/account-deletion-requests/batch-review", requireAuth, requireRegisteredUser, validate(batchReviewSchema), async (req: AuthRequest, res: Response) => {
+  try {
+    const role = req.user?.role;
+    const isSuperAdmin = isSuperAdminEmail(req.user?.email, req.user?.phone);
+
+    if (role !== "admin" && !isSuperAdmin) {
+      return res.status(403).json({ error: "Admin access required." });
+    }
+
+    const { request_ids, decision, review_note } = req.body;
+    const callerChurchId = isSuperAdmin ? undefined : req.user?.church_id;
+    const summary = await runBatchReview(request_ids, async (requestId) => {
+      await reviewAccountDeletionRequest(requestId, decision, req.user!.id, review_note, callerChurchId);
+      await persistAuditLog(req, `account_deletion_request.${decision}`, "account_deletion_request", requestId, {
+        decision,
+        review_note,
+        batch: true,
+      });
+    });
+
+    return res.json(summary);
+  } catch (err: any) {
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to review account deletion requests.") });
   }
 });
 

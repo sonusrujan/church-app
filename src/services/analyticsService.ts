@@ -60,6 +60,59 @@ export async function getChurchIncomeSummary(churchId: string) {
   }
 }
 
+export async function getPlatformIncomeSummary() {
+  try {
+    const { rows } = await rawQuery<{
+      daily_income: string;
+      monthly_income: string;
+      yearly_income: string;
+      successful_payments_count: string;
+    }>(`
+      SELECT
+        COALESCE(SUM(CASE WHEN (p.payment_date AT TIME ZONE $1)::date = (NOW() AT TIME ZONE $1)::date THEN p.amount END), 0) AS daily_income,
+        COALESCE(SUM(CASE WHEN date_trunc('month', p.payment_date AT TIME ZONE $1) = date_trunc('month', NOW() AT TIME ZONE $1) THEN p.amount END), 0) AS monthly_income,
+        COALESCE(SUM(CASE WHEN date_trunc('year', p.payment_date AT TIME ZONE $1) = date_trunc('year', NOW() AT TIME ZONE $1) THEN p.amount END), 0) AS yearly_income,
+        COUNT(*)::text AS successful_payments_count
+      FROM payments p
+      JOIN members m ON m.id = p.member_id AND m.deleted_at IS NULL
+      JOIN churches c ON c.id = m.church_id AND c.deleted_at IS NULL
+      WHERE LOWER(p.payment_status) = 'success'
+    `, [TZ]);
+
+    const summary = rows[0] || { daily_income: "0", monthly_income: "0", yearly_income: "0", successful_payments_count: "0" };
+
+    const { rows: weeklyRows } = await rawQuery<{ dow: number; income: string }>(`
+      SELECT
+        EXTRACT(DOW FROM p.payment_date AT TIME ZONE $1)::int AS dow,
+        COALESCE(SUM(p.amount), 0) AS income
+      FROM payments p
+      JOIN members m ON m.id = p.member_id AND m.deleted_at IS NULL
+      JOIN churches c ON c.id = m.church_id AND c.deleted_at IS NULL
+      WHERE LOWER(p.payment_status) = 'success'
+        AND (p.payment_date AT TIME ZONE $1)::date >= date_trunc('week', NOW() AT TIME ZONE $1)::date
+        AND p.payment_date <= NOW()
+      GROUP BY 1
+    `, [TZ]);
+
+    const weeklyMap: Record<number, number> = {};
+    for (const r of weeklyRows) weeklyMap[r.dow] = Number(r.income);
+
+    return {
+      daily_income: Number(Number(summary.daily_income).toFixed(2)),
+      monthly_income: Number(Number(summary.monthly_income).toFixed(2)),
+      yearly_income: Number(Number(summary.yearly_income).toFixed(2)),
+      successful_payments_count: Number(summary.successful_payments_count),
+      weekly_income_breakdown: dayNames.map((day, i) => ({
+        day,
+        income: Number((weeklyMap[i] || 0).toFixed(2)),
+      })),
+    };
+  } catch (err) {
+    logger.error({ err }, "getPlatformIncomeSummary failed");
+    throw err;
+  }
+}
+
 export async function getChurchGrowthMetrics(churchId: string) {
   try {
     // Total members
@@ -220,6 +273,117 @@ export async function getChurchIncomeDetail(churchId: string) {
     };
   } catch (err) {
     logger.error({ err, churchId }, "getChurchIncomeDetail failed");
+    throw err;
+  }
+}
+
+export async function getPlatformIncomeDetail() {
+  try {
+    const { rows } = await rawQuery<{
+      is_donation: boolean;
+      daily: string; monthly: string; yearly: string; cnt: string;
+    }>(`
+      SELECT
+        (LOWER(p.payment_method) = 'donation') AS is_donation,
+        COALESCE(SUM(CASE WHEN (p.payment_date AT TIME ZONE $1)::date = (NOW() AT TIME ZONE $1)::date THEN p.amount END), 0) AS daily,
+        COALESCE(SUM(CASE WHEN date_trunc('month', p.payment_date AT TIME ZONE $1) = date_trunc('month', NOW() AT TIME ZONE $1) THEN p.amount END), 0) AS monthly,
+        COALESCE(SUM(CASE WHEN date_trunc('year', p.payment_date AT TIME ZONE $1) = date_trunc('year', NOW() AT TIME ZONE $1) THEN p.amount END), 0) AS yearly,
+        COUNT(*)::text AS cnt
+      FROM payments p
+      JOIN members m ON m.id = p.member_id AND m.deleted_at IS NULL
+      JOIN churches c ON c.id = m.church_id AND c.deleted_at IS NULL
+      WHERE LOWER(p.payment_status) = 'success'
+      GROUP BY 1
+    `, [TZ]);
+
+    const sub = { daily: 0, monthly: 0, yearly: 0, count: 0 };
+    const don = { daily: 0, monthly: 0, yearly: 0, count: 0 };
+    for (const r of rows) {
+      const target = r.is_donation ? don : sub;
+      target.daily = Number(r.daily);
+      target.monthly = Number(r.monthly);
+      target.yearly = Number(r.yearly);
+      target.count = Number(r.cnt);
+    }
+
+    const { rows: weeklyRows } = await rawQuery<{ is_donation: boolean; dow: number; income: string }>(`
+      SELECT
+        (LOWER(p.payment_method) = 'donation') AS is_donation,
+        EXTRACT(DOW FROM p.payment_date AT TIME ZONE $1)::int AS dow,
+        COALESCE(SUM(p.amount), 0) AS income
+      FROM payments p
+      JOIN members m ON m.id = p.member_id AND m.deleted_at IS NULL
+      JOIN churches c ON c.id = m.church_id AND c.deleted_at IS NULL
+      WHERE LOWER(p.payment_status) = 'success'
+        AND (p.payment_date AT TIME ZONE $1)::date >= date_trunc('week', NOW() AT TIME ZONE $1)::date
+        AND p.payment_date <= NOW()
+      GROUP BY 1, 2
+    `, [TZ]);
+
+    const subWeekly: Record<number, number> = {};
+    const donWeekly: Record<number, number> = {};
+    for (const r of weeklyRows) {
+      const map = r.is_donation ? donWeekly : subWeekly;
+      map[r.dow] = Number(r.income);
+    }
+
+    const { rows: trendRows } = await rawQuery<{ is_donation: boolean; ym: string; income: string }>(`
+      SELECT
+        (LOWER(p.payment_method) = 'donation') AS is_donation,
+        to_char(p.payment_date AT TIME ZONE $1, 'Mon YY') AS ym,
+        COALESCE(SUM(p.amount), 0) AS income
+      FROM payments p
+      JOIN members m ON m.id = p.member_id AND m.deleted_at IS NULL
+      JOIN churches c ON c.id = m.church_id AND c.deleted_at IS NULL
+      WHERE LOWER(p.payment_status) = 'success'
+        AND p.payment_date >= date_trunc('month', NOW() AT TIME ZONE $1 - INTERVAL '5 months') AT TIME ZONE $1
+      GROUP BY 1, 2, date_trunc('month', p.payment_date AT TIME ZONE $1)
+      ORDER BY date_trunc('month', p.payment_date AT TIME ZONE $1)
+    `, [TZ]);
+
+    const now = new Date();
+    const trendBuckets: string[] = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      trendBuckets.push(`${monthNames[d.getMonth()]} ${d.getFullYear().toString().slice(2)}`);
+    }
+
+    const subMonthly: Record<string, number> = {};
+    const donMonthly: Record<string, number> = {};
+    for (const r of trendRows) {
+      const map = r.is_donation ? donMonthly : subMonthly;
+      map[r.ym] = Number(r.income);
+    }
+
+    const toWeekly = (m: Record<number, number>) => dayNames.map((d, i) => ({ day: d, income: Number((m[i] || 0).toFixed(2)) }));
+    const toTrend = (m: Record<string, number>) => trendBuckets.map((month) => ({ month, income: Number((m[month] || 0).toFixed(2)) }));
+
+    return {
+      subscription_income: {
+        daily: Number(sub.daily.toFixed(2)),
+        monthly: Number(sub.monthly.toFixed(2)),
+        yearly: Number(sub.yearly.toFixed(2)),
+        count: sub.count,
+        weekly: toWeekly(subWeekly),
+        monthly_trend: toTrend(subMonthly),
+      },
+      donation_income: {
+        daily: Number(don.daily.toFixed(2)),
+        monthly: Number(don.monthly.toFixed(2)),
+        yearly: Number(don.yearly.toFixed(2)),
+        count: don.count,
+        weekly: toWeekly(donWeekly),
+        monthly_trend: toTrend(donMonthly),
+      },
+      total_income: {
+        daily: Number((sub.daily + don.daily).toFixed(2)),
+        monthly: Number((sub.monthly + don.monthly).toFixed(2)),
+        yearly: Number((sub.yearly + don.yearly).toFixed(2)),
+        count: sub.count + don.count,
+      },
+    };
+  } catch (err) {
+    logger.error({ err }, "getPlatformIncomeDetail failed");
     throw err;
   }
 }

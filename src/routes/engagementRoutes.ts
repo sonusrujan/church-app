@@ -7,8 +7,6 @@ import {
   createChurchEvent,
   createChurchNotification,
   createPrayerRequest,
-  updatePrayerRequest,
-  deletePrayerRequestByMember,
   listChurchEvents,
   listChurchNotifications,
   listPrayerRequests,
@@ -172,6 +170,7 @@ router.post("/notifications", requireAuth, requireRegisteredUser, validate(creat
       message: req.body?.message,
       image_url: req.body?.image_url,
       created_by: req.user.id,
+      idempotency_key: typeof req.body?.idempotency_key === "string" ? req.body.idempotency_key : undefined,
     });
 
     logSuperAdminAudit(req, "engagement.notification.create", {
@@ -348,6 +347,7 @@ router.post("/prayer-requests", requireAuth, requireRegisteredUser, async (req: 
       member_user_id: req.user.id,
       leader_ids: req.body?.leader_ids,
       details: req.body?.details,
+      is_anonymous: !!req.body?.is_anonymous,
     });
 
     persistAuditLog(req, "engagement.prayer_request.create", "prayer_request", created.prayer_request?.id, { church_id: churchId });
@@ -374,55 +374,6 @@ router.get("/prayer-requests", requireAuth, requireRegisteredUser, async (req: A
     return res.json(rows);
   } catch (err: any) {
     return res.status(400).json({ error: safeErrorMessage(err, "Failed to list prayer requests") });
-  }
-});
-
-// ── Member edit/delete own prayer request ─────────────────────
-
-router.patch("/prayer-requests/:id", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
-  try {
-    if (!req.user) return res.status(401).json({ error: "Unauthenticated" });
-    const requestId = String(req.params.id);
-    if (!UUID_RE.test(requestId)) return res.status(400).json({ error: "Invalid request ID" });
-
-    const churchId = resolveChurchScope(req, req.body?.church_id);
-    if (!churchId) return res.status(400).json({ error: "church_id is required" });
-
-    // Resolve member to verify ownership
-    const { rows: memberRows } = await (await import("../services/dbClient")).pool.query(
-      `SELECT id FROM members WHERE user_id = $1 AND church_id = $2 AND deleted_at IS NULL LIMIT 1`,
-      [req.user.id, churchId],
-    );
-    if (!memberRows.length) return res.status(403).json({ error: "Member profile not found" });
-
-    const updated = await updatePrayerRequest(requestId, memberRows[0].id, req.body?.details);
-    persistAuditLog(req, "engagement.prayer_request.update", "prayer_request", requestId, { church_id: churchId });
-    return res.json(updated);
-  } catch (err: any) {
-    return res.status(400).json({ error: safeErrorMessage(err, "Failed to update prayer request") });
-  }
-});
-
-router.delete("/prayer-requests/:id", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
-  try {
-    if (!req.user) return res.status(401).json({ error: "Unauthenticated" });
-    const requestId = String(req.params.id);
-    if (!UUID_RE.test(requestId)) return res.status(400).json({ error: "Invalid request ID" });
-
-    const churchId = resolveChurchScope(req, String(req.query.church_id || ""));
-    if (!churchId) return res.status(400).json({ error: "church_id is required" });
-
-    const { rows: memberRows } = await (await import("../services/dbClient")).pool.query(
-      `SELECT id FROM members WHERE user_id = $1 AND church_id = $2 AND deleted_at IS NULL LIMIT 1`,
-      [req.user.id, churchId],
-    );
-    if (!memberRows.length) return res.status(403).json({ error: "Member profile not found" });
-
-    const result = await deletePrayerRequestByMember(requestId, memberRows[0].id);
-    persistAuditLog(req, "engagement.prayer_request.delete", "prayer_request", requestId, { church_id: churchId });
-    return res.json(result);
-  } catch (err: any) {
-    return res.status(400).json({ error: safeErrorMessage(err, "Failed to delete prayer request") });
   }
 });
 

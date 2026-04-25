@@ -302,13 +302,30 @@ router.delete("/:id/churches/:churchId", requireAuth, requireRegisteredUser, asy
 // Diocese Leadership
 // ══════════════════════════════════════════════════════════════════════
 
-// List leaders for a diocese (LOW-010: require super admin to prevent cross-tenant leakage)
+// List leaders for a diocese
+// Read access: SuperAdmin (all dioceses) OR members of any church mapped to
+// the diocese (so the dashboard / home page can render leadership for the
+// diocese the member belongs to). Mutations stay SuperAdmin-only below.
 router.get("/:id/leaders", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
   try {
-    if (!requireSuperAdmin(req)) return res.status(403).json({ error: "SuperAdmin access required" });
-
     const id = String(req.params.id || "").trim();
     if (!UUID_REGEX.test(id)) return res.status(400).json({ error: "Invalid diocese ID" });
+
+    if (!requireSuperAdmin(req)) {
+      const userChurchId = req.user?.church_id || req.registeredProfile?.church_id;
+      if (!userChurchId) {
+        return res.status(403).json({ error: "Not authorised to view this diocese" });
+      }
+      const { data: mapping } = await db
+        .from("diocese_churches")
+        .select("church_id")
+        .eq("diocese_id", id)
+        .eq("church_id", userChurchId)
+        .maybeSingle();
+      if (!mapping) {
+        return res.status(403).json({ error: "Not authorised to view this diocese" });
+      }
+    }
 
     const leaders = await listDioceseLeaders(id);
     return res.json(leaders);

@@ -53,14 +53,7 @@
     "photoUpdated": "Photo updated",
     "photoUploaded": "Photo uploaded",
     "sessionExpired": "Session expired",
-    "unexpectedError": "An unexpected error occurred.",
-    "done": "പൂർത്തിയായി",
-    "member": "അംഗം",
-    "change": "മാറ്റുക",
-    "copy": "പകർപ്പ്",
-    "copied": "പകർത്തി!",
-    "prev": "മുമ്പ്",
-    "name": "പേര്"
+    "unexpectedError": "An unexpected error occurred."
   },
   "auth": {
     "welcome": "ഷാലോമിലേക്ക് സ്വാഗതം",
@@ -86,6 +79,9 @@
     "familyMemberAccount": "കുടുംബാംഗ അക്കൗണ്ട്",
     "familyMemberDescription": "{{name}} ന്റെ കീഴിലെ കുടുംബാംഗമായി നിങ്ങൾ രജിസ്റ്റർ ചെയ്തിരിക്കുന്നു.",
     "familyMemberHint": "ഈ ആപ്പ് സ്വതന്ത്രമായി ഉപയോഗിക്കാൻ, {{name}} ഓട് അവരുടെ കുടുംബാംഗ ലിസ്റ്റിൽ നിന്ന് നിങ്ങളെ നീക്കം ചെയ്യാൻ ആവശ്യപ്പെടുക.",
+    "familyStep1": "{{name}} നെ ബന്ധപ്പെട്ട് അവരുടെ ആപ്പ് തുറക്കാൻ ആവശ്യപ്പെടുക.",
+    "familyStep2": "അവർക്ക് സെറ്റിംഗ്സ് → കുടുംബാംഗങ്ങൾ എന്നതിൽ നിങ്ങളെ നീക്കം ചെയ്യാം.",
+    "familyStep3": "നീക്കം ചെയ്ത ശേഷം, തുടരാൻ താഴെ 'വീണ്ടും ശ്രമിക്കുക' ടാപ്പ് ചെയ്യുക.",
     "yourFamilyHead": "നിങ്ങളുടെ കുടുംബ തലവൻ",
     "workspaceError": "എന്തോ കുഴപ്പം സംഭവിച്ചു",
     "preparingWorkspace": "വർക്ക്‌സ്‌പേസ് തയ്യാറാക്കുന്നു",
@@ -114,16 +110,7 @@
     "memberDashboardReady": "Welcome back. Member dashboard is ready.",
     "otpSentSuccess": "OTP sent! Check your phone and enter the code below.",
     "pleaseSignInFirst": "Please sign in first.",
-    "signedOut": "You have been signed out.",
-    "familyWhatCanYouDo": "നിങ്ങൾക്ക് എന്ത് ചെയ്യാൻ കഴിയും?",
-    "familyTipContactHead": "നിങ്ങളുടെ കുടുംബത്തലവനെ ബന്ധപ്പെടുക.",
-    "familyTipContactAdmin": "കൂടുതൽ സഹായത്തിന് നിങ്ങളുടെ ചർച്ച് അഡ്മിനിസ്ട്രേറ്ററെ ബന്ധപ്പെടുക.",
-    "phoneInvalid10Digits": "ഫോൺ നമ്പർ കൃത്യമായി 10 അക്കങ്ങൾ ആയിരിക്കണം.",
-    "resendOtp": "OTP വീണ്ടും അയയ്ക്കുക",
-    "resendOtpIn": "{{seconds}}s ൽ OTP വീണ്ടും അയയ്ക്കുക",
-    "paymentConfigCheckFailed": "Payment config check failed: {{message}}",
-    "paymentsDisabledFallback": "Payments are disabled for this church.",
-    "workspaceLoadError": "Something went wrong while loading your workspace. Please try again."
+    "signedOut": "You have been signed out."
   },
   "nav": {
     "dashboard": "ഡാഷ്‌ബോർഡ്",
@@ -144,8 +131,7 @@
     "shalomSuperAdmin": "ഷാലോം സൂപ്പർ അഡ്മിൻ കൺസോൾ",
     "shalomChurchAdmin": "ഷാലോം പള്ളി അഡ്മിൻ വർക്ക്‌സ്‌പേസ്",
     "shalomMember": "ഷാലോം അംഗ വർക്ക്‌സ്‌പേസ്",
-    "toggleNavigation": "Toggle navigation",
-    "switchChurch": "പള്ളി മാറ്റുക"
+    "toggleNavigation": "Toggle navigation"
   },
   "dashboard": {
     "welcomeUser": "സ്വാഗതം, {{name}}.",
@@ -247,21 +233,7 @@
     "subscriptionDuePayment": "Subscription Due Payment",
     "month": "മാസം",
     "months": "മാസങ്ങൾ",
-    "pendingMonths": "ബാക്കി മാസങ്ങൾ",
-    "paymentSuccessTitle": "പേയ്‌മെന്റ് വിജയകരം!",
-    "amountPaid": "അടച്ച തുക",
-    "transactionId": "ഇടപാട് ഐഡി",
-    "paidOn": "അടച്ച തീയതി",
-    "paymentSuccessHint": "രസീത് നിങ്ങളുടെ പേയ്‌മെന്റ് ചരിത്രത്തിൽ സേവ് ചെയ്തിട്ടുണ്ട്.",
-    "requestCancellation": "റദ്ദാക്കൽ അഭ്യർത്ഥന",
-    "cancelWarning": "സമർപ്പിച്ചതിനുശേഷം, നിങ്ങളുടെ അഡ്മിൻ റദ്ദാക്കൽ അഭ്യർത്ഥന അവലോകനം ചെയ്യും. അംഗീകാരം ലഭിക്കുന്നതുവരെ നിങ്ങളുടെ സബ്സ്ക്രിപ്ഷൻ സജീവമായിരിക്കും.",
-    "selectSubscriptionsToPay": "പണമടയ്ക്കാൻ സബ്സ്ക്രിപ്ഷനുകൾ തിരഞ്ഞെടുക്കുക.",
-    "noDueSubscriptions": "കുടിശ്ശിക സബ്സ്ക്രിപ്ഷനുകൾ ഇല്ല.",
-    "statusActive": "സജീവം",
-    "statusOverdue": "കുടിശ്ശിക",
-    "statusPending": "തീർപ്പാക്കാത്ത",
-    "growthMetricsError": "Failed to load growth metrics.",
-    "openingPaymentGateway": "Opening payment gateway..."
+    "pendingMonths": "ബാക്കി മാസങ്ങൾ"
   },
   "profile": {
     "tabPersonal": "വ്യക്തിഗത",
@@ -406,24 +378,7 @@
     "subscriptionAmount": "സബ്‌സ്‌ക്രിപ്ഷൻ തുക",
     "memberDetails": "ലിങ്ക് ചെയ്ത അംഗ വിവരങ്ങൾ",
     "manualFamilyMember": "ഈ അംഗം ഒരു രജിസ്റ്റർ ചെയ്ത പ്രൊഫൈലുമായി ലിങ്ക് ചെയ്തിട്ടില്ല.",
-    "verifyPhoneBeforeSave": "സേവ് ചെയ്യുന്നതിന് മുമ്പ് പുതിയ ഫോൺ നമ്പർ OTP ഉപയോഗിച്ച് പരിശോധിക്കുക",
-    "deleteSpecialDateTitle": "Delete Special Date",
-    "head": "Head",
-    "occupationBusiness": "Business",
-    "occupationFarmer": "Farmer",
-    "occupationGovEmployee": "Govt. Employee",
-    "occupationHomemaker": "Homemaker",
-    "occupationOther": "Other",
-    "occupationPastor": "Pastor",
-    "occupationPrivEmployee": "Private Employee",
-    "occupationRetired": "Retired",
-    "occupationSelfEmployed": "Self-Employed",
-    "occupationStudent": "Student",
-    "occupationTeacher": "Teacher",
-    "phoneChangeVerifyFirst": "Verify the new phone number before saving.",
-    "photoRemovedSaveProfile": "Photo removed. Click Save Profile to apply.",
-    "photoSelectedSaveProfile": "Photo selected. Click Save Profile to apply.",
-    "unsaved": "Unsaved"
+    "verifyPhoneBeforeSave": "സേവ് ചെയ്യുന്നതിന് മുമ്പ് പുതിയ ഫോൺ നമ്പർ OTP ഉപയോഗിച്ച് പരിശോധിക്കുക"
   },
   "history": {
     "heading": "ചരിത്രം",
@@ -478,11 +433,7 @@
     "prayerPlaceholder": "പാസ്റ്റർമാർ എന്തിനുവേണ്ടി പ്രാർത്ഥിക്കണമെന്ന് പങ്കിടുക",
     "sendPrayerRequest": "പ്രാർത്ഥനാ അഭ്യർത്ഥന അയയ്ക്കുക",
     "prayerCallToAction": "പ്രാർത്ഥന ആവശ്യമുണ്ടോ? ഒരു പ്രാർത്ഥനാ അഭ്യർത്ഥന സമർപ്പിക്കുക, ഒരു പാസ്റ്റർ നിങ്ങൾക്കായി പ്രാർത്ഥിക്കും.",
-    "goToPrayerRequests": "പ്രാർത്ഥനാ അഭ്യർത്ഥനകളിലേക്ക് പോകുക",
-    "addToCalendar": "കലണ്ടറിലേക്ക് ചേർക്കുക",
-    "markAllRead": "എല്ലാം വായിച്ചതായി",
-    "going": "Going",
-    "interested": "Interested"
+    "goToPrayerRequests": "പ്രാർത്ഥനാ അഭ്യർത്ഥനകളിലേക്ക് പോകുക"
   },
   "prayer": {
     "selectPastor": "ഒരു പാസ്റ്ററെ തിരഞ്ഞെടുക്കുക",
@@ -558,25 +509,7 @@
     "errorVerificationFailed": "Verification failed",
     "offeringDonation": "Offering / Donation",
     "scriptureRef": "— 2 Corinthians 9:7",
-    "scriptureVerse": "\"Each of you should give what you have decided in your heart to give, not reluctantly or under compulsion, for God loves a cheerful giver.\"",
-    "selectChurch": "പള്ളി തിരഞ്ഞെടുക്കുക",
-    "chooseDiocese": "രൂപത തിരഞ്ഞെടുക്കുക",
-    "selectDiocesePlaceholder": "— രൂപത തിരഞ്ഞെടുക്കുക —",
-    "noChurchesInDiocese": "ഈ രൂപതയിൽ പള്ളികൾ കണ്ടെത്തിയില്ല.",
-    "churchSelected": "പള്ളി തിരഞ്ഞെടുത്തു",
-    "invalidEmail": "അസാധുവായ ഇമെയിൽ വിലാസം",
-    "phoneNumber": "ഫോൺ നമ്പർ",
-    "selectedChurch": "തിരഞ്ഞെടുത്ത പള്ളി",
-    "donateToAnotherChurch": "Donate to another church",
-    "donateToYourChurch": "Donate to Your Church",
-    "fundBuildingFund": "Building Fund",
-    "fundCommunityAid": "Community Aid",
-    "fundGeneralOffering": "General Offering",
-    "fundMissionOutreach": "Mission & Outreach",
-    "fundOther": "Other",
-    "fundYouthMinistry": "Youth Ministry",
-    "receiptWarning": "Please save your receipt now. As a guest donor, this receipt will not be available once you leave this page.",
-    "saveReceipt": "Save Receipt"
+    "scriptureVerse": "\"Each of you should give what you have decided in your heart to give, not reluctantly or under compulsion, for God loves a cheerful giver.\""
   },
   "home": {
     "title": "ഷാലോമിലേക്ക് സ്വാഗതം",
@@ -607,9 +540,7 @@
     "codeRequired": "പള്ളി കോഡ് ആവശ്യമാണ്. കോഡിനായി നിങ്ങളുടെ പള്ളി അഡ്മിനോട് ചോദിക്കുക.",
     "codeMustBe8Digits": "പള്ളി കോഡ് കൃത്യമായി 8 അക്കങ്ങൾ ആയിരിക്കണം.",
     "joinButton": "പള്ളിയിൽ ചേരുക",
-    "errorJoinFailed": "Failed to join church.",
-    "noCodeHint": "കോഡ് ഇല്ലേ? നിങ്ങളുടെ ചർച്ച് അഡ്മിനിസ്ട്രേറ്ററോട് ചോദിക്കുക.",
-    "exploreChurches": "പള്ളികൾ പര്യവേക്ഷണം ചെയ്യുക"
+    "errorJoinFailed": "Failed to join church."
   },
   "admin": {
     "console": "കൺസോൾ",
@@ -668,9 +599,7 @@
     "pushSms": "Push / SMS",
     "refundRequests": "Refund Requests",
     "saasPlatform": "SaaS Platform",
-    "specialDates": "Special Dates",
-    "donationLinksQR": "Donation Links & QR",
-    "searchTools": "Search tools..."
+    "specialDates": "Special Dates"
   },
   "relations": {
     "spouse": "ഭർത്താവ്/ഭാര്യ",
@@ -696,7 +625,6 @@
   },
   "settings": {
     "title": "ക്രമീകരണങ്ങൾ",
-    "editProfile": "പ്രൊഫൈൽ എഡിറ്റ് ചെയ്യുക",
     "lightMode": "ലൈറ്റ് മോഡ്",
     "darkMode": "ഡാർക്ക് മോഡ്",
     "switchToLight": "ലൈറ്റിലേക്ക് മാറുക",
@@ -723,26 +651,7 @@
     "deleteWarning2": "സജീവ സബ്‌സ്‌ക്രിപ്‌ഷനുകൾ ഉടൻ റദ്ദാക്കപ്പെടും.",
     "deleteWarning3": "നിങ്ങളുടെ അക്കൗണ്ടിലേക്ക് ലിങ്ക് ചെയ്ത കുടുംബാംഗങ്ങൾ അൺലിങ്ക് ചെയ്യപ്പെടും.",
     "deleteWarning4": "അഡ്‌മിൻ അംഗീകരിച്ചാൽ ഈ പ്രവർത്തനം പഴയപടിയാക്കാൻ കഴിയില്ല.",
-    "deleteWarningTitle": "മുന്നറിയിപ്പ്: ഈ പ്രവർത്തനത്തിന് ഗുരുതരമായ പ്രത്യാഘാതങ്ങളുണ്ട്",
-    "typeDeleteToConfirm": "സ്ഥിരീകരിക്കാൻ DELETE ടൈപ്പ് ചെയ്യുക",
-    "signOutConfirmTitle": "സൈൻ ഔട്ട്?",
-    "signOutConfirmDesc": "നിങ്ങളുടെ അക്കൗണ്ടിൽ നിന്ന് ഉറപ്പായും സൈൻ ഔട്ട് ചെയ്യണോ?",
-    "deleteReasonMinLength": "Please provide at least 10 characters.",
-    "goToProfile": "Go to Profile",
-    "exportMyData": "Export My Data",
-    "exportMyDataHint": "Download all your personal data (profile, subscriptions, payments) as a JSON file.",
-    "downloadData": "Download",
-    "exportSuccess": "Your data has been downloaded successfully.",
-    "exportFailed": "Failed to export data. Please try again.",
-    "pushBlockedInstructions": "To enable: open your browser settings → Site Settings → Notifications → allow this site.",
-    "notifyCat_announcements": "Announcements",
-    "notifyCat_events": "Events & Calendar",
-    "notifyCat_family": "Family & Membership",
-    "notifyCat_payments": "Payments & Subscriptions",
-    "notifyCat_prayer": "Prayer Requests",
-    "notifyCategories": "Notification Categories",
-    "off": "Off",
-    "on": "On"
+    "deleteWarningTitle": "മുന്നറിയിപ്പ്: ഈ പ്രവർത്തനത്തിന് ഗുരുതരമായ പ്രത്യാഘാതങ്ങളുണ്ട്"
   },
   "banner": {
     "pushPrompt": "🔔 അറിയിപ്പുകളും ഓർമ്മപ്പെടുത്തലുകളും ലഭിക്കാൻ പുഷ് അറിയിപ്പുകൾ പ്രവർത്തനക്ഷമമാക്കുക.",
@@ -937,10 +846,7 @@
       "impactEvents": "Events:",
       "impactNotifications": "Notifications:",
       "impactPrayerRequests": "Prayer Requests:",
-      "impactPayments": "Payments:",
-      "downloadQr": "Download QR",
-      "generateJoinQr": "Generate Join QR Code",
-      "joinQrHint": "Members can scan this QR code with their phone camera to join your church."
+      "impactPayments": "Payments:"
     },
     "createChurch": {
       "title": "Create Church",
@@ -1115,7 +1021,13 @@
       "errorNoField": "At least one field to update is required.",
       "errorNoSubscriptions": "This member has no subscriptions.",
       "errorLoadFailed": "Failed to load member subscriptions",
-      "successUpdated": "Subscription updated."
+      "successUpdated": "Subscription updated.",
+      "pauseSubButton": "Pause",
+      "pausing": "Pausing…",
+      "pauseSubscriptionTitle": "Pause subscription?",
+      "pauseSubscriptionMessage": "This will temporarily stop reminders and due tracking. You can resume it anytime.",
+      "pauseKeyword": "PAUSE",
+      "successPaused": "Subscription paused."
     },
     "events": {
       "title": "Events & Notifications",
@@ -1128,16 +1040,16 @@
       "addressHeader": "Address",
       "selectButton": "Select",
       "eventsToggle": "Events",
-      "notificationsToggle": "അറിയിപ്പുകൾ",
+      "notificationsToggle": "Notifications",
       "newEvent": "New Event",
-      "newNotification": "പുതിയ അറിയിപ്പ്",
+      "newNotification": "New Notification",
       "editEvent": "Edit Event",
-      "editNotification": "അറിയിപ്പ് എഡിറ്റ് ചെയ്യുക",
+      "editNotification": "Edit Notification",
       "createEvent": "Create Event",
-      "createNotification": "അറിയിപ്പ് സൃഷ്ടിക്കുക",
+      "createNotification": "Create Notification",
       "titleLabel": "Title",
       "titlePlaceholderEvent": "Sunday Service",
-      "titlePlaceholderNotification": "പ്രധാന അറിയിപ്പ്",
+      "titlePlaceholderNotification": "Important Notice",
       "messageLabel": "Message",
       "messagePlaceholder": "Details...",
       "eventDateLabel": "Event Date",
@@ -1152,21 +1064,15 @@
       "createdHeader": "Created",
       "actionsHeader": "Actions",
       "noEventsYet": "No events yet.",
-      "noNotificationsYet": "ഇതുവരെ അറിയിപ്പുകളൊന്നുമില്ല.",
+      "noNotificationsYet": "No notifications yet.",
       "errorTitleMessageRequired": "Title and message are required.",
       "errorUploadFailed": "Failed to upload image",
       "successEventCreated": "Event created.",
       "successEventUpdated": "Event updated.",
       "successEventDeleted": "Event deleted.",
-      "successNotificationCreated": "അറിയിപ്പ് സൃഷ്ടിച്ചു.",
-      "successNotificationUpdated": "അറിയിപ്പ് അപ്ഡേറ്റ് ചെയ്തു.",
-      "successNotificationDeleted": "അറിയിപ്പ് ഇല്ലാതാക്കി.",
-      "confirmDeleteEvent": "ഈ ഇവന്റ് ഉറപ്പായും ഇല്ലാതാക്കണോ?",
-      "confirmDeleteNotification": "ഈ അറിയിപ്പ് ഇല്ലാതാക്കണോ?",
-      "endTimeLabel": "End Time",
-      "locationHeader": "Location",
-      "locationLabel": "Location",
-      "locationPlaceholder": "e.g. Church Main Hall, 123 Main St"
+      "successNotificationCreated": "Notification created.",
+      "successNotificationUpdated": "Notification updated.",
+      "successNotificationDeleted": "Notification deleted."
     },
     "export": {
       "title": "Data Export",
@@ -1197,9 +1103,7 @@
       "emptyDescription": "Family member addition requests will appear here.",
       "errorLoadFailed": "Failed to load family requests",
       "successApproved": "Family request approved.",
-      "successRejected": "Family request rejected.",
-      "memberIdLabel": "അംഗ ഐഡി:",
-      "familyCountLabel": "കുടുംബാംഗങ്ങൾ:"
+      "successRejected": "Family request rejected."
     },
     "incomeDashboard": {
       "title": "Income Dashboard",
@@ -1468,10 +1372,7 @@
       "emptyTitle": "No payments found",
       "emptyDescription": "This member has no recorded payments yet.",
       "errorSelectMember": "Please select a member first.",
-      "errorDownloadFailed": "Failed to download receipt",
-      "filterByPerson": "വ്യക്തിയുടെ പേര് പ്രകാരം ഫിൽട്ടർ",
-      "paginationInfo": "അവരോഹണ ക്രമത്തിൽ ഓരോ പേജിലും 10 എൻട്രികൾ കാണിക്കുന്നു.",
-      "loadFailed": "പേയ്‌മെന്റ് ചരിത്രം ലോഡ് ചെയ്യാനായില്ല"
+      "errorDownloadFailed": "Failed to download receipt"
     },
     "platformRazorpay": {
       "title": "Platform Razorpay Configuration",
@@ -1486,9 +1387,7 @@
       "configLoadedSuccess": "Platform config loaded.",
       "configSavedSuccess": "Platform Razorpay config saved.",
       "statusConfigured": "Configured — churches can pay platform fees online",
-      "statusNotConfigured": "Not configured — set both Key ID and Key Secret to enable online SaaS payments",
-      "donationFeeLabel": "പൊതു സംഭാവന പ്ലാറ്റ്ഫോം ഫീസ് (%)",
-      "donationFeeHint": "പൊതു (അംഗമല്ലാത്ത) സംഭാവനകളിൽ ഈടാക്കുന്ന ഫീസ് ശതമാനം. പ്രവർത്തനരഹിതമാക്കാൻ 0 നൽകുക."
+      "statusNotConfigured": "Not configured — set both Key ID and Key Secret to enable online SaaS payments"
     },
     "preRegister": {
       "title": "Pre-register Member",
@@ -1585,12 +1484,7 @@
       "pillSent": "Sent",
       "pillFailed": "Failed",
       "pillCancelled": "Cancelled",
-      "charsCount": "{{count}}/320 characters",
-      "confirmSend": "ഈ അറിയിപ്പ് {{target}} ലേക്ക് അയയ്ക്കണോ?",
-      "confirmTargetMember": "തിരഞ്ഞെടുത്ത അംഗം",
-      "confirmTargetChurch": "തിരഞ്ഞെടുത്ത പള്ളിയിലെ എല്ലാ അംഗങ്ങൾ",
-      "confirmTargetDiocese": "തിരഞ്ഞെടുത്ത രൂപതയിലെ എല്ലാ അംഗങ്ങൾ",
-      "confirmTargetAll": "എല്ലാ അംഗങ്ങളും ആഗോളമായി"
+      "charsCount": "{{count}}/320 characters"
     },
     "refundRequests": {
       "title": "Refund Requests",
@@ -1689,8 +1583,7 @@
       "grantPhoneLabel": "Phone Number",
       "grantPhoneRequired": "Phone number is required.",
       "revokePhoneLabel": "Phone Number",
-      "revokePhoneRequired": "Phone number is required.",
-      "alreadyAdmin": "This user is already an admin."
+      "revokePhoneRequired": "Phone number is required."
     },
     "saasSettings": {
       "title": "Platform Settings",
@@ -1810,18 +1703,6 @@
       "successReviewed": "Deletion request {{decision}}.",
       "title": "Account Deletion Requests",
       "unknownMember": "Unknown Member"
-    },
-    "donationLinks": {
-      "title": "സംഭാവന ലിങ്കുകൾ & QR കോഡുകൾ",
-      "description": "നിങ്ങളുടെ പള്ളിക്കായി പങ്കിടാവുന്ന സംഭാവന ലിങ്കുകളും QR കോഡുകളും സൃഷ്ടിക്കുക.",
-      "diocese": "രൂപത",
-      "selectDiocese": "— രൂപത തിരഞ്ഞെടുക്കുക —",
-      "church": "പള്ളി",
-      "selectChurch": "— പള്ളി തിരഞ്ഞെടുക്കുക —",
-      "fund": "ഫണ്ട്",
-      "donationLink": "സംഭാവന ലിങ്ക്",
-      "qrCode": "QR കോഡ്",
-      "downloadQR": "QR കോഡ് ഡൗൺലോഡ്"
     }
   },
   "photo": {
@@ -1909,50 +1790,14 @@
     "shalomHelpsYou": "Shalom helps you to",
     "signInToJoin": "Sign in to join →",
     "whyIntro": "Shalom is an all-in-one church management app that helps your church stay connected, organized, and future-ready. Built to bring your entire congregation closer together.",
-    "whyShalom": "Why Shalom?",
-    "churchCode": "Church Code",
-    "members": "members"
+    "whyShalom": "Why Shalom?"
   },
   "historyPage": {
-    "errorDownloadReceiptFailed": "രസീത് ഡൗൺലോഡ് പരാജയപ്പെട്ടു.",
-    "title": "പേയ്‌മെന്റ് ചരിത്രം",
-    "subtitle": "നിങ്ങളുടെ കുടുംബത്തിന്റെ പേയ്‌മെന്റ് രേഖകൾ കാണുക.",
-    "allFamilyMembers": "എല്ലാ കുടുംബാംഗങ്ങൾ",
-    "selectPerson": "വ്യക്തിയെ തിരഞ്ഞെടുക്കുക",
-    "newerEntries": "പുതിയ",
-    "olderEntries": "പഴയ",
-    "monthAndYear": "മാസം & വർഷം",
-    "paidAmount": "അടച്ച തുക",
-    "paidBy": "അടച്ചയാൾ",
-    "paidDate": "അടച്ച തീയതി",
-    "downloadReceipt": "രസീത് ഡൗൺലോഡ്",
-    "downloadBtn": "ഡൗൺലോഡ്",
-    "receipt": "രസീത്",
-    "noEntries": "പേയ്‌മെന്റ് ചരിത്രം കണ്ടെത്തിയില്ല.",
-    "paginationInfo": "{{start}}–{{end}} / {{total}} കാണിക്കുന്നു",
-    "errorLoadFailed": "പേയ്‌മെന്റ് ചരിത്രം ലോഡ് ചെയ്യാനായില്ല.",
-    "goToDashboard": "ഡാഷ്ബോർഡിലേക്ക് പോകുക",
-    "refundHint": "റീഫണ്ടിനായി, ദയവായി നിങ്ങളുടെ ചർച്ച് അഡ്മിനിസ്ട്രേറ്ററെ ബന്ധപ്പെടുക.",
-    "adminNote": "Admin Note",
-    "myRefundRequests": "My Refund Requests",
-    "refund": "Refund",
-    "refundReasonLabel": "Reason for refund",
-    "refundReasonPlaceholder": "Please explain why you want a refund...",
-    "refundRequestFailed": "Failed to submit refund request.",
-    "refundRequestInfo": "Your request will be reviewed by the church administrator. Refunds are subject to approval.",
-    "refundRequestSubmitted": "Refund request submitted successfully.",
-    "requestRefund": "Request Refund",
-    "requestRefundTitle": "Request a Refund",
-    "submitRefundRequest": "Submit Refund Request",
-    "status": "സ്ഥിതി",
-    "statusPaid": "അടച്ചു",
-    "statusUnpaid": "ബാക്കി",
-    "statusImported": "ഇറക്കുമതി"
+    "errorDownloadReceiptFailed": "രസീത് ഡൗൺലോഡ് പരാജയപ്പെട്ടു."
   },
   "checkout": {
     "title": "പേയ്‌മെന്റ് സംഗ്രഹം",
     "subtotal": "ഉപ ആകെ",
-    "feeExplanation": "നിങ്ങൾ നൽകുമ്പോൾ, ഒരു ചെറിയ ഭാഗം നിങ്ങളുടെ കാണിക്കയെ മുന്നോട്ട് കൊണ്ടുപോകുന്ന മാർഗങ്ങളെ പിന്തുണയ്ക്കുന്നു, നിങ്ങളുടെ സമ്മാനം സഭയിൽ പൂർണ്ണമായും തടസ്സമില്ലാതെയും എത്തുന്നുവെന്ന് ഉറപ്പാക്കുന്നു.",
     "processingFee": "പ്രോസസ്സിംഗ് ഫീസ് ({{percent}}%)",
     "waived": "ഒഴിവാക്കി",
     "total": "മൊത്തം തുക",
@@ -1973,12 +1818,5 @@
   },
   "offline": {
     "message": "നിങ്ങള് ഓഫ്ലൈനാണ്. ചില ഫീച്ചറുകള് ലഭ്യമായേക്കില്ല."
-  },
-  "churchPicker": {
-    "title": "നിങ്ങളുടെ പള്ളി തിരഞ്ഞെടുക്കുക",
-    "subtitle": "നിങ്ങൾ ഒന്നിലധികം പള്ളികളിൽ അംഗമാണ്. തുടരാൻ ഒന്ന് തിരഞ്ഞെടുക്കുക.",
-    "unnamedChurch": "പേരില്ലാത്ത പള്ളി",
-    "admin": "അഡ്മിൻ",
-    "member": "അംഗം"
   }
 }

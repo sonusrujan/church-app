@@ -164,11 +164,13 @@ router.get("/activity", requireAuth, requireRegisteredUser, async (req: AuthRequ
 
     const limit = Math.min(Number(req.query.limit) || 50, 200);
     const offset = Math.max(Number(req.query.offset) || 0, 0);
+    const memberId = typeof req.query.member_id === "string" ? req.query.member_id.trim() : null;
 
     const events = await listChurchActivityEvents(
       isSuper && !churchId ? null : churchId,
       limit,
       offset,
+      memberId || undefined,
     );
     return res.json(events);
   } catch (err: any) {

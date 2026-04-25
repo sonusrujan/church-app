@@ -4,14 +4,13 @@ import { Search, Church, Users, Bell, Heart, CreditCard, Shield, Globe, Mail, Ar
 import shalomLogo from "../assets/shalom-logo.png";
 import { useI18n } from "../i18n";
 import { usePageMeta } from "../hooks/usePageMeta";
-import { apiRequest } from "../lib/api";
+
+const API = import.meta.env.VITE_API_URL || "http://localhost:4000";
 
 interface ChurchResult {
   name: string;
-  church_code: string | null;
   address: string | null;
   location: string | null;
-  member_count: number;
 }
 
 const MEMBER_FEATURES = [
@@ -74,8 +73,12 @@ export default function ExplorePage({ isLoggedIn }: { isLoggedIn?: boolean }) {
     setLoading(true);
     setSearched(true);
     try {
-      const data = await apiRequest<ChurchResult[]>(`/api/churches/public-search?query=${encodeURIComponent(q)}`);
-      setResults(data);
+      const res = await fetch(`${API}/api/churches/public-search?query=${encodeURIComponent(q)}`);
+      if (res.ok) {
+        setResults(await res.json());
+      } else {
+        setResults([]);
+      }
     } catch {
       setResults([]);
     } finally {
@@ -164,16 +167,8 @@ export default function ExplorePage({ isLoggedIn }: { isLoggedIn?: boolean }) {
                         </div>
                         <div className="explore-result-info">
                           <span className="explore-result-name">{c.name}</span>
-                          {c.church_code && (
-                            <span className="explore-result-code" style={{ fontSize: "0.8rem", color: "var(--primary)", fontWeight: 600 }}>{t("explore.churchCode")}: {c.church_code}</span>
-                          )}
                           {(c.address || c.location) && (
                             <span className="explore-result-loc">{c.address || c.location}</span>
-                          )}
-                          {c.member_count > 0 && (
-                            <span className="explore-result-loc" style={{ fontSize: "0.8rem" }}>
-                              <Users size={13} style={{ verticalAlign: "middle" }} /> {c.member_count} {t("explore.members")}
-                            </span>
                           )}
                         </div>
                         <CheckCircle size={18} className="explore-result-check" />

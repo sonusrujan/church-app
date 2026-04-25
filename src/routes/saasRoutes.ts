@@ -29,6 +29,7 @@ import {
   verifyPayment,
   fetchRazorpayOrder,
 } from "../services/paymentService";
+import { db } from "../services/dbClient";
 
 const router = Router();
 
@@ -110,7 +111,7 @@ router.get("/subscription/:churchId", requireAuth, requireRegisteredUser, requir
 
 router.post("/subscription", requireAuth, requireRegisteredUser, requireSuperAdmin, async (req: AuthRequest, res) => {
   try {
-    const { church_id, amount, billing_cycle } = req.body;
+    const { church_id, amount, billing_cycle, start_date } = req.body;
     if (!church_id || !UUID_REGEX.test(church_id)) {
       return res.status(400).json({ error: "Valid church_id is required" });
     }
@@ -121,10 +122,11 @@ router.post("/subscription", requireAuth, requireRegisteredUser, requireSuperAdm
       church_id,
       amount: Number(amount),
       billing_cycle: billing_cycle || "monthly",
+      start_date: typeof start_date === "string" && start_date.trim() ? start_date.trim() : undefined,
     });
 
-    logSuperAdminAudit(req, "church_subscription.create", { church_id, amount });
-    persistAuditLog(req, "church_subscription.create", "church_subscription", sub.id, { church_id, amount });
+    logSuperAdminAudit(req, "church_subscription.create", { church_id, amount, start_date: start_date || null });
+    persistAuditLog(req, "church_subscription.create", "church_subscription", sub.id, { church_id, amount, start_date: start_date || null });
 
     return res.json(sub);
   } catch (err: any) {
@@ -167,7 +169,7 @@ router.get("/overview", requireAuth, requireRegisteredUser, requireSuperAdmin, a
 
 router.post("/payment", requireAuth, requireRegisteredUser, requireSuperAdmin, async (req: AuthRequest, res) => {
   try {
-    const { church_subscription_id, church_id, amount, payment_method, transaction_id, note } = req.body;
+    const { church_subscription_id, church_id, amount, payment_method, transaction_id, note, payment_date } = req.body;
     if (!church_subscription_id || !church_id || !amount) {
       return res.status(400).json({ error: "church_subscription_id, church_id, and amount are required" });
     }
@@ -178,10 +180,11 @@ router.post("/payment", requireAuth, requireRegisteredUser, requireSuperAdmin, a
       payment_method,
       transaction_id,
       note,
+      payment_date: typeof payment_date === "string" && payment_date.trim() ? payment_date.trim() : undefined,
     });
 
-    logSuperAdminAudit(req, "church_subscription.payment", { church_id, amount });
-    persistAuditLog(req, "church_subscription.payment", "church_subscription_payment", payment.id, { church_id, amount });
+    logSuperAdminAudit(req, "church_subscription.payment", { church_id, amount, payment_date: payment_date || null });
+    persistAuditLog(req, "church_subscription.payment", "church_subscription_payment", payment.id, { church_id, amount, payment_date: payment_date || null });
 
     return res.json(payment);
   } catch (err: any) {
@@ -310,6 +313,25 @@ router.post("/pay/order", requireAuth, requireRegisteredUser, async (req: AuthRe
       church_id: churchId,
       church_subscription_id: subscription.id,
     });
+
+    // Record the pending order so the Razorpay webhook can reconcile this
+    // payment if the synchronous /pay/verify call is never made (e.g. browser
+    // closed after Razorpay success, cross-origin handoff failure).
+    const { error: pendingErr } = await db
+      .from("church_subscription_pending_orders")
+      .insert({
+        razorpay_order_id: order.id,
+        church_subscription_id: subscription.id,
+        church_id: churchId,
+        expected_amount: amount,
+      });
+    if (pendingErr) {
+      // Non-fatal: order still works via /pay/verify. Just log — duplicate
+      // inserts (23505) happen on retry and are safe.
+      if (pendingErr.code !== "23505") {
+        logger.warn({ err: pendingErr, order_id: order.id }, "Failed to record pending SaaS order");
+      }
+    }
 
     return res.json({
       order,

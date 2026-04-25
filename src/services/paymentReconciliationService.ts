@@ -3,6 +3,18 @@ import { logger } from "../utils/logger";
 import { fetchRazorpayOrder } from "./paymentService";
 import { getEffectivePaymentConfig } from "./churchPaymentService";
 
+const RAZORPAY_FETCH_TIMEOUT_MS = 15_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    promise.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); },
+    );
+  });
+}
+
 /**
  * Payment Reconciliation Service (4.1)
  *
@@ -53,10 +65,14 @@ export async function reconcilePendingPayments(): Promise<{
           return "failed" as const;
         }
 
-        const order = await fetchRazorpayOrder(item.razorpay_order_id, {
-          key_id: config.key_id,
-          key_secret: config.key_secret,
-        });
+        const order = await withTimeout(
+          fetchRazorpayOrder(item.razorpay_order_id, {
+            key_id: config.key_id,
+            key_secret: config.key_secret,
+          }),
+          RAZORPAY_FETCH_TIMEOUT_MS,
+          `Razorpay fetch for order ${item.razorpay_order_id}`,
+        );
 
         if (order.status === "paid") {
           const { data: existing } = await db

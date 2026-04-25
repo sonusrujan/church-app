@@ -14,18 +14,23 @@ html, body {
   overflow-x: hidden;
   overscroll-behavior-x: none;
   -webkit-text-size-adjust: 100%;
-}
-
-/* ── iOS safe areas for notched devices ── */
-body {
-  padding-top: env(safe-area-inset-top, 0);
-  padding-left: env(safe-area-inset-left, 0);
-  padding-right: env(safe-area-inset-right, 0);
+  /* iOS PWA: lock viewport height so the keyboard / address-bar collapse
+     doesn't leave a white gap at the bottom of the home screen */
+  background: var(--surface, #EDE6ED);
 }
 
 @media (max-width: 768px) {
   html {
     touch-action: pan-y;
+  }
+}
+
+/* ── PWA standalone (home-screen / TWA) tweaks ── */
+@media (display-mode: standalone) {
+  html, body {
+    /* Fill the entire screen including the area behind the notch / status bar */
+    min-height: 100vh;
+    min-height: 100dvh;
   }
 }
 
@@ -63,6 +68,9 @@ body {
   left: 0;
   right: 0;
   padding: 8px 16px;
+  padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  padding-left: calc(16px + env(safe-area-inset-left, 0px));
+  padding-right: calc(16px + env(safe-area-inset-right, 0px));
   background: var(--warning, #E8C84A);
   color: #1a1a1a;
   text-align: center;
@@ -395,7 +403,6 @@ html {
 
 body {
   min-height: 100vh;
-  min-height: 100dvh;
   background: var(--surface);
   font-family: "Inter", system-ui, -apple-system, sans-serif;
   font-size: 15px;
@@ -546,7 +553,6 @@ pre {
 .auth-shell {
   display: flex;
   min-height: 100vh;
-  min-height: 100dvh;
   flex-direction: column;
   align-items: center;
   justify-content: center;
@@ -787,7 +793,6 @@ pre {
 
 .app-layout {
   min-height: 100vh;
-  min-height: 100dvh;
   display: flex;
   flex-direction: row;
 }
@@ -802,8 +807,10 @@ pre {
   flex-direction: column;
   width: var(--sidebar-width);
   height: 100vh;
-  height: 100dvh;
   padding: 1.25rem 0.75rem;
+  padding-top: calc(1.25rem + env(safe-area-inset-top, 0px));
+  padding-bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px));
+  padding-left: calc(0.75rem + env(safe-area-inset-left, 0px));
   gap: 1.5rem;
   background: var(--surface-container-lowest);
   border-right: 1px solid var(--outline-variant);
@@ -824,6 +831,9 @@ pre {
   background: var(--surface);
   overflow-y: auto;
   margin-left: var(--sidebar-width);
+  /* Honour right-edge safe area on landscape iOS */
+  padding-right: env(safe-area-inset-right, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 .brand-block {
@@ -1215,10 +1225,6 @@ pre {
   .panel {
     padding: 1.25rem;
     border-radius: 1.5rem;
-    overflow-x: hidden;
-    max-width: 100%;
-    box-sizing: border-box;
-    word-break: break-word;
   }
 }
 
@@ -1420,8 +1426,6 @@ pre {
 }
 
 .list-item {
-  display: block !important;
-  list-style: none;
   border-radius: var(--radius-md);
   border: 1px solid rgba(196, 198, 205, 0.15);
   background: var(--surface-container-lowest);
@@ -1453,45 +1457,6 @@ pre {
 
 .field-stack > * + * {
   margin-top: 1rem;
-}
-
-.field-label {
-  font-size: 0.9375rem;
-  font-weight: 500;
-  color: var(--on-surface);
-  margin: 0;
-}
-
-.checkbox-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.9375rem;
-  font-weight: 400;
-  cursor: pointer;
-}
-
-.checkbox-row input[type="checkbox"] {
-  width: auto;
-  flex-shrink: 0;
-}
-
-.checkbox-row.disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.months-scroll-box {
-  margin-top: 0.6rem;
-  max-height: 14rem;
-  overflow-y: auto;
-  border: 1px solid var(--outline-variant, #ddd);
-  border-radius: var(--radius-sm);
-  padding: 0.625rem;
-  background: var(--surface-container-lowest, #fff);
-  display: flex;
-  flex-direction: column;
-  gap: 0.375rem;
 }
 
 /* ── Detail Rows (profile read-only view) ── */
@@ -2082,7 +2047,6 @@ pre {
 
 .admin-content {
   min-width: 0;
-  overflow-x: hidden;
 }
 
 .admin-content > .panel {
@@ -2259,107 +2223,48 @@ pre {
 }
 
 /* ═══════════════════════════════════════════
-   Responsive Navigation — Production Drawer
+   Responsive Navigation
    ═══════════════════════════════════════════ */
 
-/* Burger button — hidden on desktop, top-left on mobile */
 .hamburger-btn {
   display: none;
   background: none;
   border: none;
   cursor: pointer;
-  padding: 8px;
+  padding: 6px;
   color: var(--on-surface);
-  z-index: 210;
-  -webkit-tap-highlight-color: transparent;
-}
-
-/* Floating burger (used on mobile at top-left, hidden on desktop) */
-.floating-burger {
-  display: none;
-}
-
-/* Backdrop — always present, opacity-animated, hidden on desktop */
-.nav-backdrop {
-  display: none;
+  margin-left: auto;
 }
 
 @media (max-width: 768px) {
-  /* ── Floating burger at top-left ── */
-  .floating-burger {
+  .hamburger-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-    position: fixed;
-    top: 10px;
-    left: 10px;
-    z-index: 250;
-    width: 42px;
-    height: 42px;
-    border-radius: 12px;
-    border: none;
-    cursor: pointer;
-    background: var(--surface-container-lowest, #fff);
-    color: var(--on-surface);
-    box-shadow: 0 2px 8px rgba(0,0,0,0.12), 0 1px 3px rgba(0,0,0,0.08);
-    transition: transform 0.2s ease, background 0.3s ease, color 0.3s ease, box-shadow 0.3s ease;
-    -webkit-tap-highlight-color: transparent;
   }
 
-  .floating-burger:active {
-    transform: scale(0.92);
-  }
-
-  /* Open state — hide burger when sidebar is showing (logo area conflict) */
-  .floating-burger.fab-open {
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.2s ease;
-  }
-
-  /* Smooth icon rotation on open/close */
-  .floating-burger svg {
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-  .floating-burger.fab-open svg {
-    transform: rotate(90deg);
-  }
-
-  /* Make room for burger button in topbar */
-  .topbar {
-    padding-left: 60px !important;
-  }
-
-  /* ── Sidebar: left-to-right slide drawer ── */
   .sidebar {
     position: fixed;
     top: 0;
     left: 0;
-    width: 280px;
-    height: 100vh;
-    height: 100dvh;
+    width: 100%;
+    height: auto;
     max-height: 100vh;
     flex-direction: column;
-    padding: 1rem 0.75rem;
-    gap: 0.5rem;
-    z-index: 240;
-    background: var(--surface-container-lowest, rgba(255, 255, 255, 0.98));
-    border-right: 1px solid rgba(0, 0, 0, 0.08);
-    overflow-y: auto;
-    overflow-x: hidden;
-    overscroll-behavior: contain;
-    -webkit-overflow-scrolling: touch;
-    transform: translateX(-100%);
-    visibility: hidden;
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), visibility 0s 0.3s;
-    box-shadow: none;
-  }
-
-  .sidebar.sidebar-open {
-    transform: translateX(0);
-    visibility: visible;
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), visibility 0s 0s;
-    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.12);
+    padding: 0.4rem 0.75rem;
+    /* Push the brand block below the iOS notch / Android status bar */
+    padding-top: calc(0.4rem + env(safe-area-inset-top, 0px));
+    padding-left: calc(0.75rem + env(safe-area-inset-left, 0px));
+    padding-right: calc(0.75rem + env(safe-area-inset-right, 0px));
+    gap: 0.25rem;
+    z-index: 200;
+    background: rgba(237, 230, 237, 0.97);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-right: none;
+    border-bottom: 1px solid rgba(220, 208, 255, 0.40);
+    overflow-y: hidden;
+    transition: height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .brand-block {
@@ -2378,42 +2283,45 @@ pre {
     font-size: 1rem;
   }
 
-  /* Hide inline hamburger — using floating burger instead */
-  .hamburger-btn {
-    display: none !important;
-  }
-
-  /* nav-stack always visible when sidebar is open (no separate toggle) */
   .nav-stack {
-    max-height: none;
-    opacity: 1;
-    overflow: visible;
+    max-height: 0;
+    opacity: 0;
+    overflow: hidden;
     flex-direction: column;
     width: 100%;
     align-items: stretch;
+    transition: max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 0.25s ease;
   }
 
-  .nav-stack .nav-link,
-  .nav-stack .sidebar-user-badge,
-  .nav-stack .nav-section-label {
+  .nav-stack.nav-open {
+    max-height: calc(100vh - 3.5rem);
+    opacity: 1;
+    overflow-y: auto;
+    padding-bottom: 0.5rem;
+  }
+
+  .nav-stack.nav-open .nav-link,
+  .nav-stack.nav-open .sidebar-user-badge,
+  .nav-stack.nav-open .nav-section-label {
     animation: navItemSlideIn 0.3s ease both;
   }
-  .nav-stack > :nth-child(1) { animation-delay: 0.03s; }
-  .nav-stack > :nth-child(2) { animation-delay: 0.06s; }
-  .nav-stack > :nth-child(3) { animation-delay: 0.09s; }
-  .nav-stack > :nth-child(4) { animation-delay: 0.12s; }
-  .nav-stack > :nth-child(5) { animation-delay: 0.15s; }
-  .nav-stack > :nth-child(6) { animation-delay: 0.18s; }
-  .nav-stack > :nth-child(7) { animation-delay: 0.21s; }
-  .nav-stack > :nth-child(8) { animation-delay: 0.24s; }
-  .nav-stack > :nth-child(9) { animation-delay: 0.27s; }
-  .nav-stack > :nth-child(10) { animation-delay: 0.30s; }
-  .nav-stack > :nth-child(11) { animation-delay: 0.33s; }
-  .nav-stack > :nth-child(12) { animation-delay: 0.36s; }
+  .nav-stack.nav-open > :nth-child(1) { animation-delay: 0.03s; }
+  .nav-stack.nav-open > :nth-child(2) { animation-delay: 0.06s; }
+  .nav-stack.nav-open > :nth-child(3) { animation-delay: 0.09s; }
+  .nav-stack.nav-open > :nth-child(4) { animation-delay: 0.12s; }
+  .nav-stack.nav-open > :nth-child(5) { animation-delay: 0.15s; }
+  .nav-stack.nav-open > :nth-child(6) { animation-delay: 0.18s; }
+  .nav-stack.nav-open > :nth-child(7) { animation-delay: 0.21s; }
+  .nav-stack.nav-open > :nth-child(8) { animation-delay: 0.24s; }
+  .nav-stack.nav-open > :nth-child(9) { animation-delay: 0.27s; }
+  .nav-stack.nav-open > :nth-child(10) { animation-delay: 0.30s; }
+  .nav-stack.nav-open > :nth-child(11) { animation-delay: 0.33s; }
+  .nav-stack.nav-open > :nth-child(12) { animation-delay: 0.36s; }
 
   @keyframes navItemSlideIn {
-    from { opacity: 0; transform: translateX(-12px); }
-    to   { opacity: 1; transform: translateX(0); }
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
   }
 
   .sidebar-user-badge {
@@ -2454,36 +2362,35 @@ pre {
     padding-top: 0;
   }
 
-  /* Main area — no sidebar push, leave room for bottom nav */
   .main-area {
     margin-left: 0;
-    padding-top: 0.5rem;
-    padding-bottom: 90px;
+    /* Account for fixed mobile top bar plus the iOS notch */
+    padding-top: calc(3.5rem + env(safe-area-inset-top, 0px));
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
-  /* ── Backdrop — full-screen, animated, blocks ALL touch ── */
   .nav-backdrop {
     display: block;
     position: fixed;
     inset: 0;
-    z-index: 230;
-    background: rgba(0, 0, 0, 0.45);
+    z-index: 150;
+    background: rgba(0, 0, 0, 0.35);
     backdrop-filter: blur(2px);
     -webkit-backdrop-filter: blur(2px);
-    opacity: 0;
-    visibility: hidden;
-    pointer-events: none;
-    transition: opacity 0.3s ease, visibility 0s 0.3s;
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
+    animation: backdropFadeIn 0.25s ease;
   }
 
-  .nav-backdrop.nav-backdrop-visible {
-    opacity: 1;
-    visibility: visible;
-    pointer-events: auto;
-    transition: opacity 0.3s ease, visibility 0s 0s;
+  @keyframes backdropFadeIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
   }
+}
+
+/* Hide backdrop on desktop */
+.nav-backdrop {
+  display: none;
 }
 
 /* ═══════════════════════════════════════════
@@ -3015,7 +2922,6 @@ pre {
 
 .public-donation-shell {
   min-height: 100vh;
-  min-height: 100dvh;
   background: var(--surface);
   display: flex;
   flex-direction: column;
@@ -3298,98 +3204,6 @@ pre {
   min-height: 60px;
 }
 
-/* ── Church Browsing (diocese → church) ── */
-
-.public-donation-label {
-  display: block;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  color: var(--on-surface-variant);
-  margin-bottom: 0.375rem;
-}
-
-.public-donation-church-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
-}
-
-.public-donation-church-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.875rem 1rem;
-  border: 1.5px solid var(--outline-variant);
-  border-radius: var(--radius-md);
-  background: var(--surface-container-lowest);
-  cursor: pointer;
-  transition: all 0.15s;
-  text-align: left;
-  width: 100%;
-}
-
-.public-donation-church-card:hover {
-  border-color: var(--primary);
-  background: var(--accent-light);
-}
-
-.public-donation-church-info {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.public-donation-church-info svg {
-  color: var(--primary);
-  flex-shrink: 0;
-}
-
-.public-donation-church-info strong {
-  display: block;
-  font-size: 0.9375rem;
-  color: var(--on-surface);
-}
-
-.public-donation-church-loc {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.75rem;
-  color: var(--on-surface-variant);
-  margin-top: 0.125rem;
-}
-
-.public-donation-loading,
-.public-donation-empty {
-  text-align: center;
-  color: var(--on-surface-variant);
-  font-size: 0.875rem;
-  padding: 1rem 0;
-}
-
-.public-donation-step-done {
-  border-color: var(--secondary);
-  background: var(--secondary-container);
-}
-
-.public-donation-step-check {
-  background: var(--secondary) !important;
-  color: #fff !important;
-  font-size: 0.875rem !important;
-}
-
-.public-donation-selected-church {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.9375rem;
-}
-
-.public-donation-selected-church svg {
-  color: var(--secondary);
-}
-
 /* ── Continue Button ── */
 
 .public-donation-continue-btn {
@@ -3455,44 +3269,6 @@ pre {
   font-size: 0.75rem;
   color: var(--outline);
   margin: 0;
-}
-
-/* ── Donation Links Admin Tab ── */
-
-.donation-link-output {
-  margin-bottom: 1.5rem;
-}
-
-.donation-link-row {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-.donation-link-row .field-input {
-  flex: 1;
-  font-size: 0.8125rem;
-  font-family: monospace;
-}
-
-.donation-qr-preview {
-  margin-top: 1rem;
-  text-align: center;
-}
-
-.donation-qr-image-wrap {
-  display: inline-block;
-  padding: 1rem;
-  background: #fff;
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--border-light);
-  box-shadow: var(--shadow-sm);
-}
-
-.donation-qr-image {
-  width: 256px;
-  height: 256px;
-  display: block;
 }
 
 /* ── Checkout Page ── */
@@ -3639,17 +3415,6 @@ pre {
 
 .checkout-summary-fee strong {
   color: var(--secondary);
-}
-
-/* Platform fee explanation */
-.checkout-fee-explanation {
-  font-size: 0.75rem;
-  line-height: 1.4;
-  color: var(--on-surface-variant, #666);
-  font-style: italic;
-  margin: 0.25rem 0 0.5rem;
-  padding: 0;
-  opacity: 0.85;
 }
 
 /* Waived fee — struck off */
@@ -4119,7 +3884,7 @@ pre {
 /* Floating action bar */
 .prayer-fab {
   position: fixed;
-  bottom: 1.5rem;
+  bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px));
   left: 50%;
   transform: translateX(-50%);
   background: var(--surface-container-lowest);
@@ -4463,6 +4228,80 @@ pre {
 
 .dash-btn-secondary:hover {
   background: var(--surface-container);
+}
+
+/* Diocese Leadership Card */
+.dash-card-leadership {
+  grid-column: span 8;
+  background: var(--surface-container-low);
+  border-radius: 2rem;
+  padding: 1.5rem 1.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  transition: transform var(--transition-smooth), box-shadow var(--transition-smooth);
+}
+
+.dash-card-leadership:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(46, 42, 90, 0.10);
+}
+
+.dash-leadership-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 1rem;
+}
+
+.dash-leader-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0.5rem;
+  padding: 0.75rem 0.5rem;
+  border-radius: 1rem;
+  background: var(--surface);
+}
+
+.dash-leader-avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--surface-container);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  color: var(--text-muted);
+}
+
+.dash-leader-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.dash-leader-role {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.dash-leader-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin: 0;
+  line-height: 1.3;
+}
+
+@media (max-width: 768px) {
+  .dash-card-leadership { grid-column: span 12; }
+  .dash-leadership-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
+  .dash-leader-avatar { width: 52px; height: 52px; }
 }
 
 /* Prayer Request Card */
@@ -5523,7 +5362,7 @@ pre {
 
 .history-table thead th {
   padding: 0.75rem 1.5rem;
-  text-align: center;
+  text-align: left;
   font-size: 0.75rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -5534,7 +5373,7 @@ pre {
 }
 
 .history-th-right {
-  text-align: center !important;
+  text-align: right !important;
 }
 
 .history-row {
@@ -5550,39 +5389,9 @@ pre {
   background: var(--surface-container-low);
 }
 
-.history-row-pending {
-  opacity: 0.75;
-}
-
-.history-status-badge {
-  display: inline-block;
-  padding: 2px 10px;
-  border-radius: 999px;
-  font-size: 0.78rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-}
-
-.badge-paid {
-  background: #d1fae5;
-  color: #065f46;
-}
-
-.badge-imported {
-  background: #dbeafe;
-  color: #1e40af;
-}
-
-.badge-pending {
-  background: #fef3c7;
-  color: #92400e;
-}
-
 .history-table td {
   padding: 0.85rem 1.5rem;
   vertical-align: middle;
-  text-align: center;
 }
 
 .history-cell-date {
@@ -5695,7 +5504,7 @@ pre {
 
 /* — Action Button — */
 .history-cell-action {
-  text-align: center;
+  text-align: right;
 }
 
 .history-receipt-btn {
@@ -5876,21 +5685,28 @@ pre {
     -webkit-overflow-scrolling: touch;
   }
 
-  /* Keep table layout on mobile — horizontal scroll instead of cards */
-  .history-table {
-    min-width: 600px;
+  /* Card-style layout for table rows on mobile */
+  .history-table thead {
+    display: none;
   }
 
-  .history-table thead th {
-    padding: 0.6rem 0.75rem;
-    font-size: 0.68rem;
-    white-space: nowrap;
+  .history-table,
+  .history-table tbody,
+  .history-table tr,
+  .history-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .history-table tr.history-row {
+    padding: 0.75rem;
+    border-bottom: 1px solid var(--outline-variant);
+    position: relative;
   }
 
   .history-table td {
-    padding: 0.6rem 0.75rem;
-    font-size: 0.82rem;
-    white-space: nowrap;
+    padding: 0.15rem 0;
+    border: none;
   }
 
   .history-cell-date {
@@ -5924,11 +5740,13 @@ pre {
   }
 
   .history-cell-amount {
-    font-size: 0.88rem;
+    font-size: 0.95rem;
+    margin-top: 0.35rem;
   }
 
   .history-cell-action {
-    text-align: center;
+    text-align: left;
+    margin-top: 0.35rem;
   }
 
   .history-receipt-btn {
@@ -6027,7 +5845,6 @@ pre {
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  min-height: 100dvh;
   padding: 2rem;
   text-align: center;
   font-family: -apple-system, BlinkMacSystemFont, sans-serif;
@@ -6981,27 +6798,11 @@ a.home-ad-item { text-decoration: none; }
    Toast Notifications (floating)
    ═══════════════════════════════════════════ */
 
-.toast-stack {
-  position: fixed;
-  bottom: 1.5rem;
-  right: 1.5rem;
-  z-index: 9999;
-  display: flex;
-  flex-direction: column-reverse;
-  gap: 0.5rem;
-  max-width: 380px;
-}
-
-@media (max-width: 768px) {
-  .toast-stack {
-    bottom: 5rem; /* above bottom nav */
-    right: 0.75rem;
-    left: 0.75rem;
-    max-width: none;
-  }
-}
-
 .toast-notification {
+  position: fixed;
+  bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px));
+  right: calc(1.5rem + env(safe-area-inset-right, 0px));
+  z-index: 9999;
   max-width: 380px;
   padding: 0.75rem 1rem;
   border-radius: 0.75rem;
@@ -7029,18 +6830,6 @@ a.home-ad-item { text-decoration: none; }
   background: var(--danger-bg, #fef2f2);
   color: var(--danger, #dc2626);
   border: 1px solid rgba(220, 38, 38, 0.2);
-}
-
-.toast-warning {
-  background: #fffbeb;
-  color: #b45309;
-  border: 1px solid rgba(180, 83, 9, 0.2);
-}
-
-.toast-info {
-  background: #eff6ff;
-  color: #1d4ed8;
-  border: 1px solid rgba(29, 78, 216, 0.2);
 }
 
 .toast-close {
@@ -7208,34 +6997,8 @@ a.home-ad-item { text-decoration: none; }
 }
 
 .splash-logo-link {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  display: block;
   text-decoration: none;
-  color: var(--text);
-}
-
-.splash-title {
-  margin: 0.5rem 0 0.25rem;
-  font-size: 1.5rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  animation: splash-fade-in 0.8s ease-out;
-}
-
-.splash-tagline {
-  margin: 0;
-  font-size: 0.95rem;
-  opacity: 0.7;
-  animation: splash-fade-in 1s ease-out;
-}
-
-.splash-hint {
-  position: absolute;
-  bottom: 2rem;
-  font-size: 0.85rem;
-  opacity: 0.5;
-  animation: splash-fade-in 1.5s ease-out;
 }
 
 .splash-logo {
@@ -7281,7 +7044,6 @@ a.home-ad-item { text-decoration: none; }
   --explore-accent-light: #DCD0FF;
   --explore-success: #16a34a;
   min-height: 100vh;
-  min-height: 100dvh;
   background: var(--surface);
   color: var(--on-surface);
 }
@@ -8024,175 +7786,76 @@ a.home-ad-item { text-decoration: none; }
   border-bottom: 1px solid rgba(220, 208, 255, 0.15);
 }
 
-/* ═══════════════════════════════════════════
-   Bottom Navigation Bar (Mobile) — Floating
-   ═══════════════════════════════════════════ */
-
-.bottom-nav {
-  display: none;
-}
-
-@media (max-width: 768px) {
-  .bottom-nav {
-    display: flex;
-    position: fixed;
-    bottom: 16px;
-    left: 12px;
-    right: 12px;
-    z-index: 180;
-    height: 62px;
-    background: rgba(255, 255, 255, 0.82);
-    backdrop-filter: saturate(180%) blur(20px);
-    -webkit-backdrop-filter: saturate(180%) blur(20px);
-    border: 0.5px solid rgba(0, 0, 0, 0.08);
-    border-radius: 28px;
-    box-shadow:
-      0 2px 8px rgba(0, 0, 0, 0.04),
-      0 8px 24px rgba(0, 0, 0, 0.08),
-      inset 0 0.5px 0 rgba(255, 255, 255, 0.6);
-    justify-content: space-around;
-    align-items: center;
-    padding: 0 0.5rem;
-    padding-bottom: env(safe-area-inset-bottom, 0);
-  }
-
-  .bottom-nav-item {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 3px;
-    flex: 1;
-    padding: 8px 0;
-    color: var(--on-surface-variant);
-    text-decoration: none;
-    font-size: 0.7rem;
-    font-weight: 500;
-    letter-spacing: 0.02em;
-    transition: color 0.2s ease, transform 0.15s ease;
-    -webkit-tap-highlight-color: transparent;
-    border-radius: 12px;
-  }
-
-  .bottom-nav-item:active {
-    transform: scale(0.92);
-  }
-
-  .bottom-nav-item span {
-    line-height: 1;
-  }
-
-  .bottom-nav-active {
-    color: var(--primary);
-    font-weight: 700;
-  }
-
-  .bottom-nav-active svg {
-    filter: drop-shadow(0 0 6px rgba(103, 80, 164, 0.3));
-  }
-
-  .bottom-nav-badge {
-    position: absolute;
-    top: -5px;
-    right: -8px;
-    min-width: 16px;
-    height: 16px;
-    padding: 0 4px;
-    border-radius: 8px;
-    background: var(--error, #e53935);
-    color: #fff;
-    font-size: 0.6rem;
-    font-weight: 700;
-    line-height: 16px;
-    text-align: center;
-    pointer-events: none;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-}
-
-/* ═══════════════════════════════════════════
-   Church Donation Mode (logged-in users)
-   ═══════════════════════════════════════════ */
-
-.church-donation-header {
+/* ── Church picker search bar (only shown when >= 6 churches) ── */
+.church-picker-search {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 1.25rem 1.5rem;
-  background: var(--surface-container-lowest);
-  border-radius: var(--radius-lg);
-  border: 1px solid rgba(220, 208, 255, 0.25);
-  margin-bottom: 0.5rem;
+  gap: 0.5rem;
+  width: 100%;
+  margin: 0.75rem 0;
+  padding: 0.55rem 0.85rem;
+  border-radius: var(--radius-md, 0.6rem);
+  border: 1px solid var(--outline-variant, rgba(220, 208, 255, 0.6));
+  background: var(--surface-container-lowest, #fff);
+  color: var(--on-surface);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
-.church-donation-header h2 {
-  font-size: 1.1rem;
-  font-weight: 700;
+.church-picker-search:focus-within {
+  border-color: var(--primary, #2E2A5A);
+  box-shadow: 0 0 0 3px rgba(220, 208, 255, 0.30);
+}
+
+.church-picker-search input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  min-width: 0;
+}
+
+.church-picker-empty {
+  padding: 1.25rem 0.5rem;
+  text-align: center;
+  color: var(--on-surface-variant, #666);
+  font-size: 0.9rem;
   margin: 0;
 }
 
-.church-donation-header .muted {
-  font-size: 0.85rem;
-  color: var(--on-surface-variant);
-  margin: 0.1rem 0 0;
-}
-
-.church-donation-header svg {
-  color: var(--primary);
-  flex-shrink: 0;
-}
-
-.church-donation-public-link {
-  text-align: center;
-  padding: 1rem 0 0.5rem;
-}
-
-.church-donation-public-link .btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.85rem;
-  color: var(--primary);
-}
-
-/* In church mode, hide the large hero padding and simplify the shell */
-.public-donation-shell.church-donation-mode {
-  padding-top: 0;
-  min-height: auto;
-}
-
-.public-donation-shell.church-donation-mode .public-donation-form-section {
-  margin-top: 0;
-}
-
-/* ═══════════════════════════════════════════
-   Payment Loading Overlay (Razorpay)
-   ═══════════════════════════════════════════ */
-.payment-loading-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
+/* ── OTP resend / voice fallback ── */
+.otp-resend-row {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 1rem;
-  background: rgba(0, 0, 0, 0.55);
-  color: #fff;
-  font-size: 1rem;
-  backdrop-filter: blur(4px);
-  animation: plo-fade-in 0.2s ease-out;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  margin: 0.4rem 0 0.25rem;
+  font-size: 0.85rem;
+  color: var(--on-surface-variant, #5A5280);
 }
-.payment-loading-spinner {
-  width: 40px;
-  height: 40px;
-  border: 3px solid rgba(255, 255, 255, 0.3);
-  border-top-color: #fff;
-  border-radius: 50%;
-  animation: plo-spin 0.7s linear infinite;
+
+.otp-resend-timer {
+  color: var(--on-surface-variant, #5A5280);
 }
-@keyframes plo-fade-in { from { opacity: 0; } to { opacity: 1; } }
-@keyframes plo-spin { to { transform: rotate(360deg); } }
+
+.otp-voice-hint {
+  font-size: 0.78rem;
+  color: var(--on-surface-variant, #5A5280);
+  line-height: 1.45;
+  margin: 0 0 0.75rem;
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--primary, #2E2A5A);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.link-btn:disabled {
+  color: var(--outline, #9B93C4);
+  cursor: not-allowed;
+}

@@ -33,7 +33,7 @@ type NotificationBatch = {
 
 export default function PushNotificationTab() {
   const { t } = useI18n();
-  const { token, busyKey, setBusyKey, setNotice } = useApp();
+  const { token, busyKey, setBusyKey, setNotice, openOperationConfirmDialog } = useApp();
 
   const [dioceses, setDioceses] = useState<DioceseOption[]>([]);
   const [churches, setChurches] = useState<ChurchOption[]>([]);
@@ -124,7 +124,7 @@ export default function PushNotificationTab() {
     return () => { cancelled = true; clearInterval(timer); };
   }, [expandedBatch, token]);
 
-  async function handleSend() {
+  async function submitSend() {
     if (!message.trim()) {
       setNotice({ tone: "error", text: t("adminTabs.pushNotification.messageRequired") });
       return;
@@ -134,12 +134,13 @@ export default function PushNotificationTab() {
       return;
     }
 
-    // Confirmation before sending mass notification
-    const target = selectedMember ? t("adminTabs.pushNotification.confirmTargetMember") : selectedChurch ? t("adminTabs.pushNotification.confirmTargetChurch") : selectedDiocese ? t("adminTabs.pushNotification.confirmTargetDiocese") : t("adminTabs.pushNotification.confirmTargetAll");
-    if (!window.confirm(t("adminTabs.pushNotification.confirmSend", { target }))) return;
-
     setBusyKey("send-notif");
     try {
+      // Stable idempotency key for this composed message — prevents duplicate
+      // batch creation if the POST is retried or the button is double-clicked.
+      const idempotencyKey = (typeof crypto !== "undefined" && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const result = await apiRequest<{ queued: number; batch_id: string; message: string }>("/api/push/send-notification", {
         method: "POST",
         token,
@@ -151,6 +152,7 @@ export default function PushNotificationTab() {
           title: title.trim(),
           message: message.trim(),
           url: channel === "push" ? url : undefined,
+          idempotency_key: idempotencyKey,
         },
       });
       setNotice({ tone: "success", text: result.message || t("adminTabs.pushNotification.notificationsQueued", { count: result.queued }) });
@@ -165,6 +167,23 @@ export default function PushNotificationTab() {
     } finally {
       setBusyKey("");
     }
+  }
+
+  function handleSend() {
+    const target = selectedMember
+      ? t("adminTabs.pushNotification.confirmTargetMember")
+      : selectedChurch
+        ? t("adminTabs.pushNotification.confirmTargetChurch")
+        : selectedDiocese
+          ? t("adminTabs.pushNotification.confirmTargetDiocese")
+          : t("adminTabs.pushNotification.confirmTargetAll");
+
+    openOperationConfirmDialog(
+      t("adminTabs.pushNotification.sendConfirmTitle"),
+      t("adminTabs.pushNotification.confirmSend", { target }),
+      t("adminTabs.pushNotification.sendConfirmKeyword"),
+      () => void submitSend(),
+    );
   }
 
   async function handleCancelBatch(batchId: string) {
@@ -190,8 +209,8 @@ export default function PushNotificationTab() {
   }
 
   return (
-    <div>
-      <h2 style={{ marginBottom: "0.25rem" }}>{t("adminTabs.pushNotification.title")}</h2>
+    <article className="panel">
+      <h3 style={{ marginBottom: "0.25rem" }}>{t("adminTabs.pushNotification.title")}</h3>
       <p className="muted" style={{ fontSize: "0.85rem", marginBottom: "1rem" }}>
         {t("adminTabs.pushNotification.description")}
       </p>
@@ -325,7 +344,7 @@ export default function PushNotificationTab() {
       {/* ───── Notification Tracking ───── */}
       <div style={{ marginTop: "2.5rem", borderTop: "1px solid var(--border, #e2e2e2)", paddingTop: "1.5rem" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1rem" }}>
-          <h2 style={{ margin: 0 }}>{t("adminTabs.pushNotification.sentNotificationsTitle")}</h2>
+          <h4 style={{ margin: 0 }}>{t("adminTabs.pushNotification.sentNotificationsTitle")}</h4>
           <button className="btn" onClick={fetchBatches} disabled={loadingBatches} style={{ fontSize: "0.8rem" }}>
             {loadingBatches ? t("adminTabs.pushNotification.refreshing") : "↻ "  + t("common.refresh")}
           </button>
@@ -347,7 +366,13 @@ export default function PushNotificationTab() {
             cancelled: b.cancelled_count,
           };
           const hasPending = b.status === "sending";
-          const statusColor = b.status === "completed" ? "#16a34a" : b.status === "cancelled" ? "#9ca3af" : b.status === "partially_failed" ? "#dc2626" : "#f59e0b";
+          const statusColor = b.status === "completed"
+            ? "var(--color-success, #16a34a)"
+            : b.status === "cancelled"
+              ? "var(--color-warning, #9ca3af)"
+              : b.status === "partially_failed"
+                ? "var(--color-error, #dc2626)"
+                : "var(--color-warning, #f59e0b)";
           const statusLabel = b.status === "sending" ? t("adminTabs.pushNotification.statusInProgress") : b.status === "completed" ? t("adminTabs.pushNotification.statusCompleted") : b.status === "cancelled" ? t("adminTabs.pushNotification.statusCancelled") : t("adminTabs.pushNotification.statusPartiallyFailed");
 
           return (
@@ -411,22 +436,22 @@ export default function PushNotificationTab() {
                   {detail && (
                     <>
                       <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.75rem", flexWrap: "wrap" }}>
-                        <StatusPill label={t("adminTabs.pushNotification.pillTotal")} count={counts.total} color="#6b7280" />
-                        <StatusPill label={t("adminTabs.pushNotification.pillPending")} count={counts.pending} color="#f59e0b" />
-                        <StatusPill label={t("adminTabs.pushNotification.pillSent")} count={counts.sent + counts.delivered} color="#16a34a" />
-                        <StatusPill label={t("adminTabs.pushNotification.pillFailed")} count={counts.failed} color="#dc2626" />
-                        {counts.cancelled > 0 && <StatusPill label={t("adminTabs.pushNotification.pillCancelled")} count={counts.cancelled} color="#9ca3af" />}
+                        <StatusPill label={t("adminTabs.pushNotification.pillTotal")} count={counts.total} color="var(--outline, #6b7280)" />
+                        <StatusPill label={t("adminTabs.pushNotification.pillPending")} count={counts.pending} color="var(--color-warning, #f59e0b)" />
+                        <StatusPill label={t("adminTabs.pushNotification.pillSent")} count={counts.sent + counts.delivered} color="var(--color-success, #16a34a)" />
+                        <StatusPill label={t("adminTabs.pushNotification.pillFailed")} count={counts.failed} color="var(--color-error, #dc2626)" />
+                        {counts.cancelled > 0 && <StatusPill label={t("adminTabs.pushNotification.pillCancelled")} count={counts.cancelled} color="var(--color-warning, #9ca3af)" />}
                       </div>
 
                       {/* Progress bar */}
                       {counts.total > 0 && (
-                        <div style={{ height: 6, borderRadius: 3, background: "#e5e7eb", overflow: "hidden", marginBottom: "0.75rem" }}>
+                        <div style={{ height: 6, borderRadius: 3, background: "var(--outline-variant, #e5e7eb)", overflow: "hidden", marginBottom: "0.75rem" }}>
                           <div
                             style={{
                               height: "100%",
                               borderRadius: 3,
                               width: `${((counts.sent + counts.delivered + counts.failed + counts.cancelled) / counts.total) * 100}%`,
-                              background: counts.failed > 0 ? "linear-gradient(90deg, #16a34a, #dc2626)" : "#16a34a",
+                              background: counts.failed > 0 ? "linear-gradient(90deg, var(--color-success, #16a34a), var(--color-error, #dc2626))" : "var(--color-success, #16a34a)",
                               transition: "width 0.5s ease",
                             }}
                           />
@@ -440,14 +465,10 @@ export default function PushNotificationTab() {
                   {/* Cancel button */}
                   {hasPending && (
                     <button
-                      className="btn"
+                      className="btn btn-danger"
                       onClick={(e) => { e.stopPropagation(); handleCancelBatch(b.id); }}
                       disabled={busyKey === "cancel-batch"}
-                      style={{
-                        fontSize: "0.8rem",
-                        color: "#dc2626",
-                        borderColor: "#dc2626",
-                      }}
+                      style={{ fontSize: "0.8rem" }}
                     >
                       {busyKey === "cancel-batch" ? t("adminTabs.pushNotification.cancelling") : t("adminTabs.pushNotification.cancelPendingButton")}
                     </button>
@@ -458,7 +479,7 @@ export default function PushNotificationTab() {
           );
         })}
       </div>
-    </div>
+    </article>
   );
 }
 

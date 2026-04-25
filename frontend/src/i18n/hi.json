@@ -53,14 +53,7 @@
     "deleteActionTitle": "हटाएं",
     "checkConnection": "Check your connection.",
     "operationFailed": "Operation failed",
-    "unexpectedError": "An unexpected error occurred.",
-    "done": "हो गया",
-    "member": "सदस्य",
-    "change": "बदलें",
-    "copy": "कॉपी",
-    "copied": "कॉपी हो गया!",
-    "prev": "पिछला",
-    "name": "नाम"
+    "unexpectedError": "An unexpected error occurred."
   },
   "auth": {
     "welcome": "शालोम में आपका स्वागत है",
@@ -85,6 +78,9 @@
     "familyMemberAccount": "परिवार सदस्य खाता",
     "familyMemberDescription": "आप {{name}} के अंतर्गत एक परिवार सदस्य के रूप में पंजीकृत हैं।",
     "familyMemberHint": "इस ऐप को स्वतंत्र रूप से उपयोग करने के लिए, कृपया {{name}} से आपको उनकी परिवार सदस्य सूची से हटाने के लिए कहें।",
+    "familyStep1": "{{name}} से संपर्क करें और उन्हें ऐप खोलने के लिए कहें।",
+    "familyStep2": "वे सेटिंग्स → परिवार के सदस्य पर जाकर आपको हटा सकते हैं।",
+    "familyStep3": "हटाए जाने के बाद, जारी रखने के लिए नीचे 'पुनः प्रयास' टैप करें।",
     "yourFamilyHead": "आपके परिवार के मुखिया",
     "workspaceError": "कुछ गड़बड़ हो गई",
     "preparingWorkspace": "वर्कस्पेस तैयार हो रहा है",
@@ -113,16 +109,7 @@
     "memberDashboardReady": "Welcome back. Member dashboard is ready.",
     "otpSentSuccess": "OTP sent! Check your phone and enter the code below.",
     "pleaseSignInFirst": "Please sign in first.",
-    "signedOut": "You have been signed out.",
-    "familyWhatCanYouDo": "आप क्या कर सकते हैं?",
-    "familyTipContactHead": "अपने परिवार के मुखिया से संपर्क करें।",
-    "familyTipContactAdmin": "अधिक सहायता के लिए अपने चर्च प्रशासक से संपर्क करें।",
-    "phoneInvalid10Digits": "फ़ोन नंबर ठीक 10 अंकों का होना चाहिए।",
-    "resendOtp": "OTP पुनः भेजें",
-    "resendOtpIn": "{{seconds}}s में OTP पुनः भेजें",
-    "paymentConfigCheckFailed": "Payment config check failed: {{message}}",
-    "paymentsDisabledFallback": "Payments are disabled for this church.",
-    "workspaceLoadError": "Something went wrong while loading your workspace. Please try again."
+    "signedOut": "You have been signed out."
   },
   "nav": {
     "dashboard": "डैशबोर्ड",
@@ -143,8 +130,7 @@
     "shalomSuperAdmin": "SHALOM सुपर एडमिन कंसोल",
     "shalomChurchAdmin": "SHALOM चर्च एडमिन वर्कस्पेस",
     "shalomMember": "SHALOM सदस्य वर्कस्पेस",
-    "toggleNavigation": "Toggle navigation",
-    "switchChurch": "चर्च बदलें"
+    "toggleNavigation": "Toggle navigation"
   },
   "dashboard": {
     "welcomeUser": "स्वागत है, {{name}}।",
@@ -246,21 +232,7 @@
     "subscriptionDuePayment": "Subscription Due Payment",
     "month": "माह",
     "months": "महीने",
-    "pendingMonths": "लंबित महीने",
-    "paymentSuccessTitle": "भुगतान सफल!",
-    "amountPaid": "भुगतान राशि",
-    "transactionId": "लेन-देन आईडी",
-    "paidOn": "भुगतान तिथि",
-    "paymentSuccessHint": "रसीद आपके भुगतान इतिहास में सहेजी गई है।",
-    "requestCancellation": "रद्द करने का अनुरोध करें",
-    "cancelWarning": "सबमिट करने के बाद, आपके एडमिन रद्द करने के अनुरोध की समीक्षा करेंगे। अनुमोदन तक आपकी सदस्यता सक्रिय रहेगी।",
-    "selectSubscriptionsToPay": "भुगतान के लिए सदस्यता चुनें।",
-    "noDueSubscriptions": "कोई बकाया सदस्यता नहीं।",
-    "statusActive": "सक्रिय",
-    "statusOverdue": "बकाया",
-    "statusPending": "लंबित",
-    "growthMetricsError": "Failed to load growth metrics.",
-    "openingPaymentGateway": "Opening payment gateway..."
+    "pendingMonths": "लंबित महीने"
   },
   "profile": {
     "tabPersonal": "व्यक्तिगत",
@@ -405,24 +377,7 @@
     "subscriptionAmount": "सदस्यता राशि",
     "memberDetails": "लिंक्ड सदस्य विवरण",
     "manualFamilyMember": "यह सदस्य किसी पंजीकृत प्रोफाइल से जुड़ा नहीं है।",
-    "verifyPhoneBeforeSave": "सेव करने से पहले कृपया नया फ़ोन नंबर OTP से सत्यापित करें",
-    "deleteSpecialDateTitle": "Delete Special Date",
-    "head": "Head",
-    "occupationBusiness": "Business",
-    "occupationFarmer": "Farmer",
-    "occupationGovEmployee": "Govt. Employee",
-    "occupationHomemaker": "Homemaker",
-    "occupationOther": "Other",
-    "occupationPastor": "Pastor",
-    "occupationPrivEmployee": "Private Employee",
-    "occupationRetired": "Retired",
-    "occupationSelfEmployed": "Self-Employed",
-    "occupationStudent": "Student",
-    "occupationTeacher": "Teacher",
-    "phoneChangeVerifyFirst": "Verify the new phone number before saving.",
-    "photoRemovedSaveProfile": "Photo removed. Click Save Profile to apply.",
-    "photoSelectedSaveProfile": "Photo selected. Click Save Profile to apply.",
-    "unsaved": "Unsaved"
+    "verifyPhoneBeforeSave": "सेव करने से पहले कृपया नया फ़ोन नंबर OTP से सत्यापित करें"
   },
   "history": {
     "heading": "इतिहास",
@@ -477,11 +432,7 @@
     "prayerPlaceholder": "पास्टरों को किसके लिए प्रार्थना करनी है साझा करें",
     "sendPrayerRequest": "प्रार्थना अनुरोध भेजें",
     "prayerCallToAction": "प्रार्थना चाहिए? प्रार्थना अनुरोध जमा करें और एक पास्टर आपके लिए प्रार्थना करेगा।",
-    "goToPrayerRequests": "प्रार्थना अनुरोधों पर जाएं",
-    "addToCalendar": "कैलेंडर में जोड़ें",
-    "markAllRead": "सभी पढ़ा गया",
-    "going": "Going",
-    "interested": "Interested"
+    "goToPrayerRequests": "प्रार्थना अनुरोधों पर जाएं"
   },
   "prayer": {
     "selectPastor": "एक पास्टर चुनें",
@@ -557,25 +508,7 @@
     "errorVerificationFailed": "Verification failed",
     "offeringDonation": "Offering / Donation",
     "scriptureRef": "— 2 Corinthians 9:7",
-    "scriptureVerse": "\"Each of you should give what you have decided in your heart to give, not reluctantly or under compulsion, for God loves a cheerful giver.\"",
-    "selectChurch": "चर्च चुनें",
-    "chooseDiocese": "डायोसिस चुनें",
-    "selectDiocesePlaceholder": "— डायोसिस चुनें —",
-    "noChurchesInDiocese": "इस डायोसिस में कोई चर्च नहीं मिला।",
-    "churchSelected": "चर्च चयनित",
-    "invalidEmail": "अमान्य ईमेल पता",
-    "phoneNumber": "फ़ोन नंबर",
-    "selectedChurch": "चयनित चर्च",
-    "donateToAnotherChurch": "Donate to another church",
-    "donateToYourChurch": "Donate to Your Church",
-    "fundBuildingFund": "Building Fund",
-    "fundCommunityAid": "Community Aid",
-    "fundGeneralOffering": "General Offering",
-    "fundMissionOutreach": "Mission & Outreach",
-    "fundOther": "Other",
-    "fundYouthMinistry": "Youth Ministry",
-    "receiptWarning": "Please save your receipt now. As a guest donor, this receipt will not be available once you leave this page.",
-    "saveReceipt": "Save Receipt"
+    "scriptureVerse": "\"Each of you should give what you have decided in your heart to give, not reluctantly or under compulsion, for God loves a cheerful giver.\""
   },
   "home": {
     "title": "शालोम में आपका स्वागत है",
@@ -606,9 +539,7 @@
     "codeRequired": "चर्च कोड आवश्यक है। कोड के लिए अपने चर्च प्रशासक से पूछें।",
     "codeMustBe8Digits": "चर्च कोड बिल्कुल 8 अंकों का होना चाहिए।",
     "joinButton": "चर्च में शामिल हों",
-    "errorJoinFailed": "Failed to join church.",
-    "noCodeHint": "कोड नहीं है? अपने चर्च प्रशासक से पूछें।",
-    "exploreChurches": "चर्चें देखें"
+    "errorJoinFailed": "Failed to join church."
   },
   "admin": {
     "console": "कंसोल",
@@ -667,9 +598,7 @@
     "pushSms": "Push / SMS",
     "refundRequests": "Refund Requests",
     "saasPlatform": "SaaS Platform",
-    "specialDates": "Special Dates",
-    "donationLinksQR": "Donation Links & QR",
-    "searchTools": "Search tools..."
+    "specialDates": "Special Dates"
   },
   "relations": {
     "spouse": "पति/पत्नी",
@@ -695,7 +624,6 @@
   },
   "settings": {
     "title": "सेटिंग्स",
-    "editProfile": "प्रोफाइल संपादित करें",
     "lightMode": "लाइट मोड",
     "darkMode": "डार्क मोड",
     "switchToLight": "लाइट पर स्विच करें",
@@ -722,26 +650,7 @@
     "deleteWarning2": "सक्रिय सदस्यता तुरंत रद्द कर दी जाएगी।",
     "deleteWarning3": "आपके खाते से जुड़े परिवार के सदस्य अनलिंक हो जाएंगे।",
     "deleteWarning4": "एडमिन द्वारा स्वीकृत होने के बाद यह कार्रवाई पूर्ववत नहीं की जा सकती।",
-    "deleteWarningTitle": "चेतावनी: इस कार्रवाई के गंभीर परिणाम हैं",
-    "typeDeleteToConfirm": "पुष्टि के लिए DELETE टाइप करें",
-    "signOutConfirmTitle": "साइन आउट करें?",
-    "signOutConfirmDesc": "क्या आप वाकई अपने खाते से साइन आउट करना चाहते हैं?",
-    "deleteReasonMinLength": "Please provide at least 10 characters.",
-    "goToProfile": "Go to Profile",
-    "exportMyData": "Export My Data",
-    "exportMyDataHint": "Download all your personal data (profile, subscriptions, payments) as a JSON file.",
-    "downloadData": "Download",
-    "exportSuccess": "Your data has been downloaded successfully.",
-    "exportFailed": "Failed to export data. Please try again.",
-    "pushBlockedInstructions": "To enable: open your browser settings → Site Settings → Notifications → allow this site.",
-    "notifyCat_announcements": "Announcements",
-    "notifyCat_events": "Events & Calendar",
-    "notifyCat_family": "Family & Membership",
-    "notifyCat_payments": "Payments & Subscriptions",
-    "notifyCat_prayer": "Prayer Requests",
-    "notifyCategories": "Notification Categories",
-    "off": "Off",
-    "on": "On"
+    "deleteWarningTitle": "चेतावनी: इस कार्रवाई के गंभीर परिणाम हैं"
   },
   "banner": {
     "pushPrompt": "🔔 घोषणाओं और रिमाइंडर से अपडेट रहने के लिए पुश नोटिफिकेशन सक्षम करें।",
@@ -936,10 +845,7 @@
       "impactEvents": "कार्यक्रम:",
       "impactNotifications": "सूचनाएं:",
       "impactPrayerRequests": "प्रार्थना अनुरोध:",
-      "impactPayments": "भुगतान:",
-      "downloadQr": "Download QR",
-      "generateJoinQr": "Generate Join QR Code",
-      "joinQrHint": "Members can scan this QR code with their phone camera to join your church."
+      "impactPayments": "भुगतान:"
     },
     "createChurch": {
       "title": "चर्च बनाएं",
@@ -1112,7 +1018,13 @@
       "errorNoField": "अपडेट के लिए कम से कम एक फील्ड आवश्यक है।",
       "errorNoSubscriptions": "इस सदस्य की कोई सदस्यता नहीं है।",
       "errorLoadFailed": "सदस्य सदस्यताएं लोड करने में विफल",
-      "successUpdated": "सदस्यता अपडेट की गई।"
+      "successUpdated": "सदस्यता अपडेट की गई।",
+      "pauseSubButton": "रोकें",
+      "pausing": "रोका जा रहा है…",
+      "pauseSubscriptionTitle": "सदस्यता रोकें?",
+      "pauseSubscriptionMessage": "इससे अनुस्मारक और देय ट्रैकिंग अस्थायी रूप से रुक जाएगी। आप इसे कभी भी फिर से शुरू कर सकते हैं।",
+      "pauseKeyword": "PAUSE",
+      "successPaused": "सदस्यता रोक दी गई।"
     },
     "events": {
       "title": "कार्यक्रम और सूचनाएं",
@@ -1125,16 +1037,16 @@
       "addressHeader": "पता",
       "selectButton": "चुनें",
       "eventsToggle": "कार्यक्रम",
-      "notificationsToggle": "घोषणाएँ",
+      "notificationsToggle": "सूचनाएं",
       "newEvent": "नया कार्यक्रम",
-      "newNotification": "नई घोषणा",
+      "newNotification": "नई सूचना",
       "editEvent": "कार्यक्रम संपादित करें",
-      "editNotification": "घोषणा संपादित करें",
+      "editNotification": "सूचना संपादित करें",
       "createEvent": "कार्यक्रम बनाएं",
-      "createNotification": "घोषणा बनाएं",
+      "createNotification": "सूचना बनाएं",
       "titleLabel": "शीर्षक",
       "titlePlaceholderEvent": "रविवार सेवा",
-      "titlePlaceholderNotification": "महत्वपूर्ण घोषणा",
+      "titlePlaceholderNotification": "महत्वपूर्ण सूचना",
       "messageLabel": "संदेश",
       "messagePlaceholder": "विवरण...",
       "eventDateLabel": "कार्यक्रम तिथि",
@@ -1149,21 +1061,15 @@
       "createdHeader": "बनाया गया",
       "actionsHeader": "कार्रवाइयां",
       "noEventsYet": "अभी तक कोई कार्यक्रम नहीं।",
-      "noNotificationsYet": "अभी तक कोई घोषणा नहीं।",
+      "noNotificationsYet": "अभी तक कोई सूचना नहीं।",
       "errorTitleMessageRequired": "शीर्षक और संदेश आवश्यक हैं।",
       "errorUploadFailed": "इमेज अपलोड करने में विफल",
       "successEventCreated": "कार्यक्रम बनाया गया।",
       "successEventUpdated": "कार्यक्रम अपडेट किया गया।",
       "successEventDeleted": "कार्यक्रम हटाया गया।",
-      "successNotificationCreated": "घोषणा बनाई गई।",
-      "successNotificationUpdated": "घोषणा अपडेट की गई।",
-      "successNotificationDeleted": "घोषणा हटाई गई।",
-      "confirmDeleteEvent": "क्या आप वाकई इस कार्यक्रम को हटाना चाहते हैं?",
-      "confirmDeleteNotification": "क्या आप इस घोषणा को हटाना चाहते हैं?",
-      "endTimeLabel": "End Time",
-      "locationHeader": "Location",
-      "locationLabel": "Location",
-      "locationPlaceholder": "e.g. Church Main Hall, 123 Main St"
+      "successNotificationCreated": "सूचना बनाई गई।",
+      "successNotificationUpdated": "सूचना अपडेट की गई।",
+      "successNotificationDeleted": "सूचना हटाई गई।"
     },
     "export": {
       "title": "डेटा निर्यात",
@@ -1194,9 +1100,7 @@
       "emptyDescription": "परिवार सदस्य जोड़ने के अनुरोध यहां दिखाई देंगे।",
       "errorLoadFailed": "परिवार अनुरोध लोड करने में विफल",
       "successApproved": "परिवार अनुरोध स्वीकृत किया गया।",
-      "successRejected": "परिवार अनुरोध अस्वीकार किया गया।",
-      "memberIdLabel": "सदस्य आईडी:",
-      "familyCountLabel": "परिवार के सदस्य:"
+      "successRejected": "परिवार अनुरोध अस्वीकार किया गया।"
     },
     "incomeDashboard": {
       "title": "आय डैशबोर्ड",
@@ -1465,10 +1369,7 @@
       "emptyTitle": "कोई भुगतान नहीं मिला",
       "emptyDescription": "इस सदस्य का अभी तक कोई भुगतान दर्ज नहीं है।",
       "errorSelectMember": "कृपया पहले एक सदस्य चुनें।",
-      "errorDownloadFailed": "रसीद डाउनलोड करने में विफल",
-      "filterByPerson": "व्यक्ति का नाम फ़िल्टर करें",
-      "paginationInfo": "अवरोही क्रम में प्रति पृष्ठ 10 प्रविष्टियाँ दिखा रहा है।",
-      "loadFailed": "भुगतान इतिहास लोड करने में विफल"
+      "errorDownloadFailed": "रसीद डाउनलोड करने में विफल"
     },
     "platformRazorpay": {
       "title": "प्लेटफॉर्म Razorpay कॉन्फ़िगरेशन",
@@ -1483,9 +1384,7 @@
       "configLoadedSuccess": "प्लेटफॉर्म कॉन्फ़िग लोड हो गया।",
       "configSavedSuccess": "प्लेटफॉर्म Razorpay कॉन्फ़िग सेव हो गया।",
       "statusConfigured": "कॉन्फ़िगर — चर्च ऑनलाइन प्लेटफॉर्म शुल्क भुगतान कर सकते हैं",
-      "statusNotConfigured": "कॉन्फ़िगर नहीं — ऑनलाइन SaaS भुगतान सक्षम करने के लिए Key ID और Key Secret दोनों सेट करें",
-      "donationFeeLabel": "सार्वजनिक दान प्लेटफ़ॉर्म शुल्क (%)",
-      "donationFeeHint": "सार्वजनिक (गैर-सदस्य) दानों पर लिया जाने वाला शुल्क प्रतिशत। अक्षम करने के लिए 0 सेट करें।"
+      "statusNotConfigured": "कॉन्फ़िगर नहीं — ऑनलाइन SaaS भुगतान सक्षम करने के लिए Key ID और Key Secret दोनों सेट करें"
     },
     "preRegister": {
       "title": "सदस्य पूर्व-पंजीकरण",
@@ -1582,12 +1481,7 @@
       "pillSent": "भेजा गया",
       "pillFailed": "विफल",
       "pillCancelled": "रद्द",
-      "charsCount": "{{count}}/320 अक्षर",
-      "confirmSend": "यह सूचना {{target}} को भेजें?",
-      "confirmTargetMember": "चयनित सदस्य",
-      "confirmTargetChurch": "चयनित चर्च के सभी सदस्य",
-      "confirmTargetDiocese": "चयनित डायोसिस के सभी सदस्य",
-      "confirmTargetAll": "सभी सदस्य विश्वव्यापी"
+      "charsCount": "{{count}}/320 अक्षर"
     },
     "refundRequests": {
       "title": "रिफंड अनुरोध",
@@ -1680,8 +1574,7 @@
       "revokeButton": "एडमिन एक्सेस हटाएं",
       "revokePhoneRequired": "फ़ोन नंबर आवश्यक है।",
       "revokeSuccess": "एडमिन एक्सेस हटाया गया।",
-      "errorInvalidChurch": "चयनित चर्च अमान्य है।",
-      "alreadyAdmin": "This user is already an admin."
+      "errorInvalidChurch": "चयनित चर्च अमान्य है।"
     },
     "saasSettings": {
       "title": "प्लेटफॉर्म सेटिंग्स",
@@ -1801,18 +1694,6 @@
       "successReviewed": "Deletion request {{decision}}.",
       "title": "Account Deletion Requests",
       "unknownMember": "Unknown Member"
-    },
-    "donationLinks": {
-      "title": "दान लिंक और QR कोड",
-      "description": "अपने चर्च के लिए साझा करने योग्य दान लिंक और QR कोड बनाएं।",
-      "diocese": "डायोसिस",
-      "selectDiocese": "— डायोसिस चुनें —",
-      "church": "चर्च",
-      "selectChurch": "— चर्च चुनें —",
-      "fund": "फंड",
-      "donationLink": "दान लिंक",
-      "qrCode": "QR कोड",
-      "downloadQR": "QR कोड डाउनलोड करें"
     }
   },
   "photo": {
@@ -1900,50 +1781,14 @@
     "shalomHelpsYou": "Shalom helps you to",
     "signInToJoin": "Sign in to join →",
     "whyIntro": "Shalom is an all-in-one church management app that helps your church stay connected, organized, and future-ready. Built to bring your entire congregation closer together.",
-    "whyShalom": "Why Shalom?",
-    "churchCode": "Church Code",
-    "members": "members"
+    "whyShalom": "Why Shalom?"
   },
   "historyPage": {
-    "errorDownloadReceiptFailed": "रसीद डाउनलोड करने में विफल।",
-    "title": "भुगतान इतिहास",
-    "subtitle": "अपने परिवार के भुगतान रिकॉर्ड देखें।",
-    "allFamilyMembers": "सभी परिवार के सदस्य",
-    "selectPerson": "व्यक्ति चुनें",
-    "newerEntries": "नया",
-    "olderEntries": "पुराना",
-    "monthAndYear": "माह और वर्ष",
-    "paidAmount": "भुगतान राशि",
-    "paidBy": "भुगतानकर्ता",
-    "paidDate": "भुगतान तिथि",
-    "downloadReceipt": "रसीद डाउनलोड करें",
-    "downloadBtn": "डाउनलोड",
-    "receipt": "रसीद",
-    "noEntries": "कोई भुगतान इतिहास नहीं मिला।",
-    "paginationInfo": "{{start}}–{{end}} / {{total}} दिखा रहा है",
-    "errorLoadFailed": "भुगतान इतिहास लोड करने में विफल।",
-    "goToDashboard": "डैशबोर्ड पर जाएं",
-    "refundHint": "रिफंड के लिए, कृपया अपने चर्च प्रशासक से संपर्क करें।",
-    "adminNote": "Admin Note",
-    "myRefundRequests": "My Refund Requests",
-    "refund": "Refund",
-    "refundReasonLabel": "Reason for refund",
-    "refundReasonPlaceholder": "Please explain why you want a refund...",
-    "refundRequestFailed": "Failed to submit refund request.",
-    "refundRequestInfo": "Your request will be reviewed by the church administrator. Refunds are subject to approval.",
-    "refundRequestSubmitted": "Refund request submitted successfully.",
-    "requestRefund": "Request Refund",
-    "requestRefundTitle": "Request a Refund",
-    "submitRefundRequest": "Submit Refund Request",
-    "status": "स्थिति",
-    "statusPaid": "भुगतान किया",
-    "statusUnpaid": "बकाया",
-    "statusImported": "आयातित"
+    "errorDownloadReceiptFailed": "रसीद डाउनलोड करने में विफल।"
   },
   "checkout": {
     "title": "भुगतान सारांश",
     "subtotal": "उप-योग",
-    "feeExplanation": "जब आप देते हैं, तो एक छोटा हिस्सा उन माध्यमों का समर्थन करता है जो आपकी भेंट को आगे ले जाते हैं, यह सुनिश्चित करते हुए कि आपका उपहार चर्च तक पूर्ण और अबाधित पहुँचे।",
     "processingFee": "प्रोसेसिंग शुल्क ({{percent}}%)",
     "waived": "माफ़",
     "total": "कुल राशि",
@@ -1964,12 +1809,5 @@
   },
   "offline": {
     "message": "आप ऑंफ़लाइन हैं। कुछ सुविधाएँ उपलब्ध नहीं हो सकतीं।"
-  },
-  "churchPicker": {
-    "title": "अपना चर्च चुनें",
-    "subtitle": "आप कई चर्चों से जुड़े हैं। जारी रखने के लिए एक चुनें।",
-    "unnamedChurch": "अनाम चर्च",
-    "admin": "एडमिन",
-    "member": "सदस्य"
   }
 }

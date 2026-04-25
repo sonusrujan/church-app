@@ -15,9 +15,11 @@ export default function BulkImportTab() {
   const [results, setResults] = useState<Array<{ row: number; status: string; error?: string; id?: string }> | null>(null);
 
   function handleCsvData(rows: CsvRow[]) {
+    // Serialize with a TAB delimiter so embedded commas in names/addresses survive
+    // the round-trip to the editable textarea.
     const lines = rows.map((r) => {
       const phone = r.phone_number?.trim() ? normalizeIndianPhone(r.phone_number) : "";
-      return [r.full_name, r.email, phone, r.address || ""].join(", ");
+      return [r.full_name || "", r.email || "", phone, r.address || ""].join("\t");
     });
     setText(lines.join("\n"));
     setShowPreview(true);
@@ -25,11 +27,33 @@ export default function BulkImportTab() {
   }
 
   function getParsedMembers() {
-    return text.trim().split("\n").filter(Boolean).map((line) => {
-      const parts = line.split(",").map((s) => s.trim());
+    const rows = text.trim().split("\n").filter(Boolean).map((line) => {
+      // Accept both TAB-delimited (from CSV upload) and legacy comma-delimited (manual paste).
+      const parts = line.includes("\t")
+        ? line.split("\t").map((s) => s.trim())
+        : line.split(",").map((s) => s.trim());
       const rawPhone = parts[2] || "";
-      return { full_name: parts[0] || "", email: parts[1] || "", phone_number: rawPhone ? normalizeIndianPhone(rawPhone) : undefined, address: parts[3] || undefined };
+      return {
+        full_name: parts[0] || "",
+        email: (parts[1] || "").toLowerCase(),
+        phone_number: rawPhone ? normalizeIndianPhone(rawPhone) : undefined,
+        address: parts[3] || undefined,
+      };
     });
+
+    // Dedup within this import: drop later rows that share the same phone or email
+    // (empty phone/email counts as "no match" — multiple empty-email rows are kept).
+    const seenPhones = new Set<string>();
+    const seenEmails = new Set<string>();
+    const deduped: typeof rows = [];
+    for (const r of rows) {
+      if (r.phone_number && seenPhones.has(r.phone_number)) continue;
+      if (r.email && seenEmails.has(r.email)) continue;
+      if (r.phone_number) seenPhones.add(r.phone_number);
+      if (r.email) seenEmails.add(r.email);
+      deduped.push(r);
+    }
+    return deduped;
   }
 
   async function handleImport() {

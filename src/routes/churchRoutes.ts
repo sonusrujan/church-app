@@ -66,26 +66,6 @@ router.get("/public-search", publicSearchLimiter, async (req, res) => {
   }
 });
 
-// ── Public: preview church by code (for JoinPage confirmation) ──
-router.get("/preview/:code", publicSearchLimiter, async (req, res) => {
-  try {
-    const code = String(req.params.code || "").trim();
-    if (!/^\d{8}$/.test(code)) {
-      return res.status(400).json({ error: "Invalid church code format" });
-    }
-    const { rows } = await pool.query(
-      `SELECT name, address, logo_url FROM churches WHERE church_code = $1 LIMIT 1`,
-      [code],
-    );
-    if (!rows.length) {
-      return res.status(404).json({ error: "Church not found" });
-    }
-    return res.json({ name: rows[0].name, address: rows[0].address || null, logo_url: rows[0].logo_url || null });
-  } catch (err: any) {
-    return res.status(500).json({ error: "Preview failed" });
-  }
-});
-
 function resolveScopedChurchId(req: AuthRequest, requestedChurchId?: string) {
   if (!req.user) {
     throw new Error("Unauthenticated");

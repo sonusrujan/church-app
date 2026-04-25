@@ -1,6 +1,8 @@
 import { UUID_REGEX } from "../utils/validation";
 import { Router } from "express";
+import jwt from "jsonwebtoken";
 import rateLimit from "express-rate-limit";
+import { JWT_SECRET } from "../config";
 import { requireAuth, AuthRequest } from "../middleware/requireAuth";
 import { requireRegisteredUser } from "../middleware/requireRegisteredUser";
 import { createPaymentOrder, verifyPayment, storePayment, fetchRazorpayOrder } from "../services/paymentService";
@@ -127,8 +129,8 @@ function normalizeSubscriptionMonthCounts(input: unknown): Record<string, number
 router.get("/my-monthly-history", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
   try {
     const dashboard = await getCurrentMemberDashboard(req);
-    const limit = Number(req.query.limit) || 10;
-    const offset = Number(req.query.offset) || 0;
+    const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 200);
+    const offset = Math.max(Number(req.query.offset) || 0, 0);
     const personName = typeof req.query.person_name === "string" ? req.query.person_name : undefined;
     const fromDate = typeof req.query.from_date === "string" ? req.query.from_date : undefined;
 
@@ -1017,9 +1019,18 @@ router.get("/:paymentId/receipt", requireAuth, requireRegisteredUser, async (req
 
     const { data: church } = await db
       .from("churches")
-      .select("name")
+      .select("name, legal_name, registered_address, pan_number, gstin, tax_80g_registration_number, receipt_signatory_name, receipt_signatory_title")
       .eq("id", payment.church_id)
-      .maybeSingle<{ name: string }>();
+      .maybeSingle<{
+        name: string;
+        legal_name: string | null;
+        registered_address: string | null;
+        pan_number: string | null;
+        gstin: string | null;
+        tax_80g_registration_number: string | null;
+        receipt_signatory_name: string | null;
+        receipt_signatory_title: string | null;
+      }>();
 
     let subscriptionName: string | null = null;
     if (payment.subscription_id) {
@@ -1064,6 +1075,13 @@ router.get("/:paymentId/receipt", requireAuth, requireRegisteredUser, async (req
       subscription_id: payment.subscription_id,
       subscription_name: subscriptionName,
       months_covered: monthsCovered,
+      church_legal_name: church?.legal_name || null,
+      church_registered_address: church?.registered_address || null,
+      church_pan_number: church?.pan_number || null,
+      church_gstin: church?.gstin || null,
+      church_tax_80g_number: church?.tax_80g_registration_number || null,
+      receipt_signatory_name: church?.receipt_signatory_name || null,
+      receipt_signatory_title: church?.receipt_signatory_title || null,
     });
 
     const safeFileName = `receipt-${receiptNumber}.pdf`;
@@ -1229,9 +1247,31 @@ router.post("/public/donation/verify", publicDonationLimiter, validate(publicDon
     const fund = typeof req.body?.fund === "string" ? req.body.fund.trim().slice(0, 200) : "";
     const message = typeof req.body?.message === "string" ? req.body.message.trim().slice(0, 500) : "";
 
+    // Opportunistic auth: if a logged-in member is donating to their own
+    // church, link this payment to their member_id so it appears in their
+    // dashboard / history. Anonymous donors continue to work unchanged.
+    let linkedMemberId: string | null = null;
+    try {
+      const authHeader = req.headers.authorization;
+      if (authHeader?.startsWith("Bearer ")) {
+        const token = authHeader.slice(7);
+        if (token && token.split(".").length === 3) {
+          const decoded = jwt.verify(token, JWT_SECRET) as { sub?: string; email?: string; phone?: string; church_id?: string };
+          if (decoded?.sub && decoded?.church_id === churchId) {
+            const memberDashboard = await getMemberDashboardByEmail(decoded.email || "", decoded.phone || "");
+            if (memberDashboard?.member?.id) {
+              linkedMemberId = memberDashboard.member.id;
+            }
+          }
+        }
+      }
+    } catch {
+      // Token invalid/expired — fall back to anonymous public donation.
+    }
+
     // Generate receipt number for the public donation
     const receiptNumber = createReceiptNumber({
-      member_id: "PUBLIC",
+      member_id: linkedMemberId || "PUBLIC",
       payment_date: new Date().toISOString(),
       transaction_id: razorpay_payment_id,
     });
@@ -1240,11 +1280,11 @@ router.post("/public/donation/verify", publicDonationLimiter, validate(publicDon
     const { data, error } = await db
       .from("payments")
       .insert([{
-        member_id: null,
+        member_id: linkedMemberId,
         subscription_id: null,
         church_id: churchId,
         amount: verifiedAmount,
-        payment_method: "public_donation",
+        payment_method: linkedMemberId ? "donation" : "public_donation",
         transaction_id: razorpay_payment_id,
         payment_status: "success",
         payment_date: new Date().toISOString(),

@@ -22,7 +22,9 @@ import {
 import { logger } from "../utils/logger";
 import { db } from "../services/dbClient";
 import { createRefreshToken } from "../services/refreshTokenService";
+import { refreshCookieOptions } from "../utils/refreshCookie";
 import { requireAuth, AuthRequest } from "../middleware/requireAuth";
+import { checkOtpSendAllowed } from "../services/otpRateLimitService";
 
 const router = Router();
 
@@ -195,19 +197,35 @@ async function ensureJunctionRows(userId: string) {
 // ── Send OTP via Twilio Verify ──
 router.post("/send", validate(otpSendSchema), async (req: Request, res: Response) => {
   try {
-    const { phone } = req.body;
+    const { phone, channel } = req.body as { phone: string; channel?: "sms" | "call" };
+    const verifyChannel: "sms" | "call" = channel === "call" ? "call" : "sms";
 
     const cleaned = normalizeIndianPhone(phone);
     if (!/^\+91[6-9]\d{9}$/.test(cleaned)) {
       return res.status(400).json({ error: "Enter a valid 10-digit Indian mobile number" });
     }
 
+    // App-side rate limit (DB-backed, survives multi-instance + IP switching)
+    const rl = await checkOtpSendAllowed(cleaned, req.ip);
+    if (!rl.allowed) {
+      res.setHeader("Retry-After", String(rl.retryAfterSec));
+      return res.status(429).json({
+        error: `Too many OTP requests. Please try again in ${Math.ceil(rl.retryAfterSec / 60)} minute(s).`,
+      });
+    }
+
     const client = getTwilioClient();
     await client.verify.v2.services(TWILIO_VERIFY_SERVICE_SID)
-      .verifications.create({ to: cleaned, channel: "sms" });
+      .verifications.create({ to: cleaned, channel: verifyChannel });
 
-    logger.info({ phone_number: cleaned }, "OTP sent via Twilio Verify");
-    return res.json({ success: true, message: "OTP sent successfully" });
+    logger.info({ phone_number: cleaned, channel: verifyChannel }, "OTP sent via Twilio Verify");
+    return res.json({
+      success: true,
+      message: verifyChannel === "call"
+        ? "We're calling you with the verification code"
+        : "OTP sent successfully",
+      channel: verifyChannel,
+    });
   } catch (err: any) {
     logger.error({ err }, "OTP send error");
     // Twilio rate-limits return status 429 / code 60203
@@ -403,6 +421,37 @@ router.post("/verify", validate(otpVerifySchema), async (req: Request, res: Resp
       }
     }
 
+    // SEC: Reject token issuance for family dependents (prevents holding a valid JWT).
+    if (!SUPER_ADMIN_PHONES.includes(cleaned)) {
+      const { data: memberRow } = await db
+        .from("members")
+        .select("id")
+        .eq("phone_number", cleaned)
+        .limit(1)
+        .maybeSingle();
+      if (memberRow) {
+        const { data: familyLink } = await db
+          .from("family_members")
+          .select("id, member_id")
+          .eq("linked_to_member_id", memberRow.id)
+          .limit(1)
+          .maybeSingle();
+        if (familyLink) {
+          let headName = "your family head";
+          const { data: head } = await db
+            .from("members")
+            .select("full_name")
+            .eq("id", familyLink.member_id)
+            .maybeSingle();
+          if (head?.full_name) headName = head.full_name;
+          return res.status(403).json({
+            error: `family_dependent:${headName}`,
+            message: `Your account is registered as a family member under ${headName}. Please ask them to remove you from their family list to proceed independently.`,
+          });
+        }
+      }
+    }
+
     // Look up role + church_id from junction table (falls back to users table)
     const profile = await getUserProfileForJwt(userId, userEmail, userPhone);
 
@@ -441,14 +490,7 @@ router.post("/verify", validate(otpVerifySchema), async (req: Request, res: Resp
 
     // Issue refresh token and set as httpOnly cookie (SH-008: store church_id for tenant-scoped sessions)
     const { token: refreshToken, expiresAt } = await createRefreshToken(userId, profile.church_id || undefined);
-    const isProduction = process.env.NODE_ENV === "production";
-    res.cookie("refresh_token", refreshToken, {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: "strict",
-      path: "/api/auth/refresh",
-      expires: expiresAt,
-    });
+    res.cookie("refresh_token", refreshToken, refreshCookieOptions({ expires: expiresAt }));
 
     logger.info({ phone: cleaned, userId, church_id: profile.church_id, churches_count: userChurches.length }, "OTP verified, JWT issued");
     return res.json({
@@ -471,6 +513,14 @@ router.post("/resend", validate(otpSendSchema), async (req: Request, res: Respon
     const cleaned = normalizeIndianPhone(phone);
     if (!/^\+91[6-9]\d{9}$/.test(cleaned)) {
       return res.status(400).json({ error: "Enter a valid 10-digit Indian mobile number" });
+    }
+
+    const rl = await checkOtpSendAllowed(cleaned, req.ip);
+    if (!rl.allowed) {
+      res.setHeader("Retry-After", String(rl.retryAfterSec));
+      return res.status(429).json({
+        error: `Too many OTP requests. Please try again in ${Math.ceil(rl.retryAfterSec / 60)} minute(s).`,
+      });
     }
 
     const client = getTwilioClient();

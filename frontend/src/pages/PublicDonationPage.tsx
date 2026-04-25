@@ -15,7 +15,7 @@ type ChurchItem = { id: string; name: string; location?: string | null };
 
 type Props = {
   isLoggedIn?: boolean;
-  userChurch?: { id: string; name: string; platform_fee_enabled?: boolean; platform_fee_percentage?: number };
+  userChurch?: { id: string; name: string };
 };
 
 export default function PublicDonationPage({ isLoggedIn = false, userChurch }: Props) {
@@ -64,20 +64,6 @@ export default function PublicDonationPage({ isLoggedIn = false, userChurch }: P
   // Whether user pre-selected a church via URL or login
   const isChurchPreSelected = !!(urlChurchId || userChurch?.id);
   const [loadError, setLoadError] = useState("");
-
-  // Platform-configured public donation fee percentage
-  const [publicFeePercent, setPublicFeePercent] = useState(5);
-
-  // Fetch the superadmin-configured public donation fee on mount
-  useEffect(() => {
-    apiRequest<{ public_donation_fee_percent?: number }>("/api/payments/public/config")
-      .then((data) => {
-        if (data?.public_donation_fee_percent != null) {
-          setPublicFeePercent(Number(data.public_donation_fee_percent));
-        }
-      })
-      .catch(() => { /* default to 5% */ });
-  }, []);
 
   // Initialize fund options from translated defaults
   useEffect(() => {
@@ -184,14 +170,6 @@ export default function PublicDonationPage({ isLoggedIn = false, userChurch }: P
       setEmailWarning(t("donation.invalidEmail"));
       return;
     }
-    // Logged-in members of the selected church use the church's configured fee.
-    // Public (unauthenticated) donors use the superadmin-configured platform fee.
-    const feeEnabled = isOwnChurchDonation && userChurch?.platform_fee_enabled !== undefined
-      ? !!userChurch.platform_fee_enabled
-      : true;
-    const feePct = isOwnChurchDonation && userChurch?.platform_fee_percentage !== undefined
-      ? Number(userChurch.platform_fee_percentage)
-      : publicFeePercent;
     navigate("/donate/checkout", {
       state: {
         amount: selectedAmount,
@@ -202,8 +180,6 @@ export default function PublicDonationPage({ isLoggedIn = false, userChurch }: P
         donorEmail: trimmedEmail,
         donorPhone: donorPhone.trim(),
         message: message.trim(),
-        platformFeeEnabled: feeEnabled,
-        platformFeePercent: feePct,
       },
     });
   }

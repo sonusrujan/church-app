@@ -8,7 +8,6 @@ import { useI18n } from "../../i18n";
 
 type Diocese = { id: string; name: string };
 type ChurchItem = { id: string; name: string; location?: string | null };
-type FundRaw = { name: string; description?: string | null } | string;
 type FundItem = string;
 
 const SITE_URL = "https://shalomapp.in";
@@ -56,12 +55,11 @@ export default function DonationLinksTab() {
   // Load funds for selected church
   useEffect(() => {
     if (!selectedChurchId) { setFunds([]); return; }
-    apiRequest<FundRaw[]>(`/api/donation-funds/public?church_id=${encodeURIComponent(selectedChurchId)}`)
+    apiRequest<FundItem[]>(`/api/donation-funds/public?church_id=${encodeURIComponent(selectedChurchId)}`)
       .then((data) => {
         if (Array.isArray(data) && data.length > 0) {
-          const names = data.map((f) => (typeof f === "string" ? f : f.name));
-          setFunds(names);
-          setSelectedFund(names[0]);
+          setFunds(data);
+          setSelectedFund(data[0]);
         }
       })
       .catch((e) => console.warn("Failed to load funds", e));
@@ -154,12 +152,12 @@ export default function DonationLinksTab() {
   }
 
   return (
-    <div className="admin-tab-content">
-      <h2 style={{ marginBottom: "0.5rem" }}>
+    <article className="panel">
+      <h3 style={{ marginBottom: "0.5rem" }}>
         <QrCode size={20} style={{ verticalAlign: "middle", marginRight: 6 }} />
         {t("adminTabs.donationLinks.title")}
-      </h2>
-      <p style={{ color: "var(--on-surface-variant)", fontSize: "0.875rem", marginBottom: "1.5rem" }}>
+      </h3>
+      <p className="muted" style={{ fontSize: "0.875rem", marginBottom: "1.5rem" }}>
         {t("adminTabs.donationLinks.description")}
       </p>
 
@@ -267,10 +265,10 @@ export default function DonationLinksTab() {
       )}
 
       {!selectedChurchId && (
-        <p style={{ color: "var(--outline)", textAlign: "center", padding: "2rem 0" }}>
-          {isSuperAdmin ? "Select a diocese and church above to generate donation links." : "No church selected."}
+        <p className="muted" style={{ textAlign: "center", padding: "2rem 0" }}>
+          {isSuperAdmin ? t("adminTabs.donationLinks.selectScopeHint") : t("adminTabs.donationLinks.noChurchSelected")}
         </p>
       )}
-    </div>
+    </article>
   );
 }

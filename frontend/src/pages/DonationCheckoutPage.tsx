@@ -4,6 +4,7 @@ import { Heart, ShieldCheck, ArrowLeft, CheckCircle, Download, AlertTriangle } f
 import shalomLogo from "../assets/shalom-logo.png";
 import { openRazorpayCheckout } from "../lib/razorpayCheckout";
 import { apiRequest } from "../lib/api";
+import { useApp } from "../context/AppContext";
 import { useI18n } from "../i18n";
 import CheckoutSummary from "../components/CheckoutSummary";
 
@@ -24,6 +25,7 @@ export default function DonationCheckoutPage({ isLoggedIn = false }: { isLoggedI
   const location = useLocation();
   const navigate = useNavigate();
   const state = location.state as DonationState | null;
+  const { token, refreshMemberDashboard } = useApp();
 
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
@@ -81,9 +83,11 @@ export default function DonationCheckoutPage({ isLoggedIn = false }: { isLoggedI
     setError("");
 
     try {
-      // 1. Create order
+      // 1. Create order — pass token when logged in so server can link payment to member
+      const authedToken = isLoggedIn ? token : undefined;
       const orderData = await apiRequest<{ key_id: string; order: { id: string; amount: number; currency: string } }>("/api/payments/public/donation/order", {
         method: "POST",
+        token: authedToken,
         body: {
           amount,
           church_id: churchId,
@@ -119,6 +123,7 @@ export default function DonationCheckoutPage({ isLoggedIn = false }: { isLoggedI
       // 3. Verify payment
       await apiRequest("/api/payments/public/donation/verify", {
         method: "POST",
+        token: authedToken,
         body: {
           razorpay_order_id: razorpayResponse.razorpay_order_id,
           razorpay_payment_id: razorpayResponse.razorpay_payment_id,
@@ -135,6 +140,10 @@ export default function DonationCheckoutPage({ isLoggedIn = false }: { isLoggedI
 
       setSuccessTxnId(razorpayResponse.razorpay_payment_id);
       setSuccess(true);
+      // Refresh member dashboard so the new donation appears immediately.
+      if (isLoggedIn && refreshMemberDashboard) {
+        refreshMemberDashboard().catch(() => { /* non-blocking */ });
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : t("donation.errorPaymentFailed");
       if ((err as any)?.cancelled || msg.includes("cancelled")) {

@@ -220,7 +220,7 @@ export async function searchChurches(queryText: string, limit = 50) {
     .limit(size);
 
   if (q) {
-    const escaped = q.replace(/,/g, "").replace(/_/g, "\\_");
+    const escaped = q.replace(/,/g, "").replace(/%/g, "").replace(/_/g, "\\_");
     query = query.or(
       `name.ilike.%${escaped}%,church_code.ilike.%${escaped}%,address.ilike.%${escaped}%,location.ilike.%${escaped}%,contact_phone.ilike.%${escaped}%`
     );
@@ -281,8 +281,10 @@ export async function createChurch(input: CreateChurchInput) {
   if (typeof input.platform_fee_enabled === "boolean") {
     insertPayload.platform_fee_enabled = input.platform_fee_enabled;
   }
-  if (typeof input.platform_fee_percentage === "number" && input.platform_fee_percentage >= 0) {
+  if (typeof input.platform_fee_percentage === "number" && input.platform_fee_percentage >= 0 && input.platform_fee_percentage <= 10) {
     insertPayload.platform_fee_percentage = input.platform_fee_percentage;
+  } else if (typeof input.platform_fee_percentage === "number") {
+    throw new Error("platform_fee_percentage must be between 0 and 10");
   }
   if (typeof input.service_enabled === "boolean") {
     insertPayload.service_enabled = input.service_enabled;
@@ -459,13 +461,59 @@ export async function deleteChurch(churchId: string) {
     throw new Error("Cannot delete church while a super admin user is mapped to it");
   }
 
-  const { error } = await db
+  const now = new Date().toISOString();
+
+  // C3: Cascade soft-delete to all church-owned entities
+  // Soft-delete members
+  await db
+    .from("members")
+    .update({ deleted_at: now })
+    .eq("church_id", churchId)
+    .is("deleted_at", null);
+
+  // Cancel active/overdue member subscriptions
+  await db
+    .from("subscriptions")
+    .update({ status: "cancelled" })
+    .eq("church_id", churchId)
+    .in("status", ["active", "overdue", "pending_first_payment"]);
+
+  // Cancel active church subscriptions (SaaS)
+  await db
+    .from("church_subscriptions")
+    .update({ status: "cancelled", updated_at: now })
+    .eq("church_id", churchId)
+    .in("status", ["active", "overdue"]);
+
+  // Soft-delete church events
+  await db
+    .from("church_events")
+    .update({ deleted_at: now })
+    .eq("church_id", churchId)
+    .is("deleted_at", null);
+
+  // Soft-delete announcements
+  await db
+    .from("announcements")
+    .update({ deleted_at: now })
+    .eq("church_id", churchId)
+    .is("deleted_at", null);
+
+  // Deactivate leadership assignments
+  await db
+    .from("church_leadership")
+    .update({ is_active: false, updated_at: now })
+    .eq("church_id", churchId)
+    .eq("is_active", true);
+
+  // Disable service
+  await db
     .from("churches")
-    .update({ deleted_at: new Date().toISOString() })
+    .update({ deleted_at: now, service_enabled: false })
     .eq("id", churchId);
-  if (error) {
-    logger.error({ err: error, churchId }, "deleteChurch (soft) failed");
-    throw error;
+
+  if (db) {
+    logger.info({ churchId }, "deleteChurch cascaded: members, subscriptions, events, announcements, leadership");
   }
 
   return { deleted: true, id: churchId };

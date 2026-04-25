@@ -53,14 +53,7 @@
     "photoUpdated": "Photo updated",
     "photoUploaded": "Photo uploaded",
     "sessionExpired": "Session expired",
-    "unexpectedError": "An unexpected error occurred.",
-    "done": "ಮುಗಿಯಿತು",
-    "member": "ಸದಸ್ಯ",
-    "change": "ಬದಲಾಯಿಸಿ",
-    "copy": "ನಕಲು",
-    "copied": "ನಕಲಾಗಿದೆ!",
-    "prev": "ಹಿಂದಿನ",
-    "name": "ಹೆಸರು"
+    "unexpectedError": "An unexpected error occurred."
   },
   "auth": {
     "welcome": "ಶಾಲೋಮ್‌ಗೆ ಸ್ವಾಗತ",
@@ -86,6 +79,9 @@
     "familyMemberAccount": "ಕುಟುಂಬ ಸದಸ್ಯ ಖಾತೆ",
     "familyMemberDescription": "ನೀವು {{name}} ಅಡಿಯಲ್ಲಿ ಕುಟುಂಬ ಸದಸ್ಯರಾಗಿ ನೋಂದಾಯಿಸಲಾಗಿದೆ.",
     "familyMemberHint": "ಈ ಅಪ್ಲಿಕೇಶನ್ ಅನ್ನು ಸ್ವತಂತ್ರವಾಗಿ ಬಳಸಲು, ದಯವಿಟ್ಟು {{name}} ಅವರ ಕುಟುಂಬ ಸದಸ್ಯರ ಪಟ್ಟಿಯಿಂದ ನಿಮ್ಮನ್ನು ತೆಗೆದುಹಾಕಲು ಕೇಳಿ.",
+    "familyStep1": "{{name}} ಅನ್ನು ಸಂಪರ್ಕಿಸಿ ಅವರ ಆಪ್ ಅನ್ನು ತೆರೆಯಲು ಕೇಳಿ.",
+    "familyStep2": "ಅವರು ಸೆಟ್ಟಿಂಗ್‌ಗಳು → ಕುಟುಂಬ ಸದಸ್ಯರು ಮೂಲಕ ನಿಮ್ಮನ್ನು ತೆಗೆದುಹಾಕಬಹುದು.",
+    "familyStep3": "ತೆಗೆದ ನಂತರ, ಮುಂದುವರಿಸಲು ಕೆಳಗಿನ 'ಮರುಪ್ರಯತ್ನಿಸಿ' ಟ್ಯಾಪ್ ಮಾಡಿ.",
     "yourFamilyHead": "ನಿಮ್ಮ ಕುಟುಂಬ ಮುಖ್ಯಸ್ಥ",
     "workspaceError": "ಏನೋ ತಪ್ಪಾಗಿದೆ",
     "preparingWorkspace": "ವರ್ಕ್‌ಸ್ಪೇಸ್ ತಯಾರಾಗುತ್ತಿದೆ",
@@ -114,16 +110,7 @@
     "memberDashboardReady": "Welcome back. Member dashboard is ready.",
     "otpSentSuccess": "OTP sent! Check your phone and enter the code below.",
     "pleaseSignInFirst": "Please sign in first.",
-    "signedOut": "You have been signed out.",
-    "familyWhatCanYouDo": "ನೀವು ಏನು ಮಾಡಬಹುದು?",
-    "familyTipContactHead": "ನಿಮ್ಮ ಕುಟುಂಬದ ಮುಖ್ಯಸ್ಥರನ್ನು ಸಂಪರ್ಕಿಸಿ.",
-    "familyTipContactAdmin": "ಹೆಚ್ಚಿನ ಸಹಾಯಕ್ಕಾಗಿ ನಿಮ್ಮ ಚರ್ಚ್ ನಿರ್ವಾಹಕರನ್ನು ಸಂಪರ್ಕಿಸಿ.",
-    "phoneInvalid10Digits": "ಫೋನ್ ಸಂಖ್ಯೆ ನಿಖರವಾಗಿ 10 ಅಂಕೆಗಳಾಗಿರಬೇಕು.",
-    "resendOtp": "OTP ಮರುಕಳಿಸಿ",
-    "resendOtpIn": "{{seconds}}s ನಲ್ಲಿ OTP ಮರುಕಳಿಸಿ",
-    "paymentConfigCheckFailed": "Payment config check failed: {{message}}",
-    "paymentsDisabledFallback": "Payments are disabled for this church.",
-    "workspaceLoadError": "Something went wrong while loading your workspace. Please try again."
+    "signedOut": "You have been signed out."
   },
   "nav": {
     "dashboard": "ಡ್ಯಾಶ್‌ಬೋರ್ಡ್",
@@ -144,8 +131,7 @@
     "shalomSuperAdmin": "SHALOM ಸೂಪರ್ ಅಡ್ಮಿನ್ ಕನ್ಸೋಲ್",
     "shalomChurchAdmin": "SHALOM ಚರ್ಚ್ ಅಡ್ಮಿನ್ ವರ್ಕ್‌ಸ್ಪೇಸ್",
     "shalomMember": "SHALOM ಸದಸ್ಯ ವರ್ಕ್‌ಸ್ಪೇಸ್",
-    "toggleNavigation": "Toggle navigation",
-    "switchChurch": "ಚರ್ಚ್ ಬದಲಾಯಿಸಿ"
+    "toggleNavigation": "Toggle navigation"
   },
   "dashboard": {
     "welcomeUser": "ಸ್ವಾಗತ, {{name}}.",
@@ -247,21 +233,7 @@
     "subscriptionDuePayment": "Subscription Due Payment",
     "month": "ತಿಂಗಳು",
     "months": "ತಿಂಗಳುಗಳು",
-    "pendingMonths": "ಬಾಕಿ ತಿಂಗಳುಗಳು",
-    "paymentSuccessTitle": "ಪಾವತಿ ಯಶಸ್ವಿ!",
-    "amountPaid": "ಪಾವತಿಸಿದ ಮೊತ್ತ",
-    "transactionId": "ವಹಿವಾಟು ಐಡಿ",
-    "paidOn": "ಪಾವತಿ ದಿನಾಂಕ",
-    "paymentSuccessHint": "ರಸೀದಿ ನಿಮ್ಮ ಪಾವತಿ ಇತಿಹಾಸದಲ್ಲಿ ಉಳಿಸಲಾಗಿದೆ.",
-    "requestCancellation": "ರದ್ದತಿ ವಿನಂತಿ",
-    "cancelWarning": "ಸಲ್ಲಿಸಿದ ನಂತರ, ನಿಮ್ಮ ನಿರ್ವಾಹಕರು ರದ್ದತಿ ವಿನಂತಿಯನ್ನು ಪರಿಶೀಲಿಸುತ್ತಾರೆ. ಅನುಮೋದನೆಯವರೆಗೆ ನಿಮ್ಮ ಚಂದಾ ಸಕ್ರಿಯವಾಗಿರುತ್ತದೆ.",
-    "selectSubscriptionsToPay": "ಪಾವತಿಸಲು ಚಂದಾಗಳನ್ನು ಆಯ್ಕೆಮಾಡಿ.",
-    "noDueSubscriptions": "ಬಾಕಿ ಚಂದಾಗಳಿಲ್ಲ.",
-    "statusActive": "ಸಕ್ರಿಯ",
-    "statusOverdue": "ಬಾಕಿ",
-    "statusPending": "ಬಾಕಿ ಇರುವ",
-    "growthMetricsError": "Failed to load growth metrics.",
-    "openingPaymentGateway": "Opening payment gateway..."
+    "pendingMonths": "ಬಾಕಿ ತಿಂಗಳುಗಳು"
   },
   "profile": {
     "tabPersonal": "ವೈಯಕ್ತಿಕ",
@@ -406,24 +378,7 @@
     "subscriptionAmount": "ಚಂದಾ ಮೊತ್ತ",
     "memberDetails": "ಲಿಂಕ್ ಮಾಡಲಾದ ಸದಸ್ಯರ ವಿವರಗಳು",
     "manualFamilyMember": "ಈ ಸದಸ್ಯರು ನೋಂದಾಯಿತ ಪ್ರೊಫೈಲ್‌ಗೆ ಲಿಂಕ್ ಆಗಿಲ್ಲ.",
-    "verifyPhoneBeforeSave": "ಉಳಿಸುವ ಮೊದಲು ದಯವಿಟ್ಟು ಹೊಸ ಫೋನ್ ಸಂಖ್ಯೆಯನ್ನು OTP ಯೊಂದಿಗೆ ಪರಿಶೀಲಿಸಿ",
-    "deleteSpecialDateTitle": "Delete Special Date",
-    "head": "Head",
-    "occupationBusiness": "Business",
-    "occupationFarmer": "Farmer",
-    "occupationGovEmployee": "Govt. Employee",
-    "occupationHomemaker": "Homemaker",
-    "occupationOther": "Other",
-    "occupationPastor": "Pastor",
-    "occupationPrivEmployee": "Private Employee",
-    "occupationRetired": "Retired",
-    "occupationSelfEmployed": "Self-Employed",
-    "occupationStudent": "Student",
-    "occupationTeacher": "Teacher",
-    "phoneChangeVerifyFirst": "Verify the new phone number before saving.",
-    "photoRemovedSaveProfile": "Photo removed. Click Save Profile to apply.",
-    "photoSelectedSaveProfile": "Photo selected. Click Save Profile to apply.",
-    "unsaved": "Unsaved"
+    "verifyPhoneBeforeSave": "ಉಳಿಸುವ ಮೊದಲು ದಯವಿಟ್ಟು ಹೊಸ ಫೋನ್ ಸಂಖ್ಯೆಯನ್ನು OTP ಯೊಂದಿಗೆ ಪರಿಶೀಲಿಸಿ"
   },
   "history": {
     "heading": "ಇತಿಹಾಸ",
@@ -478,11 +433,7 @@
     "prayerPlaceholder": "ಪಾಸ್ಟರ್‌ಗಳು ಯಾವುದಕ್ಕಾಗಿ ಪ್ರಾರ್ಥಿಸಬೇಕೆಂದು ಹಂಚಿಕೊಳ್ಳಿ",
     "sendPrayerRequest": "ಪ್ರಾರ್ಥನಾ ವಿನಂತಿ ಕಳುಹಿಸಿ",
     "prayerCallToAction": "ಪ್ರಾರ್ಥನೆ ಬೇಕೆ? ಪ್ರಾರ್ಥನಾ ವಿನಂತಿ ಸಲ್ಲಿಸಿ, ಪಾಸ್ಟರ್ ನಿಮಗಾಗಿ ಪ್ರಾರ್ಥಿಸುತ್ತಾರೆ.",
-    "goToPrayerRequests": "ಪ್ರಾರ್ಥನಾ ವಿನಂತಿಗಳಿಗೆ ಹೋಗಿ",
-    "addToCalendar": "ಕ್ಯಾಲೆಂಡರ್‌ಗೆ ಸೇರಿಸಿ",
-    "markAllRead": "ಎಲ್ಲಾ ಓದಿದ ಎಂದು",
-    "going": "Going",
-    "interested": "Interested"
+    "goToPrayerRequests": "ಪ್ರಾರ್ಥನಾ ವಿನಂತಿಗಳಿಗೆ ಹೋಗಿ"
   },
   "prayer": {
     "selectPastor": "ಪಾಸ್ಟರ್ ಅನ್ನು ಆಯ್ಕೆ ಮಾಡಿ",
@@ -558,25 +509,7 @@
     "errorVerificationFailed": "Verification failed",
     "offeringDonation": "Offering / Donation",
     "scriptureRef": "— 2 Corinthians 9:7",
-    "scriptureVerse": "\"Each of you should give what you have decided in your heart to give, not reluctantly or under compulsion, for God loves a cheerful giver.\"",
-    "selectChurch": "ಚರ್ಚ್ ಆಯ್ಕೆಮಾಡಿ",
-    "chooseDiocese": "ಡಯಾಸಿಸ್ ಆಯ್ಕೆಮಾಡಿ",
-    "selectDiocesePlaceholder": "— ಡಯಾಸಿಸ್ ಆಯ್ಕೆಮಾಡಿ —",
-    "noChurchesInDiocese": "ಈ ಡಯಾಸಿಸ್‌ನಲ್ಲಿ ಚರ್ಚ್‌ಗಳು ಕಂಡುಬಂದಿಲ್ಲ.",
-    "churchSelected": "ಚರ್ಚ್ ಆಯ್ಕೆಯಾಗಿದೆ",
-    "invalidEmail": "ಅಮಾನ್ಯ ಇಮೇಲ್ ವಿಳಾಸ",
-    "phoneNumber": "ಫೋನ್ ಸಂಖ್ಯೆ",
-    "selectedChurch": "ಆಯ್ಕೆಮಾಡಿದ ಚರ್ಚ್",
-    "donateToAnotherChurch": "Donate to another church",
-    "donateToYourChurch": "Donate to Your Church",
-    "fundBuildingFund": "Building Fund",
-    "fundCommunityAid": "Community Aid",
-    "fundGeneralOffering": "General Offering",
-    "fundMissionOutreach": "Mission & Outreach",
-    "fundOther": "Other",
-    "fundYouthMinistry": "Youth Ministry",
-    "receiptWarning": "Please save your receipt now. As a guest donor, this receipt will not be available once you leave this page.",
-    "saveReceipt": "Save Receipt"
+    "scriptureVerse": "\"Each of you should give what you have decided in your heart to give, not reluctantly or under compulsion, for God loves a cheerful giver.\""
   },
   "home": {
     "title": "ಶಾಲೋಮ್‌ಗೆ ಸ್ವಾಗತ",
@@ -607,9 +540,7 @@
     "codeRequired": "ಚರ್ಚ್ ಕೋಡ್ ಅಗತ್ಯ. ಕೋಡ್‌ಗಾಗಿ ನಿಮ್ಮ ಚರ್ಚ್ ನಿರ್ವಾಹಕರನ್ನು ಕೇಳಿ.",
     "codeMustBe8Digits": "ಚರ್ಚ್ ಕೋಡ್ ನಿಖರವಾಗಿ 8 ಅಂಕಿಗಳಾಗಿರಬೇಕು.",
     "joinButton": "ಚರ್ಚ್‌ಗೆ ಸೇರಿ",
-    "errorJoinFailed": "Failed to join church.",
-    "noCodeHint": "ಕೋಡ್ ಇಲ್ಲವೇ? ನಿಮ್ಮ ಚರ್ಚ್ ನಿರ್ವಾಹಕರನ್ನು ಕೇಳಿ.",
-    "exploreChurches": "ಚರ್ಚ್‌ಗಳನ್ನು ಅನ್ವೇಷಿಸಿ"
+    "errorJoinFailed": "Failed to join church."
   },
   "admin": {
     "console": "ಕನ್ಸೋಲ್",
@@ -668,9 +599,7 @@
     "pushSms": "Push / SMS",
     "refundRequests": "Refund Requests",
     "saasPlatform": "SaaS Platform",
-    "specialDates": "Special Dates",
-    "donationLinksQR": "Donation Links & QR",
-    "searchTools": "Search tools..."
+    "specialDates": "Special Dates"
   },
   "relations": {
     "spouse": "ಪತಿ/ಪತ್ನಿ",
@@ -696,7 +625,6 @@
   },
   "settings": {
     "title": "ಸೆಟ್ಟಿಂಗ್‌ಗಳು",
-    "editProfile": "ಪ್ರೊಫೈಲ್ ಸಂಪಾದಿಸಿ",
     "lightMode": "ಲೈಟ್ ಮೋಡ್",
     "darkMode": "ಡಾರ್ಕ್ ಮೋಡ್",
     "switchToLight": "ಲೈಟ್‌ಗೆ ಬದಲಾಯಿಸಿ",
@@ -723,26 +651,7 @@
     "deleteWarning2": "ಸಕ್ರಿಯ ಚಂದಾದಾರಿಕೆಗಳನ್ನು ತಕ್ಷಣ ರದ್ದುಗೊಳಿಸಲಾಗುತ್ತದೆ.",
     "deleteWarning3": "ನಿಮ್ಮ ಖಾತೆಗೆ ಲಿಂಕ್ ಮಾಡಲಾದ ಕುಟುಂಬ ಸದಸ್ಯರನ್ನು ಅನ್‌ಲಿಂಕ್ ಮಾಡಲಾಗುತ್ತದೆ.",
     "deleteWarning4": "ನಿರ್ವಾಹಕರು ಅನುಮೋದಿಸಿದ ನಂತರ ಈ ಕ್ರಿಯೆಯನ್ನು ರದ್ದುಗೊಳಿಸಲು ಸಾಧ್ಯವಿಲ್ಲ.",
-    "deleteWarningTitle": "ಎಚ್ಚರಿಕೆ: ಈ ಕ್ರಿಯೆಯ ಗಂಭೀರ ಪರಿಣಾಮಗಳಿವೆ",
-    "typeDeleteToConfirm": "ದೃಢೀಕರಿಸಲು DELETE ಟೈಪ್ ಮಾಡಿ",
-    "signOutConfirmTitle": "ಸೈನ್ ಔಟ್?",
-    "signOutConfirmDesc": "ನೀವು ಖಚಿತವಾಗಿ ನಿಮ್ಮ ಖಾತೆಯಿಂದ ಸೈನ್ ಔಟ್ ಮಾಡಲು ಬಯಸುತ್ತೀರಾ?",
-    "deleteReasonMinLength": "Please provide at least 10 characters.",
-    "goToProfile": "Go to Profile",
-    "exportMyData": "Export My Data",
-    "exportMyDataHint": "Download all your personal data (profile, subscriptions, payments) as a JSON file.",
-    "downloadData": "Download",
-    "exportSuccess": "Your data has been downloaded successfully.",
-    "exportFailed": "Failed to export data. Please try again.",
-    "pushBlockedInstructions": "To enable: open your browser settings → Site Settings → Notifications → allow this site.",
-    "notifyCat_announcements": "Announcements",
-    "notifyCat_events": "Events & Calendar",
-    "notifyCat_family": "Family & Membership",
-    "notifyCat_payments": "Payments & Subscriptions",
-    "notifyCat_prayer": "Prayer Requests",
-    "notifyCategories": "Notification Categories",
-    "off": "Off",
-    "on": "On"
+    "deleteWarningTitle": "ಎಚ್ಚರಿಕೆ: ಈ ಕ್ರಿಯೆಯ ಗಂಭೀರ ಪರಿಣಾಮಗಳಿವೆ"
   },
   "banner": {
     "pushPrompt": "🔔 ಘೋಷಣೆಗಳು ಮತ್ತು ಜ್ಞಾಪನೆಗಳೊಂದಿಗೆ ಅಪ್‌ಡೇಟ್ ಆಗಲು ಪುಶ್ ಅಧಿಸೂಚನೆಗಳನ್ನು ಸಕ್ರಿಯಗೊಳಿಸಿ.",
@@ -937,10 +846,7 @@
       "impactEvents": "Events:",
       "impactNotifications": "Notifications:",
       "impactPrayerRequests": "Prayer Requests:",
-      "impactPayments": "Payments:",
-      "downloadQr": "Download QR",
-      "generateJoinQr": "Generate Join QR Code",
-      "joinQrHint": "Members can scan this QR code with their phone camera to join your church."
+      "impactPayments": "Payments:"
     },
     "createChurch": {
       "title": "Create Church",
@@ -1115,7 +1021,13 @@
       "errorNoField": "At least one field to update is required.",
       "errorNoSubscriptions": "This member has no subscriptions.",
       "errorLoadFailed": "Failed to load member subscriptions",
-      "successUpdated": "Subscription updated."
+      "successUpdated": "Subscription updated.",
+      "pauseSubButton": "Pause",
+      "pausing": "Pausing…",
+      "pauseSubscriptionTitle": "Pause subscription?",
+      "pauseSubscriptionMessage": "This will temporarily stop reminders and due tracking. You can resume it anytime.",
+      "pauseKeyword": "PAUSE",
+      "successPaused": "Subscription paused."
     },
     "events": {
       "title": "Events & Notifications",
@@ -1128,16 +1040,16 @@
       "addressHeader": "Address",
       "selectButton": "Select",
       "eventsToggle": "Events",
-      "notificationsToggle": "ಘೋಷಣೆಗಳು",
+      "notificationsToggle": "Notifications",
       "newEvent": "New Event",
-      "newNotification": "ಹೊಸ ಘೋಷಣೆ",
+      "newNotification": "New Notification",
       "editEvent": "Edit Event",
-      "editNotification": "ಘೋಷಣೆ ಸಂಪಾದಿಸಿ",
+      "editNotification": "Edit Notification",
       "createEvent": "Create Event",
-      "createNotification": "ಘೋಷಣೆ ರಚಿಸಿ",
+      "createNotification": "Create Notification",
       "titleLabel": "Title",
       "titlePlaceholderEvent": "Sunday Service",
-      "titlePlaceholderNotification": "ಮಹತ್ವದ ಘೋಷಣೆ",
+      "titlePlaceholderNotification": "Important Notice",
       "messageLabel": "Message",
       "messagePlaceholder": "Details...",
       "eventDateLabel": "Event Date",
@@ -1152,21 +1064,15 @@
       "createdHeader": "Created",
       "actionsHeader": "Actions",
       "noEventsYet": "No events yet.",
-      "noNotificationsYet": "ಇನ್ನೂ ಘೋಷಣೆಗಳಿಲ್ಲ.",
+      "noNotificationsYet": "No notifications yet.",
       "errorTitleMessageRequired": "Title and message are required.",
       "errorUploadFailed": "Failed to upload image",
       "successEventCreated": "Event created.",
       "successEventUpdated": "Event updated.",
       "successEventDeleted": "Event deleted.",
-      "successNotificationCreated": "ಘೋಷಣೆ ರಚಿಸಲಾಗಿದೆ.",
-      "successNotificationUpdated": "ಘೋಷಣೆ ನವೀಕರಿಸಲಾಗಿದೆ.",
-      "successNotificationDeleted": "ಘೋಷಣೆ ಅಳಿಸಲಾಗಿದೆ.",
-      "confirmDeleteEvent": "ನೀವು ಖಚಿತವಾಗಿ ಈ ಈವೆಂಟ್ ಅನ್ನು ಅಳಿಸಲು ಬಯಸುತ್ತೀರಾ?",
-      "confirmDeleteNotification": "ಈ ಘೋಷಣೆ ಅಳಿಸಬೇಕೇ?",
-      "endTimeLabel": "End Time",
-      "locationHeader": "Location",
-      "locationLabel": "Location",
-      "locationPlaceholder": "e.g. Church Main Hall, 123 Main St"
+      "successNotificationCreated": "Notification created.",
+      "successNotificationUpdated": "Notification updated.",
+      "successNotificationDeleted": "Notification deleted."
     },
     "export": {
       "title": "Data Export",
@@ -1197,9 +1103,7 @@
       "emptyDescription": "Family member addition requests will appear here.",
       "errorLoadFailed": "Failed to load family requests",
       "successApproved": "Family request approved.",
-      "successRejected": "Family request rejected.",
-      "memberIdLabel": "ಸದಸ್ಯ ಐಡಿ:",
-      "familyCountLabel": "ಕುಟುಂಬ ಸದಸ್ಯರು:"
+      "successRejected": "Family request rejected."
     },
     "incomeDashboard": {
       "title": "Income Dashboard",
@@ -1468,10 +1372,7 @@
       "emptyTitle": "No payments found",
       "emptyDescription": "This member has no recorded payments yet.",
       "errorSelectMember": "Please select a member first.",
-      "errorDownloadFailed": "Failed to download receipt",
-      "filterByPerson": "ವ್ಯಕ್ತಿ ಹೆಸರಿನ ಪ್ರಕಾರ ಫಿಲ್ಟರ್",
-      "paginationInfo": "ಅವರೋಹಣ ಕ್ರಮದಲ್ಲಿ ಪ್ರತಿ ಪುಟಕ್ಕೆ 10 ನಮೂದುಗಳನ್ನು ತೋರಿಸುತ್ತಿದೆ.",
-      "loadFailed": "ಪಾವತಿ ಇತಿಹಾಸ ಲೋಡ್ ಮಾಡಲು ವಿಫಲವಾಗಿದೆ"
+      "errorDownloadFailed": "Failed to download receipt"
     },
     "platformRazorpay": {
       "title": "Platform Razorpay Configuration",
@@ -1486,9 +1387,7 @@
       "configLoadedSuccess": "Platform config loaded.",
       "configSavedSuccess": "Platform Razorpay config saved.",
       "statusConfigured": "Configured — churches can pay platform fees online",
-      "statusNotConfigured": "Not configured — set both Key ID and Key Secret to enable online SaaS payments",
-      "donationFeeLabel": "ಸಾರ್ವಜನಿಕ ದಾನ ಪ್ಲಾಟ್‌ಫಾರ್ಮ್ ಶುಲ್ಕ (%)",
-      "donationFeeHint": "ಸಾರ್ವಜನಿಕ (ಸದಸ್ಯರಲ್ಲದ) ದಾನಗಳ ಮೇಲೆ ವಿಧಿಸುವ ಶುಲ್ಕ ಶೇಕಡಾವಾರು. ನಿಷ್ಕ್ರಿಯಗೊಳಿಸಲು 0 ಹಾಕಿ."
+      "statusNotConfigured": "Not configured — set both Key ID and Key Secret to enable online SaaS payments"
     },
     "preRegister": {
       "title": "Pre-register Member",
@@ -1585,12 +1484,7 @@
       "pillSent": "Sent",
       "pillFailed": "Failed",
       "pillCancelled": "Cancelled",
-      "charsCount": "{{count}}/320 characters",
-      "confirmSend": "ಈ ಅಧಿಸೂಚನೆಯನ್ನು {{target}} ಗೆ ಕಳುಹಿಸುವುದೇ?",
-      "confirmTargetMember": "ಆಯ್ಕೆಮಾಡಿದ ಸದಸ್ಯ",
-      "confirmTargetChurch": "ಆಯ್ಕೆಮಾಡಿದ ಚರ್ಚ್‌ನ ಎಲ್ಲ ಸದಸ್ಯರು",
-      "confirmTargetDiocese": "ಆಯ್ಕೆಮಾಡಿದ ಡಯಾಸಿಸ್‌ನ ಎಲ್ಲ ಸದಸ್ಯರು",
-      "confirmTargetAll": "ಎಲ್ಲಾ ಸದಸ್ಯರು ಜಾಗತಿಕವಾಗಿ"
+      "charsCount": "{{count}}/320 characters"
     },
     "refundRequests": {
       "title": "Refund Requests",
@@ -1689,8 +1583,7 @@
       "grantPhoneLabel": "Phone Number",
       "grantPhoneRequired": "Phone number is required.",
       "revokePhoneLabel": "Phone Number",
-      "revokePhoneRequired": "Phone number is required.",
-      "alreadyAdmin": "This user is already an admin."
+      "revokePhoneRequired": "Phone number is required."
     },
     "saasSettings": {
       "title": "Platform Settings",
@@ -1810,18 +1703,6 @@
       "successReviewed": "Deletion request {{decision}}.",
       "title": "Account Deletion Requests",
       "unknownMember": "Unknown Member"
-    },
-    "donationLinks": {
-      "title": "ದಾನ ಲಿಂಕ್‌ಗಳು & QR ಕೋಡ್‌ಗಳು",
-      "description": "ನಿಮ್ಮ ಚರ್ಚ್‌ಗಾಗಿ ಹಂಚಿಕೊಳ್ಳಬಹುದಾದ ದಾನ ಲಿಂಕ್‌ಗಳು ಮತ್ತು QR ಕೋಡ್‌ಗಳನ್ನು ರಚಿಸಿ.",
-      "diocese": "ಡಯಾಸಿಸ್",
-      "selectDiocese": "— ಡಯಾಸಿಸ್ ಆಯ್ಕೆಮಾಡಿ —",
-      "church": "ಚರ್ಚ್",
-      "selectChurch": "— ಚರ್ಚ್ ಆಯ್ಕೆಮಾಡಿ —",
-      "fund": "ಫಂಡ್",
-      "donationLink": "ದಾನ ಲಿಂಕ್",
-      "qrCode": "QR ಕೋಡ್",
-      "downloadQR": "QR ಕೋಡ್ ಡೌನ್‌ಲೋಡ್"
     }
   },
   "photo": {
@@ -1909,51 +1790,15 @@
     "shalomHelpsYou": "Shalom helps you to",
     "signInToJoin": "Sign in to join →",
     "whyIntro": "Shalom is an all-in-one church management app that helps your church stay connected, organized, and future-ready. Built to bring your entire congregation closer together.",
-    "whyShalom": "Why Shalom?",
-    "churchCode": "Church Code",
-    "members": "members"
+    "whyShalom": "Why Shalom?"
   },
   "historyPage": {
-    "errorDownloadReceiptFailed": "ರಸೀದಿ ಡೌನ್‌ಲೋಡ್ ಮಾಡಲು ವಿಫಲವಾಗಿದೆ.",
-    "title": "ಪಾವತಿ ಇತಿಹಾಸ",
-    "subtitle": "ನಿಮ್ಮ ಕುಟುಂಬದ ಪಾವತಿ ದಾಖಲೆಗಳನ್ನು ವೀಕ್ಷಿಸಿ.",
-    "allFamilyMembers": "ಎಲ್ಲಾ ಕುಟುಂಬ ಸದಸ್ಯರು",
-    "selectPerson": "ವ್ಯಕ್ತಿಯನ್ನು ಆಯ್ಕೆಮಾಡಿ",
-    "newerEntries": "ಹೊಸ",
-    "olderEntries": "ಹಳೆಯ",
-    "monthAndYear": "ತಿಂಗಳು & ವರ್ಷ",
-    "paidAmount": "ಪಾವತಿಸಿದ ಮೊತ್ತ",
-    "paidBy": "ಪಾವತಿಸಿದವರು",
-    "paidDate": "ಪಾವತಿ ದಿನಾಂಕ",
-    "downloadReceipt": "ರಸೀದಿ ಡೌನ್‌ಲೋಡ್",
-    "downloadBtn": "ಡೌನ್‌ಲೋಡ್",
-    "receipt": "ರಸೀದಿ",
-    "noEntries": "ಪಾವತಿ ಇತಿಹಾಸ ಕಂಡುಬಂದಿಲ್ಲ.",
-    "paginationInfo": "{{start}}–{{end}} / {{total}} ತೋರಿಸುತ್ತಿದೆ",
-    "errorLoadFailed": "ಪಾವತಿ ಇತಿಹಾಸ ಲೋಡ್ ಮಾಡಲು ವಿಫಲವಾಗಿದೆ.",
-    "goToDashboard": "ಡ್ಯಾಶ್‌ಬೋರ್ಡ್‌ಗೆ ಹೋಗಿ",
-    "refundHint": "ಮರುಪಾವತಿಗಾಗಿ, ದಯವಿಟ್ಟು ನಿಮ್ಮ ಚರ್ಚ್ ನಿರ್ವಾಹಕರನ್ನು ಸಂಪರ್ಕಿಸಿ.",
-    "adminNote": "Admin Note",
-    "myRefundRequests": "My Refund Requests",
-    "refund": "Refund",
-    "refundReasonLabel": "Reason for refund",
-    "refundReasonPlaceholder": "Please explain why you want a refund...",
-    "refundRequestFailed": "Failed to submit refund request.",
-    "refundRequestInfo": "Your request will be reviewed by the church administrator. Refunds are subject to approval.",
-    "refundRequestSubmitted": "Refund request submitted successfully.",
-    "requestRefund": "Request Refund",
-    "requestRefundTitle": "Request a Refund",
-    "submitRefundRequest": "Submit Refund Request",
-    "status": "ಸ್ಥಿತಿ",
-    "statusPaid": "ಪಾವತಿಸಲಾಗಿದೆ",
-    "statusUnpaid": "ಬಾಕಿ ಇದೆ",
-    "statusImported": "ಆಮದು ಮಾಡಲಾಗಿದೆ"
+    "errorDownloadReceiptFailed": "ರಸೀದಿ ಡೌನ್‌ಲೋಡ್ ಮಾಡಲು ವಿಫಲವಾಗಿದೆ."
   },
   "checkout": {
     "title": "ಪಾವತಿ ಸಾರಾಂಶ",
     "subtotal": "ಉಪಮೊತ್ತ",
     "processingFee": "ಪ್ರಕ್ರಿಯೆ ಶುಲ್ಕ ({{percent}}%)",
-    "feeExplanation": "ನೀವು ಕೊಡುವಾಗ, ಒಂದು ಸಣ್ಣ ಭಾಗವು ನಿಮ್ಮ ಅರ್ಪಣೆಯನ್ನು ಮುಂದಕ್ಕೆ ಒಯ್ಯುವ ಮಾರ್ಗಗಳನ್ನು ಬೆಂಬಲಿಸುತ್ತದೆ, ನಿಮ್ಮ ಉಡುಗೊರೆ ಚರ್ಚ್‌ಗೆ ಸಂಪೂರ್ಣವಾಗಿ ಮತ್ತು ಅಡೆತಡೆಯಿಲ್ಲದೆ ತಲುಪುವುದನ್ನು ಖಚಿತಪಡಿಸುತ್ತದೆ.",
     "waived": "ಮನ್ನಾ",
     "total": "ಒಟ್ಟು ಮೊತ್ತ",
     "payNow": "ಈಗ ಪಾವತಿಸಿ",
@@ -1973,12 +1818,5 @@
   },
   "offline": {
     "message": "ನೀವು ಆಫ್ಲೈನ್ನಲ್ಲಿದ್ದೀರಿ. ಕೆಲವು ವೈಶಿಷ್ಟ್ಯಗಳು ಲಭ್ಯವಿಲ್ಲದಿರಬಹುದು."
-  },
-  "churchPicker": {
-    "title": "ನಿಮ್ಮ ಚರ್ಚ್ ಆಯ್ಕೆಮಾಡಿ",
-    "subtitle": "ನೀವು ಹಲವು ಚರ್ಚ್‌ಗಳ ಸದಸ್ಯರು. ಮುಂದುವರಿಸಲು ಒಂದನ್ನು ಆಯ್ಕೆಮಾಡಿ.",
-    "unnamedChurch": "ಹೆಸರಿಲ್ಲದ ಚರ್ಚ್",
-    "admin": "ನಿರ್ವಾಹಕ",
-    "member": "ಸದಸ್ಯ"
   }
 }

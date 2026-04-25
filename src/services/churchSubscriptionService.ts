@@ -148,9 +148,15 @@ export async function createChurchSubscription(input: {
   church_id: string;
   amount: number;
   billing_cycle?: "monthly" | "yearly";
+  start_date?: string;
 }): Promise<ChurchSubscriptionRow> {
-  const now = new Date();
-  const nextPayment = new Date(now);
+  const startDate = input.start_date ? new Date(input.start_date) : new Date();
+  if (Number.isNaN(startDate.getTime())) {
+    throw new Error("Invalid start_date");
+  }
+
+  const startDateIso = startDate.toISOString().split("T")[0];
+  const nextPayment = new Date(startDate);
   if (input.billing_cycle === "yearly") {
     nextPayment.setFullYear(nextPayment.getFullYear() + 1);
   } else {
@@ -164,7 +170,7 @@ export async function createChurchSubscription(input: {
       amount: input.amount,
       billing_cycle: input.billing_cycle || "monthly",
       status: "active",
-      start_date: now.toISOString().split("T")[0],
+      start_date: startDateIso,
       next_payment_date: nextPayment.toISOString().split("T")[0],
     })
     .select()
@@ -265,6 +271,7 @@ export async function recordChurchSubscriptionPayment(input: {
   payment_method?: string;
   transaction_id?: string;
   note?: string;
+  payment_date?: string;
 }): Promise<ChurchSubscriptionPaymentRow> {
   // HIGH-07: Use a transaction to atomically record payment + update subscription
   const { getClient } = await import("./dbClient");
@@ -273,9 +280,35 @@ export async function recordChurchSubscriptionPayment(input: {
     await client.query("BEGIN");
 
     // Insert payment record
+    const paymentDate = input.payment_date ? new Date(input.payment_date) : new Date();
+    if (Number.isNaN(paymentDate.getTime())) {
+      throw new Error("Invalid payment_date");
+    }
+
+    const paymentDateIso = paymentDate.toISOString();
+    const paymentDateOnly = paymentDateIso.split("T")[0];
+
+    // Idempotency: if a payment with this transaction_id already exists, return it
+    // without re-rolling next_payment_date (would grant free cycles).
+    if (input.transaction_id) {
+      const existing = await client.query(
+        `SELECT * FROM church_subscription_payments WHERE transaction_id = $1 LIMIT 1`,
+        [input.transaction_id]
+      );
+      if (existing.rows[0]) {
+        await client.query("COMMIT");
+        logger.info(
+          { transaction_id: input.transaction_id },
+          "recordChurchSubscriptionPayment: duplicate transaction_id — returning existing row"
+        );
+        return existing.rows[0] as ChurchSubscriptionPaymentRow;
+      }
+    }
+
     const insertResult = await client.query(
       `INSERT INTO church_subscription_payments (church_subscription_id, church_id, amount, payment_method, transaction_id, payment_status, payment_date, note)
        VALUES ($1, $2, $3, $4, $5, 'success', $6, $7)
+       ON CONFLICT (transaction_id) WHERE transaction_id IS NOT NULL DO NOTHING
        RETURNING *`,
       [
         input.church_subscription_id,
@@ -283,10 +316,20 @@ export async function recordChurchSubscriptionPayment(input: {
         input.amount,
         input.payment_method || "manual",
         input.transaction_id || null,
-        new Date().toISOString(),
+        paymentDateIso,
         input.note || null,
       ]
     );
+
+    if (insertResult.rows.length === 0 && input.transaction_id) {
+      const existing = await client.query(
+        `SELECT * FROM church_subscription_payments WHERE transaction_id = $1 LIMIT 1`,
+        [input.transaction_id]
+      );
+      await client.query("COMMIT");
+      return existing.rows[0] as ChurchSubscriptionPaymentRow;
+    }
+
     const data = insertResult.rows[0] as ChurchSubscriptionPaymentRow;
 
     // Fetch billing cycle then update subscription
@@ -295,7 +338,7 @@ export async function recordChurchSubscriptionPayment(input: {
       [input.church_subscription_id]
     );
     if (subResult.rows[0]) {
-      const nextDate = new Date();
+      const nextDate = new Date(paymentDate);
       if (subResult.rows[0].billing_cycle === "yearly") {
         nextDate.setFullYear(nextDate.getFullYear() + 1);
       } else {
@@ -306,7 +349,7 @@ export async function recordChurchSubscriptionPayment(input: {
          last_payment_date = $1, next_payment_date = $2, updated_at = $3
          WHERE id = $4`,
         [
-          new Date().toISOString().split("T")[0],
+          paymentDateOnly,
           nextDate.toISOString().split("T")[0],
           new Date().toISOString(),
           input.church_subscription_id,

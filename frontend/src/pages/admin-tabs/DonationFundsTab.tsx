@@ -135,90 +135,51 @@ export default function DonationFundsTab() {
 
   return (
     <article className="panel">
-      <h3 style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-        <Heart size={20} /> {t("adminTabs.donationFunds.title")}
-      </h3>
-      <p className="muted" style={{ marginBottom: "1rem" }}>
+      <h3><Heart size={20} style={{ verticalAlign: "middle", marginRight: "0.4rem" }} />{t("adminTabs.donationFunds.title")}</h3>
+      <p className="muted">
         {t("adminTabs.donationFunds.description")}
       </p>
 
       {/* ── Church selector (super admin only) ── */}
       {isSuperAdmin ? (
-        <div style={{ marginBottom: "1rem", display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-          <label style={{ fontWeight: 600 }}>{t("admin.church")}:</label>
-          <select
-            value={selectedChurchId}
-            onChange={(e) => setSelectedChurchId(e.target.value)}
-            style={{ padding: "0.4rem 0.8rem", borderRadius: "6px", border: "1px solid var(--border, #e2e8f0)", minWidth: 200 }}
-          >
-            {churches.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
+        <div className="field-stack" style={{ marginBottom: "1rem" }}>
+          <label>
+            {t("admin.church")}
+            <select value={selectedChurchId} onChange={(e) => setSelectedChurchId(e.target.value)}>
+              {churches.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </label>
         </div>
       ) : null}
 
       {/* ── Add button ── */}
-      <div style={{ marginBottom: "1rem" }}>
-        <button
-          className="btn btn-primary"
-          onClick={() => { resetForm(); setShowForm(true); }}
-          style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}
-        >
+      <div className="actions-row" style={{ marginBottom: "1rem" }}>
+        <button className="btn btn-primary" onClick={() => { resetForm(); setShowForm(true); }}>
           <Plus size={16} /> {t("adminTabs.donationFunds.addFund")}
         </button>
       </div>
 
       {/* ── Inline form ── */}
       {showForm ? (
-        <div style={{
-          border: "1px solid var(--border, #e2e8f0)",
-          borderRadius: 8,
-          padding: "1rem",
-          marginBottom: "1rem",
-          background: "var(--surface-1, #f8fafc)",
-        }}>
+        <div style={{ border: "1px solid var(--outline-variant)", borderRadius: "var(--radius-md)", padding: "1rem", marginBottom: "1rem", background: "var(--surface-container)" }}>
           <h4 style={{ margin: "0 0 0.75rem" }}>{editingId ? t("adminTabs.donationFunds.editFund") : t("adminTabs.donationFunds.newFund")}</h4>
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-            <div>
-              <label style={{ display: "block", fontWeight: 500, marginBottom: 4 }}>{t("adminTabs.donationFunds.labelName")}</label>
-              <input
-                type="text"
-                value={formName}
-                onChange={(e) => setFormName(e.target.value)}
-                placeholder={t("adminTabs.donationFunds.placeholderName")}
-                maxLength={100}
-                style={{ width: "100%", padding: "0.5rem", borderRadius: 6, border: "1px solid var(--border, #e2e8f0)" }}
-              />
-            </div>
-            <div>
-              <label style={{ display: "block", fontWeight: 500, marginBottom: 4 }}>{t("adminTabs.donationFunds.labelDescription")}</label>
-              <input
-                type="text"
-                value={formDescription}
-                onChange={(e) => setFormDescription(e.target.value)}
-                placeholder={t("adminTabs.donationFunds.placeholderDescription")}
-                maxLength={500}
-                style={{ width: "100%", padding: "0.5rem", borderRadius: 6, border: "1px solid var(--border, #e2e8f0)" }}
-              />
-            </div>
-            <div>
-              <label style={{ display: "block", fontWeight: 500, marginBottom: 4 }}>{t("adminTabs.donationFunds.labelSortOrder")}</label>
-              <input
-                type="number"
-                value={formSortOrder}
-                onChange={(e) => setFormSortOrder(Number(e.target.value))}
-                min={0}
-                style={{ width: 100, padding: "0.5rem", borderRadius: 6, border: "1px solid var(--border, #e2e8f0)" }}
-              />
-            </div>
-            <div style={{ display: "flex", gap: "0.5rem" }}>
-              <button
-                className="btn btn-primary"
-                onClick={() => void handleSave()}
-                disabled={busyKey.startsWith("create-fund") || busyKey.startsWith("update-fund")}
-                style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}
-              >
+          <div className="field-stack">
+            <label>
+              {t("adminTabs.donationFunds.labelName")}
+              <input type="text" value={formName} onChange={(e) => setFormName(e.target.value)} placeholder={t("adminTabs.donationFunds.placeholderName")} maxLength={100} />
+            </label>
+            <label>
+              {t("adminTabs.donationFunds.labelDescription")}
+              <input type="text" value={formDescription} onChange={(e) => setFormDescription(e.target.value)} placeholder={t("adminTabs.donationFunds.placeholderDescription")} maxLength={500} />
+            </label>
+            <label>
+              {t("adminTabs.donationFunds.labelSortOrder")}
+              <input type="number" value={formSortOrder} onChange={(e) => setFormSortOrder(Number(e.target.value))} min={0} style={{ width: 100 }} />
+            </label>
+            <div className="actions-row">
+              <button className="btn btn-primary" onClick={() => void handleSave()} disabled={busyKey.startsWith("create-fund") || busyKey.startsWith("update-fund")}>
                 <Save size={14} /> {editingId ? t("adminTabs.donationFunds.buttonUpdate") : t("adminTabs.donationFunds.buttonCreate")}
               </button>
               <button className="btn btn-ghost" onClick={resetForm}>
@@ -235,29 +196,19 @@ export default function DonationFundsTab() {
       ) : funds.length === 0 ? (
         <EmptyState icon={<Heart size={32} />} title={t("adminTabs.donationFunds.emptyTitle")} />
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+        <div className="list-stack">
           {funds.map((fund) => (
             <div
               key={fund.id}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "0.75rem",
-                padding: "0.75rem 1rem",
-                border: "1px solid var(--border, #e2e8f0)",
-                borderRadius: 8,
-                background: fund.is_active ? "var(--surface, #fff)" : "var(--surface-1, #f1f5f9)",
-                opacity: fund.is_active ? 1 : 0.6,
-              }}
+              className="list-item"
+              style={{ opacity: fund.is_active ? 1 : 0.6 }}
             >
-              <GripVertical size={16} style={{ color: "var(--on-surface-variant, #94a3b8)", flexShrink: 0 }} />
+              <GripVertical size={16} style={{ color: "var(--on-surface-variant)", flexShrink: 0 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: "0.5rem" }}>
                   {fund.name}
                   {!fund.is_active ? (
-                    <span style={{ fontSize: "0.75rem", padding: "2px 8px", borderRadius: 12, background: "#fef2f2", color: "#991b1b" }}>
-                      {t("adminTabs.donationFunds.badgeInactive")}
-                    </span>
+                    <span className="event-badge badge-system">{t("adminTabs.donationFunds.badgeInactive")}</span>
                   ) : null}
                 </div>
                 {fund.description ? <div className="muted" style={{ fontSize: "0.85rem" }}>{fund.description}</div> : null}
@@ -268,24 +219,17 @@ export default function DonationFundsTab() {
                   title={fund.is_active ? t("adminTabs.donationFunds.deactivate") : t("adminTabs.donationFunds.activate")}
                   onClick={() => void toggleActive(fund)}
                   disabled={busyKey === `toggle-fund-${fund.id}`}
-                  style={{ fontSize: "0.8rem", padding: "4px 8px" }}
                 >
                   {fund.is_active ? t("adminTabs.donationFunds.deactivate") : t("adminTabs.donationFunds.activate")}
                 </button>
-                <button
-                  className="btn btn-ghost btn-sm"
-                  title="Edit"
-                  onClick={() => startEdit(fund)}
-                  style={{ padding: "4px 6px" }}
-                >
+                <button className="btn btn-ghost btn-sm" title={t("common.edit")} onClick={() => startEdit(fund)}>
                   <Edit size={14} />
                 </button>
                 <button
-                  className="btn btn-ghost btn-sm"
-                  title="Delete"
+                  className="btn btn-danger btn-sm"
+                  title={t("common.delete")}
                   onClick={() => void handleDelete(fund)}
                   disabled={busyKey === `delete-fund-${fund.id}`}
-                  style={{ padding: "4px 6px", color: "#dc2626" }}
                 >
                   <Trash2 size={14} />
                 </button>

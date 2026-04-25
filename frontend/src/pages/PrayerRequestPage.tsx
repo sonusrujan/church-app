@@ -24,6 +24,7 @@ export default function PrayerRequestPage() {
 
   const [selectedLeaderIds, setSelectedLeaderIds] = useState<string[]>([]);
   const [prayerDetails, setPrayerDetails] = useState("");
+  const [isAnonymous, setIsAnonymous] = useState(false);
   const [showDialog, setShowDialog] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [myRequests, setMyRequests] = useState<PrayerRequestRow[]>([]);
@@ -134,7 +135,7 @@ export default function PrayerRequestPage() {
         apiRequest<{ prayer_request: { id: string } }>("/api/engagement/prayer-requests", {
           method: "POST",
           token,
-          body: { church_id: memberDashboard?.church?.id, leader_ids: selectedLeaderIds, details: prayerDetails.trim() },
+          body: { church_id: memberDashboard?.church?.id, leader_ids: selectedLeaderIds, details: prayerDetails.trim(), is_anonymous: isAnonymous },
         }),
       t("prayer.successSubmitted"),
     );
@@ -142,6 +143,7 @@ export default function PrayerRequestPage() {
     if (result) {
       setSubmitted(true);
       setPrayerDetails("");
+      setIsAnonymous(false);
       setSelectedLeaderIds([]);
       setShowDialog(false);
       void loadMyRequests();
@@ -205,7 +207,7 @@ export default function PrayerRequestPage() {
           >
             <div className="prayer-avatar-circle">
               {leader.photo_url ? (
-                <img src={leader.photo_url} alt={leader.full_name} style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} />
+                <img src={leader.photo_url} alt={leader.full_name} loading="lazy" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} />
               ) : (
                 leader.full_name.charAt(0)
               )}
@@ -301,6 +303,14 @@ export default function PrayerRequestPage() {
               rows={5}
               autoFocus
             />
+            <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.75rem", fontSize: "0.9rem", cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={isAnonymous}
+                onChange={(e) => setIsAnonymous(e.target.checked)}
+              />
+              <span>{t("prayer.submitAnonymously") || "Submit anonymously (hide my name from pastors)"}</span>
+            </label>
             <div className="prayer-dialog-actions">
               <button
                 className="prayer-btn-outline"

@@ -1,4 +1,5 @@
 import cron from "node-cron";
+import { rlsStorage } from "../middleware/rlsContext";
 import { reconcileOverdueSubscriptions } from "../services/subscriptionTrackingService";
 import { processScheduledReports } from "../services/scheduledReportService";
 import { processJobQueue } from "../services/jobQueueService";
@@ -6,6 +7,7 @@ import { processSubscriptionReminders, enforceGracePeriods } from "../services/s
 import { reconcilePendingPayments } from "../services/paymentReconciliationService";
 import { processSpecialDateReminders } from "../services/specialDateReminderService";
 import { cleanupExpiredEvents } from "../services/engagementService";
+import { enforceSaaSSubscriptions } from "../services/saasEnforcementService";
 import { logger } from "../utils/logger";
 import { pool } from "../services/dbClient";
 
@@ -57,11 +59,25 @@ async function tryAdvisoryLock(jobName: string): Promise<(() => Promise<void>) |
  * This replaces the previous manual-only POST /api/subscriptions/reconcile-overdue
  * which only ran when an admin explicitly triggered it.
  */
+/**
+ * Wraps a cron callback in a super-admin RLS context so that the AsyncLocalStorage
+ * `getCurrentChurchId()` helper returns "" (super-admin) instead of "__NONE__".
+ * Without this, every DB call inside a cron job would be blocked by the nil-UUID
+ * footgun that was put in place to deny queries outside of any request context.
+ */
+function cronWithRls(expr: string, fn: () => Promise<void>): void {
+  cron.schedule(expr, () => {
+    rlsStorage.run({ churchId: null }, () => {
+      fn().catch((err) => logger.error({ err }, "cron callback threw (should be handled inside)"));
+    });
+  });
+}
+
 export function startScheduledJobs() {
   schedulerStartTime = new Date().toISOString();
 
   // Daily at 00:30 UTC
-  cron.schedule("30 0 * * *", async () => {
+  cronWithRls("30 0 * * *", async () => {
     const release = await tryAdvisoryLock("cron:overdue_reconciliation").catch(() => null);
     if (!release) {
       logger.info("cron: overdue reconciliation already in progress, skipping");
@@ -86,7 +102,7 @@ export function startScheduledJobs() {
   logger.info("Scheduled jobs initialized (overdue reconciliation: daily 00:30 UTC)");
 
   // Scheduled reports: every 6 hours at :15
-  cron.schedule("15 */6 * * *", async () => {
+  cronWithRls("15 */6 * * *", async () => {
     const release = await tryAdvisoryLock("cron:scheduled_reports").catch(() => null);
     if (!release) {
       logger.info("cron: scheduled reports already in progress, skipping");
@@ -111,7 +127,7 @@ export function startScheduledJobs() {
   logger.info("Scheduled jobs initialized (scheduled reports: every 6 hours at :15)");
 
   // Job queue processing: every 3 seconds, 200 jobs per batch, 40 concurrent
-  cron.schedule("*/3 * * * * *", async () => {
+  cronWithRls("*/3 * * * * *", async () => {
     const release = await tryAdvisoryLock("cron:job_queue").catch(() => null);
     if (!release) return;
     try {
@@ -134,7 +150,7 @@ export function startScheduledJobs() {
   logger.info("Scheduled jobs initialized (job queue: every 3 seconds, batch 200, concurrency 40)");
 
   // Subscription reminders: daily at 06:00 UTC (11:30 AM IST)
-  cron.schedule("0 6 * * *", async () => {
+  cronWithRls("0 6 * * *", async () => {
     const release = await tryAdvisoryLock("cron:subscription_reminders").catch(() => null);
     if (!release) return;
     logger.info("cron: subscription reminders starting");
@@ -156,7 +172,7 @@ export function startScheduledJobs() {
   logger.info("Scheduled jobs initialized (subscription reminders: daily 06:00 UTC)");
 
   // Special date greetings (birthdays/anniversaries): daily at 03:30 UTC (9:00 AM IST)
-  cron.schedule("30 3 * * *", async () => {
+  cronWithRls("30 3 * * *", async () => {
     const release = await tryAdvisoryLock("cron:special_date_reminders").catch(() => null);
     if (!release) return;
     logger.info("cron: special date reminders starting");
@@ -178,7 +194,7 @@ export function startScheduledJobs() {
   logger.info("Scheduled jobs initialized (special date reminders: daily 03:30 UTC / 9:00 AM IST)");
 
   // Grace period enforcement: daily at 01:00 UTC
-  cron.schedule("0 1 * * *", async () => {
+  cronWithRls("0 1 * * *", async () => {
     const release = await tryAdvisoryLock("cron:grace_period_enforcement").catch(() => null);
     if (!release) {
       logger.info("cron: grace period enforcement already in progress, skipping");
@@ -204,7 +220,7 @@ export function startScheduledJobs() {
 
   // Payment reconciliation: every 2 hours at :45
   // CRIT-08: Retry up to 3 times on failure with exponential backoff
-  cron.schedule("45 */2 * * *", async () => {
+  cronWithRls("45 */2 * * *", async () => {
     const release = await tryAdvisoryLock("cron:payment_reconciliation").catch(() => null);
     if (!release) {
       logger.info("cron: payment reconciliation already in progress, skipping");
@@ -230,9 +246,21 @@ export function startScheduledJobs() {
           const delayMs = 5000 * Math.pow(3, attempts - 1);
           await new Promise(r => setTimeout(r, delayMs));
         } else {
-          // All retries exhausted — log critical for CloudWatch alarm
+          // All retries exhausted — write to job_failures DLQ so the Ops tab surfaces it
           logger.error({ err }, "CRITICAL: payment reconciliation failed after all retries — manual intervention needed");
           jobHealth["payment_reconciliation"] = { lastRun: new Date().toISOString(), status: "error" };
+          try {
+            const { db } = await import("../services/dbClient");
+            await db.from("job_failures").insert({
+              job_name: "payment_reconciliation",
+              job_type: "cron",
+              payload: null,
+              last_error: (err as Error)?.message?.slice(0, 2000) || "unknown",
+              attempt_count: maxRetries,
+            });
+          } catch (dlqErr) {
+            logger.error({ err: dlqErr }, "Failed to write payment_reconciliation failure to DLQ");
+          }
         }
       }
     }
@@ -242,7 +270,7 @@ export function startScheduledJobs() {
   logger.info("Scheduled jobs initialized (payment reconciliation: every 2 hours at :45)");
 
   // Expired event cleanup: daily at 02:00 UTC
-  cron.schedule("0 2 * * *", async () => {
+  cronWithRls("0 2 * * *", async () => {
     const release = await tryAdvisoryLock("cron:expired_event_cleanup").catch(() => null);
     if (!release) {
       logger.info("cron: expired event cleanup already in progress, skipping");
@@ -268,7 +296,7 @@ export function startScheduledJobs() {
 
   // 7.2: Webhook events table cleanup: weekly on Sundays at 03:00 UTC
   // Deletes processed webhook events older than 90 days to prevent unbounded table growth
-  cron.schedule("0 3 * * 0", async () => {
+  cronWithRls("0 3 * * 0", async () => {
     const release = await tryAdvisoryLock("cron:webhook_events_cleanup").catch(() => null);
     if (!release) {
       logger.info("cron: webhook events cleanup already in progress, skipping");
@@ -293,7 +321,7 @@ export function startScheduledJobs() {
 
   // 1.4: Job queue + notification_deliveries cleanup: daily at 02:30 UTC
   // Prevents unbounded table growth that degrades query performance over time
-  cron.schedule("30 2 * * *", async () => {
+  cronWithRls("30 2 * * *", async () => {
     const release = await tryAdvisoryLock("cron:data_cleanup").catch(() => null);
     if (!release) {
       logger.info("cron: data cleanup already in progress, skipping");
@@ -329,4 +357,30 @@ export function startScheduledJobs() {
   });
 
   logger.info("Scheduled jobs initialized (data cleanup: daily 02:30 UTC)");
+
+  // SaaS subscription enforcement: daily at 04:00 UTC (9:30 AM IST)
+  // Disables churches with overdue subscriptions past grace period or expired trials
+  cronWithRls("0 4 * * *", async () => {
+    const release = await tryAdvisoryLock("cron:saas_enforcement").catch(() => null);
+    if (!release) {
+      logger.info("cron: SaaS enforcement already in progress, skipping");
+      return;
+    }
+    logger.info("cron: SaaS subscription enforcement starting");
+    try {
+      const result = await enforceSaaSSubscriptions();
+      logger.info(
+        { disabled: result.disabled, trialExpired: result.trialExpired },
+        "cron: SaaS subscription enforcement complete"
+      );
+      jobHealth["saas_enforcement"] = { lastRun: new Date().toISOString(), status: "ok" };
+    } catch (err) {
+      logger.error({ err }, "cron: SaaS subscription enforcement failed");
+      jobHealth["saas_enforcement"] = { lastRun: new Date().toISOString(), status: "error" };
+    } finally {
+      await release();
+    }
+  });
+
+  logger.info("Scheduled jobs initialized (SaaS enforcement: daily 04:00 UTC)");
 }

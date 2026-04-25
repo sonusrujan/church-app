@@ -177,6 +177,18 @@ export async function revokeAdminAccess(targetIdentifier: string) {
     throw new Error("Target user not found in users table.");
   }
 
+  // C2: Last-admin guard — prevent revoking the only remaining admin of a church
+  if (user.church_id && user.role === "admin") {
+    const { data: adminCount } = await db
+      .from("users")
+      .select("id", { count: "exact", head: true })
+      .eq("church_id", user.church_id)
+      .eq("role", "admin");
+    if ((adminCount ?? 0) <= 1) {
+      throw new Error("Cannot revoke the last admin of a church. Assign another admin first.");
+    }
+  }
+
   const { data, error } = await db
     .from("users")
     .update({ role: "member" })

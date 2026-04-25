@@ -76,13 +76,10 @@ export default function CheckoutSummary({
 
       {/* Platform fee — only shown when actually charged */}
       {showActiveFee && (
-        <>
         <div className="checkout-summary-row checkout-summary-fee">
           <span>{t("checkout.processingFee", { percent: String(platformFeePercent) })}</span>
           <strong>+ {formatINR(feeAmount)}</strong>
         </div>
-        <p className="checkout-fee-explanation">{t("checkout.feeExplanation")}</p>
-        </>
       )}
 
       <div className="checkout-summary-divider checkout-summary-divider-bold" />

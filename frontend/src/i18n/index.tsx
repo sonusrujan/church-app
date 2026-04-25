@@ -63,15 +63,41 @@ function setCookie(name: string, value: string) {
 
 function getNestedValue(obj: TranslationMap, key: string): string | undefined {
   const parts = key.split(".");
-  if (parts.length === 2) {
-    const val = obj[parts[0]]?.[parts[1]];
-    return typeof val === "string" ? val : undefined;
+  let cursor: unknown = obj;
+  for (const part of parts) {
+    if (cursor && typeof cursor === "object" && part in (cursor as Record<string, unknown>)) {
+      cursor = (cursor as Record<string, unknown>)[part];
+    } else {
+      return undefined;
+    }
   }
-  if (parts.length === 3) {
-    const section = obj[parts[0]]?.[parts[1]];
-    if (section && typeof section === "object") return section[parts[2]];
-  }
-  return undefined;
+  return typeof cursor === "string" ? cursor : undefined;
+}
+
+/**
+ * Best-effort human-readable fallback for missing translation keys.
+ * Converts e.g. "auth.otpResendIn" → "Otp resend in". Better than showing
+ * a raw dotted key to a non-developer end user.
+ */
+function humanizeKey(key: string): string {
+  const tail = key.split(".").pop() || key;
+  const spaced = tail
+    .replace(/([A-Z])/g, " $1")
+    .replace(/[_-]+/g, " ")
+    .trim();
+  if (!spaced) return key;
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1).toLowerCase();
+}
+
+const isDev = typeof import.meta !== "undefined" && (import.meta as any).env?.DEV === true;
+const warnedKeys = new Set<string>();
+function warnMissing(language: SupportedLanguage, key: string) {
+  if (!isDev) return;
+  const id = `${language}::${key}`;
+  if (warnedKeys.has(id)) return;
+  warnedKeys.add(id);
+  // eslint-disable-next-line no-console
+  console.warn(`[i18n] Missing translation: "${key}" (lang=${language})`);
 }
 
 // ── Provider ──
@@ -100,9 +126,15 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const t = useCallback(
     (key: string, vars?: Record<string, string | number>): string => {
       let value = getNestedValue(translations[language], key);
-      // Fallback to English
-      if (!value) value = getNestedValue(translations.en, key);
-      if (!value) return key;
+      // Fallback chain: chosen language → English → humanized key tail.
+      if (!value && language !== "en") {
+        value = getNestedValue(translations.en, key);
+        if (value) warnMissing(language, key);
+      }
+      if (!value) {
+        warnMissing(language, key);
+        value = humanizeKey(key);
+      }
 
       if (vars) {
         for (const [k, v] of Object.entries(vars)) {

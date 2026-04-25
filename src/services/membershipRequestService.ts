@@ -170,27 +170,33 @@ export async function reviewMembershipRequest(
   reviewNote?: string,
   callerChurchId?: string
 ) {
-  // Fetch the request
-  const { data: request, error: fetchError } = await db
-    .from("membership_requests")
-    .select("*")
-    .eq("id", requestId)
-    .eq("status", "pending")
-    .single<MembershipRequestRow>();
-
-  if (fetchError || !request) {
-    throw new Error("Request not found or already reviewed.");
-  }
-
-  // Church-scoping: non-super-admins can only review requests for their own church
-  if (callerChurchId && request.church_id !== callerChurchId) {
-    throw new Error("You cannot review requests for another church.");
-  }
-
-  // Update the request status and (if approved) create user/member atomically
+  // Transactional approval path — lock the row with FOR UPDATE SKIP LOCKED
+  // so two concurrent admin approvals can't both succeed. The second caller
+  // sees zero rows and gets "already reviewed".
   const client = await getClient();
+  let request: MembershipRequestRow;
   try {
     await client.query("BEGIN");
+
+    const lockResult = await client.query<MembershipRequestRow>(
+      `SELECT * FROM "membership_requests"
+       WHERE "id" = $1 AND "status" = 'pending'
+       FOR UPDATE SKIP LOCKED`,
+      [requestId],
+    );
+
+    if (lockResult.rows.length === 0) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw new Error("Request not found or already reviewed.");
+    }
+
+    request = lockResult.rows[0];
+
+    // Church-scoping: non-super-admins can only review requests for their own church
+    if (callerChurchId && request.church_id !== callerChurchId) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw new Error("You cannot review requests for another church.");
+    }
 
     await client.query(
       `UPDATE "membership_requests" SET "status" = $1, "reviewed_by" = $2, "reviewed_at" = $3, "review_note" = $4 WHERE "id" = $5`,

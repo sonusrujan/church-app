@@ -53,7 +53,7 @@ async function startServer(app: express.Application, path: string): Promise<stri
 }
 
 describe("Webhook Routes", () => {
-  const WEBHOOK_SECRET = process.env.RAZORPAY_KEY_SECRET || "";
+  const WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || "";
 
   beforeEach(() => {
     vi.clearAllMocks();

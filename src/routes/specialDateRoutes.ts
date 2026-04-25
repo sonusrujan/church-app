@@ -7,6 +7,7 @@ import { safeErrorMessage } from "../utils/safeError";
 import { isSuperAdminEmail } from "../middleware/requireSuperAdmin";
 import { persistAuditLog } from "../utils/auditLog";
 import { logger } from "../utils/logger";
+import { escapeCsvField } from "../utils/csv";
 import { validate, createSpecialDateSchema, updateSpecialDateSchema } from "../utils/zodSchemas";
 import {
   createSpecialDate,
@@ -221,18 +222,6 @@ router.get("/export", requireAuth, requireRegisteredUser, async (req: AuthReques
   }
 });
 
-function escapeCsvField(value: unknown): string {
-  const str = value == null ? "" : String(value);
-  // Neutralize CSV formula injection
-  let safe = str;
-  if (/^[=+\-@\t\r]/.test(safe)) {
-    safe = "'" + safe;
-  }
-  if (safe.includes(",") || safe.includes('"') || safe.includes("\n")) {
-    return `"${safe.replace(/"/g, '""')}"`;
-  }
-  return safe;
-}
 
 // ── Super-admin: Manually trigger special-date greetings (for testing) ──
 router.post("/trigger-reminders", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {

@@ -157,16 +157,15 @@ export default function AdBannerTab() {
   const scopeItems = scope === "diocese" ? dioceses : churches;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-      <h2 style={{ margin: 0 }}>{t("adminTabs.adBanner.title")}</h2>
-      <p className="dash-muted">{t("adminTabs.adBanner.description")}</p>
+    <article className="panel">
+      <h3>{t("adminTabs.adBanner.title")}</h3>
+      <p className="muted">{t("adminTabs.adBanner.description")}</p>
 
       {/* Scope selector */}
-      <div style={{ display: "flex", gap: "1rem", alignItems: "center", flexWrap: "wrap" }}>
+      <div className="actions-row" style={{ flexWrap: "wrap", marginBottom: "0.5rem" }}>
         <select
           value={scope}
           onChange={(e) => { setScope(e.target.value as "diocese" | "church"); setSelectedScopeId(""); setBanners([]); }}
-          className="settings-select"
         >
           <option value="diocese">{t("adminTabs.adBanner.scopeDiocese")}</option>
           <option value="church">{t("adminTabs.adBanner.scopeChurch")}</option>
@@ -175,7 +174,6 @@ export default function AdBannerTab() {
         <select
           value={selectedScopeId}
           onChange={(e) => setSelectedScopeId(e.target.value)}
-          className="settings-select"
           style={{ minWidth: 200 }}
         >
           <option value="">{t("common.select")} {scope}...</option>
@@ -194,7 +192,7 @@ export default function AdBannerTab() {
         <EmptyState title={t("adminTabs.adBanner.emptyTitle")} action={{ label: t("adminTabs.adBanner.addBanner"), onClick: () => setShowForm(true) }} />
       ) : (
         <>
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+          <div className="field-stack">
             {banners.map((banner) => (
               <div
                 key={banner.id}
@@ -255,7 +253,7 @@ export default function AdBannerTab() {
           </div>
 
           {!showForm ? (
-            <button className="btn btn-primary" onClick={() => setShowForm(true)} style={{ alignSelf: "flex-start" }}>
+            <button className="btn btn-primary" onClick={() => setShowForm(true)}>
               <Plus size={16} /> {t("adminTabs.adBanner.addBanner")}
             </button>
           ) : null}
@@ -264,79 +262,46 @@ export default function AdBannerTab() {
 
       {/* New banner form */}
       {showForm ? (
-        <div style={{
-          padding: "1rem",
-          background: "var(--surface-container-lowest)",
-          border: "1px solid var(--outline-variant)",
-          borderRadius: "var(--radius-md)",
-          display: "flex",
-          flexDirection: "column",
-          gap: "0.75rem",
-        }}>
+        <div className="field-stack" style={{ padding: "1rem", background: "var(--surface-container-lowest)", border: "1px solid var(--outline-variant)", borderRadius: "var(--radius-md)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <strong>{t("adminTabs.adBanner.newBanner")}</strong>
             <button className="btn btn-ghost btn-sm" onClick={() => { setShowForm(false); setLinkUrl(""); setPosition("bottom"); setStartDate(""); setEndDate(""); }}>
               <X size={16} />
             </button>
           </div>
-          <label style={{ fontSize: "0.88rem" }}>
+          <label>
             {t("adminTabs.adBanner.labelPosition")}
-            <select
-              value={position}
-              onChange={(e) => setPosition(e.target.value as "top" | "bottom")}
-              className="settings-select"
-              style={{ marginTop: 4, width: "100%" }}
-            >
+            <select value={position} onChange={(e) => setPosition(e.target.value as "top" | "bottom")}>
               <option value="top">{t("adminTabs.adBanner.optionTop")}</option>
               <option value="bottom">{t("adminTabs.adBanner.optionBottom")}</option>
             </select>
           </label>
-          <label style={{ fontSize: "0.88rem" }}>
+          <label>
             {t("adminTabs.adBanner.labelLinkUrl")}
             <input
               type="url"
               value={linkUrl}
               onChange={(e) => setLinkUrl(e.target.value)}
               placeholder={t("adminTabs.adBanner.placeholderUrl")}
-              className="auth-input"
-              style={{ marginTop: 4 }}
             />
           </label>
-          <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
-            <label style={{ fontSize: "0.88rem", flex: 1, minWidth: 140 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+            <label>
               {t("adminTabs.adBanner.labelStartDate")}
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="auth-input"
-                style={{ marginTop: 4, width: "100%" }}
-              />
+              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
             </label>
-            <label style={{ fontSize: "0.88rem", flex: 1, minWidth: 140 }}>
+            <label>
               {t("adminTabs.adBanner.labelEndDate")}
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="auth-input"
-                style={{ marginTop: 4, width: "100%" }}
-              />
+              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
             </label>
           </div>
-          <label style={{ fontSize: "0.88rem" }}>
+          <label>
             {t("adminTabs.adBanner.labelBannerMedia")}
-            <input
-              type="file"
-              accept="image/*,video/mp4,video/webm"
-              onChange={handleFileUpload}
-              disabled={uploading}
-              style={{ marginTop: 4 }}
-            />
+            <input type="file" accept="image/*,video/mp4,video/webm" onChange={handleFileUpload} disabled={uploading} />
           </label>
-          {uploading ? <p style={{ fontSize: "0.85rem", color: "var(--secondary)" }}>{t("adminTabs.adBanner.uploading")}</p> : null}
+          {uploading ? <p className="muted">{t("adminTabs.adBanner.uploading")}</p> : null}
         </div>
       ) : null}
-    </div>
+    </article>
   );
 }

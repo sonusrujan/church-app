@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { apiRequest, setTokenRefreshCallback, tryRefreshToken, API_BASE_URL, setActiveChurchId } from "../lib/api";
+import { apiRequest, setTokenRefreshCallback, setAuthFailureCallback, tryRefreshToken, API_BASE_URL, setActiveChurchId } from "../lib/api";
 import { normalizeIndianPhone } from "../types";
 import { useI18n } from "../i18n";
+import { setSentryUser, clearSentryUser } from "../sentry";
 import type { Notice } from "../types";
 
 /** Church membership returned by OTP verify / my-churches */
@@ -39,6 +40,15 @@ export function useAuth(setNotice: React.Dispatch<React.SetStateAction<Notice>>)
   const [phoneInput, setPhoneInput] = useState("");
   const [otpInput, setOtpInput] = useState("");
   const [otpStep, setOtpStep] = useState<"phone" | "otp">("phone");
+  /** Seconds until the user is allowed to request a new SMS / voice OTP. */
+  const [otpResendIn, setOtpResendIn] = useState(0);
+
+  // Countdown tick for OTP resend
+  useEffect(() => {
+    if (otpResendIn <= 0) return;
+    const id = setInterval(() => setOtpResendIn((s) => Math.max(0, s - 1)), 1000);
+    return () => clearInterval(id);
+  }, [otpResendIn]);
 
   // ── Bootstrap control — exposed so bootstrap effect in App can reset it ──
   const hasBootstrappedRef = useRef(false);
@@ -56,13 +66,77 @@ export function useAuth(setNotice: React.Dispatch<React.SetStateAction<Notice>>)
   const userPhone = customAuth?.user?.phone || session?.user?.phone || "";
   const isLoggedIn = Boolean(session || customAuth);
 
-  // Wire token-refresh callback once
+  // Wire token-refresh + auth-failure callbacks once
   useEffect(() => {
     setTokenRefreshCallback((newToken) => {
       setCustomAuth((prev) => (prev ? { ...prev, access_token: newToken } : prev));
       setSession((prev) => (prev ? { ...prev, access_token: newToken } : prev));
     });
-  }, []);
+    setAuthFailureCallback(() => {
+      setActiveChurchId(null);
+      hasBootstrappedRef.current = false;
+      setSession(null);
+      setCustomAuth(null);
+      setUserChurches([]);
+      setShowChurchPicker(false);
+      clearSentryUser();
+      navigate("/signin", { replace: true });
+    });
+  }, [navigate]);
+
+  // Cross-tab logout via BroadcastChannel + storage event fallback
+  useEffect(() => {
+    const LOGOUT_KEY = "shalom_logout_at";
+    const bc = "BroadcastChannel" in window ? new BroadcastChannel("shalom_auth") : null;
+    const onLogout = () => {
+      setSession(null);
+      setCustomAuth(null);
+      setActiveChurchId(null);
+      hasBootstrappedRef.current = false;
+      setUserChurches([]);
+      setShowChurchPicker(false);
+      navigate("/signin", { replace: true });
+    };
+    bc?.addEventListener("message", (e) => { if (e.data === "logout") onLogout(); });
+    const onStorage = (e: StorageEvent) => { if (e.key === LOGOUT_KEY) onLogout(); };
+    window.addEventListener("storage", onStorage);
+    return () => {
+      bc?.close();
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [navigate]);
+
+  // bfcache guard — back-button restore may resurrect a logged-out session
+  useEffect(() => {
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) {
+        tryRefreshToken().then((tok) => {
+          if (!tok) {
+            setSession(null);
+            setCustomAuth(null);
+            navigate("/signin", { replace: true });
+          }
+        });
+      }
+    };
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, [navigate]);
+
+  // Refresh token when tab becomes visible if JWT is close to expiry
+  useEffect(() => {
+    if (!token) return;
+    const onVis = () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        const payload = JSON.parse(atob(token.split(".")[1]));
+        const expMs = (payload.exp || 0) * 1000;
+        if (expMs - Date.now() < 5 * 60 * 1000) tryRefreshToken().catch(() => {});
+      } catch { /* ignore */ }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [token]);
 
   // Token is memory-only — no localStorage persistence (XSS protection)
 
@@ -94,6 +168,7 @@ export function useAuth(setNotice: React.Dispatch<React.SetStateAction<Notice>>)
               access_token: data.access_token,
               user: { id: payload.sub || "", email: payload.email || "", phone: payload.phone || "" },
             });
+            if (payload.sub) setSentryUser(payload.sub);
           } catch {
             /* decode failed */
           }
@@ -111,7 +186,7 @@ export function useAuth(setNotice: React.Dispatch<React.SetStateAction<Notice>>)
 
   // ── Auth actions ──
 
-  const sendOtp = useCallback(async () => {
+  const sendOtp = useCallback(async (channel: "sms" | "call" = "sms") => {
     const phone = normalizeIndianPhone(phoneInput);
     if (!phone || phone.length < 5) {
       setNotice({ tone: "error", text: t("auth.errorPhoneNumberRequired") });
@@ -120,9 +195,16 @@ export function useAuth(setNotice: React.Dispatch<React.SetStateAction<Notice>>)
     setBusyKey("login");
     setNotice({ tone: "neutral", text: t("auth.sendingOtp") });
     try {
-      await apiRequest("/api/otp/send", { method: "POST", body: { phone } });
+      await apiRequest("/api/otp/send", { method: "POST", body: { phone, channel } });
       setOtpStep("otp");
-      setNotice({ tone: "success", text: t("auth.otpSentSuccess") });
+      // 90s resend window — Twilio Verify TTL is 5 min, but the SMS/voice
+      // delivery itself can take 30–60s, so block resend until the user has
+      // realistically had a chance to receive the first attempt.
+      setOtpResendIn(90);
+      setNotice({
+        tone: "success",
+        text: channel === "call" ? t("auth.otpVoiceSent") : t("auth.otpSentSuccess"),
+      });
     } catch (err: any) {
       setNotice({ tone: "error", text: err?.message || t("auth.errorSendOtpFailed") });
     } finally {
@@ -152,6 +234,7 @@ export function useAuth(setNotice: React.Dispatch<React.SetStateAction<Notice>>)
       });
       setCustomAuth(null);
       setOtpInput("");
+      if (result.user.id) setSentryUser(result.user.id);
 
       const churches = result.churches || [];
       setUserChurches(churches);
@@ -227,10 +310,16 @@ export function useAuth(setNotice: React.Dispatch<React.SetStateAction<Notice>>)
     // SH-012: Clear multi-church state to prevent stale data on next login
     setUserChurches([]);
     setShowChurchPicker(false);
+    clearSentryUser();
     setNotice({ tone: "success", text: t("auth.signedOut") });
     setOtpStep("phone");
     setPhoneInput("");
     setOtpInput("");
+    // Notify other tabs
+    try {
+      if ("BroadcastChannel" in window) new BroadcastChannel("shalom_auth").postMessage("logout");
+      localStorage.setItem("shalom_logout_at", String(Date.now()));
+    } catch { /* ignore */ }
     navigate("/signin", { replace: true });
   }, [token, navigate, setNotice, t]);
 
@@ -292,6 +381,7 @@ export function useAuth(setNotice: React.Dispatch<React.SetStateAction<Notice>>)
     setOtpStep,
     sendOtp,
     verifyOtp,
+    otpResendIn,
 
     // Multi-church
     userChurches,

@@ -75,10 +75,15 @@ export async function recordManualPayment(input: ManualPaymentInput) {
   if (input.subscription_id) {
     const { data: sub } = await db
       .from("subscriptions")
-      .select("id, member_id, family_member_id, amount")
+      .select("id, member_id, family_member_id, amount, status")
       .eq("id", input.subscription_id)
-      .maybeSingle<{ id: string; member_id: string; family_member_id: string | null; amount: number | string }>();
+      .maybeSingle<{ id: string; member_id: string; family_member_id: string | null; amount: number | string; status: string }>();
     if (!sub) throw new Error("Subscription not found");
+
+    // H5: Reject payments on cancelled/expired subscriptions
+    if (sub.status === "cancelled" || sub.status === "expired") {
+      throw new Error(`Cannot record payment for a ${sub.status} subscription. Reactivate it first.`);
+    }
 
     subscriptionMonthlyAmount = Number(sub.amount || 0);
     if (!Number.isFinite(subscriptionMonthlyAmount) || subscriptionMonthlyAmount <= 0) {
@@ -328,9 +333,17 @@ export async function recordRefund(input: RecordRefundInput) {
 
   const { data: payment, error: payErr } = await db
     .from("payments")
-    .select("id, member_id, amount, payment_status, subscription_id")
+    .select("id, member_id, amount, payment_status, subscription_id, transaction_id, payment_method")
     .eq("id", input.payment_id)
-    .maybeSingle<{ id: string; member_id: string; amount: number; payment_status: string; subscription_id: string | null }>();
+    .maybeSingle<{
+      id: string;
+      member_id: string;
+      amount: number;
+      payment_status: string;
+      subscription_id: string | null;
+      transaction_id: string | null;
+      payment_method: string | null;
+    }>();
 
   if (payErr) throw payErr;
   if (!payment) throw new Error("Payment not found");
@@ -374,6 +387,47 @@ export async function recordRefund(input: RecordRefundInput) {
     );
   }
 
+  const normalizedPaymentMethod = String(payment.payment_method || "").toLowerCase();
+  const isRazorpayPayment = normalizedPaymentMethod === "razorpay";
+
+  if (isRazorpayPayment && input.refund_method !== "razorpay") {
+    throw new Error("Razorpay payments must be refunded through Razorpay to keep records in sync");
+  }
+
+  let gatewayRefundId: string | null = null;
+  if (isRazorpayPayment) {
+    if (!payment.transaction_id) {
+      throw new Error("Cannot refund Razorpay payment because the gateway payment ID is missing");
+    }
+
+    const Razorpay = (await import("razorpay")).default;
+    const { getEffectivePaymentConfig } = await import("./churchPaymentService");
+    const gatewayConfig = await getEffectivePaymentConfig(input.church_id || null);
+    if (!gatewayConfig.payments_enabled || !gatewayConfig.key_id || !gatewayConfig.key_secret) {
+      throw new Error("Razorpay credentials are not configured for refunds");
+    }
+
+    const client = new Razorpay({
+      key_id: gatewayConfig.key_id,
+      key_secret: gatewayConfig.key_secret,
+    });
+
+    try {
+      const refund = await (client.payments as any).refund(payment.transaction_id, {
+        amount: Math.round(input.refund_amount * 100),
+        notes: {
+          payment_id: input.payment_id,
+          member_id: payment.member_id,
+          refund_reason: input.refund_reason || "",
+        },
+      });
+      gatewayRefundId = String(refund?.id || "") || null;
+    } catch (err: any) {
+      logger.error({ err, paymentId: input.payment_id, transactionId: payment.transaction_id }, "Razorpay refund failed");
+      throw new Error(err?.error?.description || err?.message || "Razorpay refund failed");
+    }
+  }
+
   // Update payment status and insert refund record atomically
   const client = await getClient();
   try {
@@ -396,8 +450,10 @@ export async function recordRefund(input: RecordRefundInput) {
         input.payment_id,
         payment.member_id,
         input.refund_amount,
-        input.refund_reason || null,
-        input.refund_method,
+        gatewayRefundId
+          ? [input.refund_reason || null, `Razorpay refund ID: ${gatewayRefundId}`].filter(Boolean).join(" | ")
+          : input.refund_reason || null,
+        isRazorpayPayment ? "razorpay" : input.refund_method,
         input.recorded_by,
       ],
     );
@@ -443,6 +499,166 @@ export async function recordRefund(input: RecordRefundInput) {
   } finally {
     client.release();
   }
+}
+
+// ── Edit Manual Payment (within 48h, manual-only) ──
+
+export interface EditManualPaymentInput {
+  payment_id: string;
+  amount?: number;
+  payment_method?: string;
+  payment_date?: string;
+  note?: string;
+  church_id: string;
+  edited_by: string;
+}
+
+export async function editManualPayment(input: EditManualPaymentInput) {
+  const { payment_id, church_id, edited_by } = input;
+
+  // Fetch the payment
+  const { data: payment, error: fetchErr } = await db
+    .from("payments")
+    .select("id, member_id, amount, payment_method, payment_date, payment_status, payment_category, created_at, note")
+    .eq("id", payment_id)
+    .maybeSingle();
+
+  if (fetchErr || !payment) throw new Error("Payment not found");
+
+  // Only manual payments can be edited
+  const manualMethods = ["manual_cash", "manual_bank_transfer", "manual_upi_manual", "manual_cheque", "manual_other"];
+  if (!manualMethods.includes(payment.payment_method)) {
+    throw new Error("Only manual payments can be edited. Use refund for online payments.");
+  }
+
+  // Only successful payments
+  if (payment.payment_status !== "success") {
+    throw new Error("Only successful payments can be edited");
+  }
+
+  // Verify member belongs to church
+  const { data: member } = await db
+    .from("members")
+    .select("id, church_id")
+    .eq("id", payment.member_id)
+    .maybeSingle();
+  if (!member || member.church_id !== church_id) {
+    throw new Error("Payment does not belong to your church");
+  }
+
+  // Only within 48 hours of recording
+  const createdAt = new Date(payment.created_at);
+  const hoursSinceCreation = (Date.now() - createdAt.getTime()) / (1000 * 60 * 60);
+  if (hoursSinceCreation > 48) {
+    throw new Error("Manual payments can only be edited within 48 hours of recording. Use refund instead.");
+  }
+
+  // Check no refunds have been issued
+  const { data: refunds } = await db
+    .from("payment_refunds")
+    .select("id")
+    .eq("payment_id", payment_id)
+    .limit(1);
+  if (refunds && refunds.length > 0) {
+    throw new Error("Cannot edit a payment that has refunds. Void the refund first.");
+  }
+
+  // Build update
+  const patch: Record<string, unknown> = {};
+  if (typeof input.amount === "number") {
+    if (!Number.isFinite(input.amount) || input.amount <= 0) throw new Error("amount must be a positive number");
+    if (input.amount > 500_000) throw new Error("amount cannot exceed ₹5,00,000");
+    patch.amount = input.amount;
+  }
+  if (input.payment_method) {
+    const allowed = ["cash", "bank_transfer", "upi_manual", "cheque", "other"];
+    if (!allowed.includes(input.payment_method)) throw new Error("Invalid payment method");
+    patch.payment_method = `manual_${input.payment_method}`;
+  }
+  if (input.payment_date) {
+    const d = new Date(input.payment_date);
+    if (isNaN(d.getTime())) throw new Error("Invalid payment_date");
+    patch.payment_date = d.toISOString().slice(0, 10);
+  }
+  if (typeof input.note === "string") {
+    patch.note = input.note.trim().slice(0, 1000);
+  }
+
+  if (!Object.keys(patch).length) throw new Error("No fields to update");
+
+  const { data: updated, error: updateErr } = await db
+    .from("payments")
+    .update(patch)
+    .eq("id", payment_id)
+    .select("id, amount, payment_method, payment_date, note")
+    .single();
+
+  if (updateErr) {
+    logger.error({ err: updateErr, payment_id }, "editManualPayment failed");
+    throw updateErr;
+  }
+
+  logger.info({ payment_id, edited_by, changes: patch }, "Manual payment edited");
+  return updated;
+}
+
+// ── Void Manual Payment (within 48h, manual-only) ──
+
+export async function voidManualPayment(paymentId: string, churchId: string, voidedBy: string) {
+  // Fetch the payment
+  const { data: payment, error: fetchErr } = await db
+    .from("payments")
+    .select("id, member_id, amount, payment_method, payment_status, created_at")
+    .eq("id", paymentId)
+    .maybeSingle();
+
+  if (fetchErr || !payment) throw new Error("Payment not found");
+
+  const manualMethods = ["manual_cash", "manual_bank_transfer", "manual_upi_manual", "manual_cheque", "manual_other"];
+  if (!manualMethods.includes(payment.payment_method)) {
+    throw new Error("Only manual payments can be voided");
+  }
+  if (payment.payment_status !== "success") {
+    throw new Error("Only successful payments can be voided");
+  }
+
+  // Verify member belongs to church
+  const { data: member } = await db
+    .from("members")
+    .select("id, church_id")
+    .eq("id", payment.member_id)
+    .maybeSingle();
+  if (!member || member.church_id !== churchId) {
+    throw new Error("Payment does not belong to your church");
+  }
+
+  // Only within 48 hours
+  const createdAt = new Date(payment.created_at);
+  const hoursSinceCreation = (Date.now() - createdAt.getTime()) / (1000 * 60 * 60);
+  if (hoursSinceCreation > 48) {
+    throw new Error("Manual payments can only be voided within 48 hours. Use refund instead.");
+  }
+
+  // Mark as voided
+  const { error: updateErr } = await db
+    .from("payments")
+    .update({ payment_status: "voided" })
+    .eq("id", paymentId);
+
+  if (updateErr) {
+    logger.error({ err: updateErr, paymentId }, "voidManualPayment failed");
+    throw updateErr;
+  }
+
+  // Reverse any monthly dues allocations
+  try {
+    await reversePaymentAllocations(paymentId);
+  } catch (e) {
+    logger.warn({ err: e, paymentId }, "voidManualPayment: reversePaymentAllocations failed (non-fatal)");
+  }
+
+  logger.info({ paymentId, voidedBy }, "Manual payment voided");
+  return { voided: true, id: paymentId };
 }
 
 // ── Per-Member Payment History ──

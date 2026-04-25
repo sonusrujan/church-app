@@ -5,6 +5,7 @@ type SubscriptionEventSource =
   | "system"
   | "admin"
   | "admin_manual"
+  | "admin_reactivate"
   | "member"
   | "payment_gateway"
   | "reconciler";
@@ -213,7 +214,7 @@ export async function reconcileOverdueSubscriptions(churchId?: string) {
   };
 }
 
-export async function listChurchActivityEvents(churchId: string | null, limit = 50, offset = 0) {
+export async function listChurchActivityEvents(churchId: string | null, limit = 50, offset = 0, memberId?: string | null) {
   const normalizedLimit = Math.max(1, Math.min(limit, 200));
   const normalizedOffset = Math.max(0, offset);
 
@@ -227,6 +228,10 @@ export async function listChurchActivityEvents(churchId: string | null, limit = 
 
   if (churchId) {
     query = query.eq("church_id", churchId);
+  }
+
+  if (memberId) {
+    query = query.eq("member_id", memberId);
   }
 
   const { data, error } = await query;

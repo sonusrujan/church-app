@@ -76,7 +76,6 @@ const AdBannerTab = lazy(() => import("./admin-tabs/AdBannerTab"));
 const AnnouncementsTab = lazy(() => import("./admin-tabs/AnnouncementsTab"));
 const SpecialDatesTab = lazy(() => import("./admin-tabs/SpecialDatesTab"));
 const DonationFundsTab = lazy(() => import("./admin-tabs/DonationFundsTab"));
-const DonationLinksTab = lazy(() => import("./admin-tabs/DonationLinksTab"));
 const PushNotificationTab = lazy(() => import("./admin-tabs/PushNotificationTab"));
 const AccountDeletionRequestsTab = lazy(() => import("./admin-tabs/AccountDeletionRequestsTab"));
 
@@ -96,37 +95,21 @@ export default function AdminConsolePage() {
   const [activeAdminTab, setActiveAdminTab] = useState<AdminTabKey>("members");
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [mobileToolOpen, setMobileToolOpen] = useState(false);
-  const [sidebarSearch, setSidebarSearch] = useState("");
 
   function selectTab(tab: AdminTabKey) {
     setActiveAdminTab(tab);
     setMobileToolOpen(true);
   }
 
-  const searchLower = sidebarSearch.toLowerCase().trim();
-
   function toggleGroup(group: string) {
     setCollapsedGroups((prev) => ({ ...prev, [group]: !prev[group] }));
-  }
-  function isGroupCollapsed(group: string) { return !searchLower && collapsedGroups[group]; }
-
-  /** Check if a tab's translated label matches the current search query */
-  function matchesSearch(i18nKey: string): boolean {
-    if (!searchLower) return true;
-    return t(i18nKey).toLowerCase().includes(searchLower);
-  }
-
-  /** Check if any item in a group matches the search */
-  function groupHasMatch(keys: string[]): boolean {
-    if (!searchLower) return true;
-    return keys.some((k) => t(k).toLowerCase().includes(searchLower));
   }
 
   // ── keyboard nav ──
   const adminTabs: AdminTabKey[] = isSuperAdmin
-    ? ["members", "churches", "leadership", "diocese", "ad-banners", "admins", "create-church", "roles", "payments", "saas-settings", "saas-subscriptions", "platform-razorpay", "pre-register", "membership-requests", "family-requests", "cancellation-requests", "account-deletion-requests", "trial", "income-dashboard", "manual-payment", "refunds", "refund-requests", "create-subscription", "subscriptions", "payment-history", "bulk-import", "restore", "scheduled-reports", "export", "special-dates", "audit-log", "announcements", "events", "activity", "push-notifications", "donation-links"]
+    ? ["members", "churches", "leadership", "diocese", "ad-banners", "admins", "create-church", "roles", "payments", "saas-settings", "saas-subscriptions", "platform-razorpay", "pre-register", "membership-requests", "family-requests", "cancellation-requests", "account-deletion-requests", "trial", "income-dashboard", "manual-payment", "refunds", "refund-requests", "create-subscription", "subscriptions", "payment-history", "bulk-import", "restore", "scheduled-reports", "export", "special-dates", "audit-log", "announcements", "events", "activity", "push-notifications"]
     : isChurchAdmin
-      ? ["members", "leadership", "pre-register", "membership-requests", "family-requests", "cancellation-requests", "account-deletion-requests", "income-dashboard", "manual-payment", "refunds", "refund-requests", "create-subscription", "subscriptions", "payment-history", "bulk-import", "church-logo", "special-dates", "audit-log", "announcements", "events", "activity", "donation-links"]
+      ? ["members", "leadership", "pre-register", "membership-requests", "family-requests", "cancellation-requests", "account-deletion-requests", "income-dashboard", "manual-payment", "refunds", "refund-requests", "create-subscription", "subscriptions", "payment-history", "bulk-import", "church-logo", "special-dates", "audit-log", "announcements", "events", "activity"]
       : [];
 
   function handleAdminNavKeyDown(e: React.KeyboardEvent<HTMLElement>) {
@@ -211,230 +194,205 @@ export default function AdminConsolePage() {
       {/* ── Tree Navigation Sidebar ── */}
       <nav className="admin-tree-nav" onKeyDown={handleAdminNavKeyDown}>
         <p className="admin-tree-title">{t("admin.console")}</p>
-        <input
-          type="text"
-          className="admin-tree-search"
-          placeholder={t("admin.searchTools")}
-          value={sidebarSearch}
-          onChange={(e) => setSidebarSearch(e.target.value)}
-          style={{ width: "100%", marginBottom: "0.5rem", padding: "0.4rem 0.6rem", fontSize: "0.85rem", borderRadius: 6, border: "1px solid var(--border)" }}
-        />
 
         {isSuperAdmin ? (
           <>
-            {groupHasMatch(["admin.members", "admin.churches", "admin.leadership", "admin.diocese", "admin.adBanners", "admin.pushSms", "admin.admins"]) && (<>
-            <button className="admin-tree-group-toggle" onClick={() => toggleGroup("operations")} aria-expanded={!isGroupCollapsed("operations")}>
+            <button className="admin-tree-group-toggle" onClick={() => toggleGroup("operations")} aria-expanded={!collapsedGroups.operations}>
               <span>{t("admin.operations")}</span>
-              <span className="group-badge">7</span>
-              <ChevronDown size={14} strokeWidth={1.5} className={`group-chevron${isGroupCollapsed("operations") ? " collapsed" : ""}`} />
+              <span className="group-badge">6</span>
+              <ChevronDown size={14} strokeWidth={1.5} className={`group-chevron${collapsedGroups.operations ? " collapsed" : ""}`} />
             </button>
-            <div className="admin-tree-group-items" data-collapsed={isGroupCollapsed("operations") || undefined}>
-              {matchesSearch("admin.members") && <button className={`admin-tree-item${activeAdminTab === "members" ? " active" : ""}`} onClick={() => selectTab("members")}>
+            <div className="admin-tree-group-items" data-collapsed={collapsedGroups.operations || undefined}>
+              <button className={`admin-tree-item${activeAdminTab === "members" ? " active" : ""}`} onClick={() => selectTab("members")}>
                 <Users size={16} strokeWidth={1.5} /> <span>{t("admin.members")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
-              </button>}
-              {matchesSearch("admin.churches") && <button className={`admin-tree-item${activeAdminTab === "churches" ? " active" : ""}`} onClick={() => selectTab("churches")}>
+              </button>
+              <button className={`admin-tree-item${activeAdminTab === "churches" ? " active" : ""}`} onClick={() => selectTab("churches")}>
                 <Church size={16} strokeWidth={1.5} /> <span>{t("admin.churches")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
-              </button>}
-              {matchesSearch("admin.leadership") && <button className={`admin-tree-item${activeAdminTab === "leadership" ? " active" : ""}`} onClick={() => selectTab("leadership")}>
+              </button>
+              <button className={`admin-tree-item${activeAdminTab === "leadership" ? " active" : ""}`} onClick={() => selectTab("leadership")}>
                 <Crown size={16} strokeWidth={1.5} /> <span>{t("admin.leadership")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
-              </button>}
-              {matchesSearch("admin.diocese") && <button className={`admin-tree-item${activeAdminTab === "diocese" ? " active" : ""}`} onClick={() => selectTab("diocese")}>
+              </button>
+              <button className={`admin-tree-item${activeAdminTab === "diocese" ? " active" : ""}`} onClick={() => selectTab("diocese")}>
                 <Crown size={16} strokeWidth={1.5} /> <span>{t("admin.diocese")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
-              </button>}
-              {matchesSearch("admin.adBanners") && <button className={`admin-tree-item${activeAdminTab === "ad-banners" ? " active" : ""}`} onClick={() => selectTab("ad-banners")}>
+              </button>
+              <button className={`admin-tree-item${activeAdminTab === "ad-banners" ? " active" : ""}`} onClick={() => selectTab("ad-banners")}>
                 <Image size={16} strokeWidth={1.5} /> <span>{t("admin.adBanners")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
-              </button>}
-              {matchesSearch("admin.pushSms") && <button className={`admin-tree-item${activeAdminTab === "push-notifications" ? " active" : ""}`} onClick={() => selectTab("push-notifications")}>
+              </button>
+              <button className={`admin-tree-item${activeAdminTab === "push-notifications" ? " active" : ""}`} onClick={() => selectTab("push-notifications")}>
                 <Bell size={16} strokeWidth={1.5} /> <span>{t("admin.pushSms")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
-              </button>}
-              {matchesSearch("admin.admins") && <button className={`admin-tree-item${activeAdminTab === "admins" ? " active" : ""}`} onClick={() => selectTab("admins")}>
+              </button>
+              <button className={`admin-tree-item${activeAdminTab === "admins" ? " active" : ""}`} onClick={() => selectTab("admins")}>
                 <ShieldCheck size={16} strokeWidth={1.5} /> <span>{t("admin.admins")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
-              </button>}
+              </button>
             </div>
-            </>)}
 
-            {groupHasMatch(["admin.createChurch", "admin.roleManagement", "admin.paymentGateway"]) && (<>
-            <button className="admin-tree-group-toggle" onClick={() => toggleGroup("setup")} aria-expanded={!isGroupCollapsed("setup")}>
+            <button className="admin-tree-group-toggle" onClick={() => toggleGroup("setup")} aria-expanded={!collapsedGroups.setup}>
               <span>{t("admin.setup")}</span>
               <span className="group-badge">3</span>
-              <ChevronDown size={14} strokeWidth={1.5} className={`group-chevron${isGroupCollapsed("setup") ? " collapsed" : ""}`} />
+              <ChevronDown size={14} strokeWidth={1.5} className={`group-chevron${collapsedGroups.setup ? " collapsed" : ""}`} />
             </button>
-            <div className="admin-tree-group-items" data-collapsed={isGroupCollapsed("setup") || undefined}>
-              {matchesSearch("admin.createChurch") && <button className={`admin-tree-item${activeAdminTab === "create-church" ? " active" : ""}`} onClick={() => selectTab("create-church")}>
+            <div className="admin-tree-group-items" data-collapsed={collapsedGroups.setup || undefined}>
+              <button className={`admin-tree-item${activeAdminTab === "create-church" ? " active" : ""}`} onClick={() => selectTab("create-church")}>
                 <Church size={16} strokeWidth={1.5} /> <span>{t("admin.createChurch")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
-              </button>}
-              {matchesSearch("admin.roleManagement") && <button className={`admin-tree-item${activeAdminTab === "roles" ? " active" : ""}`} onClick={() => selectTab("roles")}>
+              </button>
+              <button className={`admin-tree-item${activeAdminTab === "roles" ? " active" : ""}`} onClick={() => selectTab("roles")}>
                 <Shield size={16} strokeWidth={1.5} /> <span>{t("admin.roleManagement")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
-              </button>}
-              {matchesSearch("admin.paymentGateway") && <button className={`admin-tree-item${activeAdminTab === "payments" ? " active" : ""}`} onClick={() => selectTab("payments")}>
+              </button>
+              <button className={`admin-tree-item${activeAdminTab === "payments" ? " active" : ""}`} onClick={() => selectTab("payments")}>
                 <CreditCard size={16} strokeWidth={1.5} /> <span>{t("admin.paymentGateway")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
-              </button>}
+              </button>
             </div>
-            </>)}
 
-            {groupHasMatch(["admin.platformSettings", "admin.churchSubscriptions", "admin.platformRazorpay"]) && (<>
-            <button className="admin-tree-group-toggle" onClick={() => toggleGroup("saas")} aria-expanded={!isGroupCollapsed("saas")}>
+            <button className="admin-tree-group-toggle" onClick={() => toggleGroup("saas")} aria-expanded={!collapsedGroups.saas}>
               <span>{t("admin.saasPlatform")}</span>
               <span className="group-badge">3</span>
-              <ChevronDown size={14} strokeWidth={1.5} className={`group-chevron${isGroupCollapsed("saas") ? " collapsed" : ""}`} />
+              <ChevronDown size={14} strokeWidth={1.5} className={`group-chevron${collapsedGroups.saas ? " collapsed" : ""}`} />
             </button>
-            <div className="admin-tree-group-items" data-collapsed={isGroupCollapsed("saas") || undefined}>
-              {matchesSearch("admin.platformSettings") && <button className={`admin-tree-item${activeAdminTab === "saas-settings" ? " active" : ""}`} onClick={() => selectTab("saas-settings")}>
+            <div className="admin-tree-group-items" data-collapsed={collapsedGroups.saas || undefined}>
+              <button className={`admin-tree-item${activeAdminTab === "saas-settings" ? " active" : ""}`} onClick={() => selectTab("saas-settings")}>
                 <Settings size={16} strokeWidth={1.5} /> <span>{t("admin.platformSettings")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
-              </button>}
-              {matchesSearch("admin.churchSubscriptions") && <button className={`admin-tree-item${activeAdminTab === "saas-subscriptions" ? " active" : ""}`} onClick={() => selectTab("saas-subscriptions")}>
+              </button>
+              <button className={`admin-tree-item${activeAdminTab === "saas-subscriptions" ? " active" : ""}`} onClick={() => selectTab("saas-subscriptions")}>
                 <BarChart3 size={16} strokeWidth={1.5} /> <span>{t("admin.churchSubscriptions")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
-              </button>}
-              {matchesSearch("admin.platformRazorpay") && <button className={`admin-tree-item${activeAdminTab === "platform-razorpay" ? " active" : ""}`} onClick={() => selectTab("platform-razorpay")}>
+              </button>
+              <button className={`admin-tree-item${activeAdminTab === "platform-razorpay" ? " active" : ""}`} onClick={() => selectTab("platform-razorpay")}>
                 <DollarSign size={16} strokeWidth={1.5} /> <span>{t("admin.platformRazorpay")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
-              </button>}
+              </button>
             </div>
-            </>)}
 
-            {groupHasMatch(["admin.freeTrial", "admin.restoreRelink"]) && (<>
-            <button className="admin-tree-group-toggle" onClick={() => toggleGroup("management")} aria-expanded={!isGroupCollapsed("management")}>
+            <button className="admin-tree-group-toggle" onClick={() => toggleGroup("management")} aria-expanded={!collapsedGroups.management}>
               <span>{t("admin.management")}</span>
               <span className="group-badge">2</span>
-              <ChevronDown size={14} strokeWidth={1.5} className={`group-chevron${isGroupCollapsed("management") ? " collapsed" : ""}`} />
+              <ChevronDown size={14} strokeWidth={1.5} className={`group-chevron${collapsedGroups.management ? " collapsed" : ""}`} />
             </button>
-            <div className="admin-tree-group-items" data-collapsed={isGroupCollapsed("management") || undefined}>
-              {matchesSearch("admin.freeTrial") && <button className={`admin-tree-item${activeAdminTab === "trial" ? " active" : ""}`} onClick={() => selectTab("trial")}>
+            <div className="admin-tree-group-items" data-collapsed={collapsedGroups.management || undefined}>
+              <button className={`admin-tree-item${activeAdminTab === "trial" ? " active" : ""}`} onClick={() => selectTab("trial")}>
                 <Gift size={16} strokeWidth={1.5} /> <span>{t("admin.freeTrial")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
-              </button>}
-              {matchesSearch("admin.restoreRelink") && <button className={`admin-tree-item${activeAdminTab === "restore" ? " active" : ""}`} onClick={() => selectTab("restore")}>
+              </button>
+              <button className={`admin-tree-item${activeAdminTab === "restore" ? " active" : ""}`} onClick={() => selectTab("restore")}>
                 <RotateCcw size={16} strokeWidth={1.5} /> <span>{t("admin.restoreRelink")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
-              </button>}
+              </button>
             </div>
-            </>)}
           </>
         ) : null}
 
-        {isAdminUser && groupHasMatch(["admin.incomeDashboard", "admin.manualPayment", "admin.refunds", "admin.createSubscription", "admin.editSubscription", "admin.paymentHistory", "admin.refundRequests", "admin.donationFunds", "admin.donationLinksQR"]) ? (
+        {isAdminUser ? (
           <>
-            <button className="admin-tree-group-toggle" onClick={() => toggleGroup("finance")} aria-expanded={!isGroupCollapsed("finance")}>
+            <button className="admin-tree-group-toggle" onClick={() => toggleGroup("finance")} aria-expanded={!collapsedGroups.finance}>
               <span>{t("admin.finance")}</span>
-              {(adminCounts?.refund_requests ?? 0) > 0
-                ? <NotificationBadge count={adminCounts?.refund_requests ?? 0} />
-                : <span className="group-badge">7</span>}
-              <ChevronDown size={14} strokeWidth={1.5} className={`group-chevron${isGroupCollapsed("finance") ? " collapsed" : ""}`} />
+              <span className="group-badge">7</span>
+              <ChevronDown size={14} strokeWidth={1.5} className={`group-chevron${collapsedGroups.finance ? " collapsed" : ""}`} />
             </button>
-            <div className="admin-tree-group-items" data-collapsed={isGroupCollapsed("finance") || undefined}>
-              {matchesSearch("admin.incomeDashboard") && <button className={`admin-tree-item${activeAdminTab === "income-dashboard" ? " active" : ""}`} onClick={() => selectTab("income-dashboard")}>
+            <div className="admin-tree-group-items" data-collapsed={collapsedGroups.finance || undefined}>
+              <button className={`admin-tree-item${activeAdminTab === "income-dashboard" ? " active" : ""}`} onClick={() => selectTab("income-dashboard")}>
                 <TrendingUp size={16} strokeWidth={1.5} /> <span>{t("admin.incomeDashboard")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
-              </button>}
-              {matchesSearch("admin.manualPayment") && <button className={`admin-tree-item${activeAdminTab === "manual-payment" ? " active" : ""}`} onClick={() => selectTab("manual-payment")}>
+              </button>
+              <button className={`admin-tree-item${activeAdminTab === "manual-payment" ? " active" : ""}`} onClick={() => selectTab("manual-payment")}>
                 <DollarSign size={16} strokeWidth={1.5} /> <span>{t("admin.manualPayment")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
-              </button>}
-              {matchesSearch("admin.refunds") && <button className={`admin-tree-item${activeAdminTab === "refunds" ? " active" : ""}`} onClick={() => selectTab("refunds")}>
+              </button>
+              <button className={`admin-tree-item${activeAdminTab === "refunds" ? " active" : ""}`} onClick={() => selectTab("refunds")}>
                 <RefreshCw size={16} strokeWidth={1.5} /> <span>{t("admin.refunds")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
-              </button>}
-              {matchesSearch("admin.createSubscription") && <button className={`admin-tree-item${activeAdminTab === "create-subscription" ? " active" : ""}`} onClick={() => selectTab("create-subscription")}>
+              </button>
+              <button className={`admin-tree-item${activeAdminTab === "create-subscription" ? " active" : ""}`} onClick={() => selectTab("create-subscription")}>
                 <UserPlus size={16} strokeWidth={1.5} /> <span>{t("admin.createSubscription")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
-              </button>}
-              {matchesSearch("admin.editSubscription") && <button className={`admin-tree-item${activeAdminTab === "subscriptions" ? " active" : ""}`} onClick={() => selectTab("subscriptions")}>
+              </button>
+              <button className={`admin-tree-item${activeAdminTab === "subscriptions" ? " active" : ""}`} onClick={() => selectTab("subscriptions")}>
                 <Edit size={16} strokeWidth={1.5} /> <span>{t("admin.editSubscription")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
-              </button>}
-              {matchesSearch("admin.paymentHistory") && <button className={`admin-tree-item${activeAdminTab === "payment-history" ? " active" : ""}`} onClick={() => selectTab("payment-history")}>
+              </button>
+              <button className={`admin-tree-item${activeAdminTab === "payment-history" ? " active" : ""}`} onClick={() => selectTab("payment-history")}>
                 <CreditCard size={16} strokeWidth={1.5} /> <span>{t("admin.paymentHistory")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
-              </button>}
-              {matchesSearch("admin.refundRequests") && <button className={`admin-tree-item${activeAdminTab === "refund-requests" ? " active" : ""}`} onClick={() => selectTab("refund-requests")}>
+              </button>
+              <button className={`admin-tree-item${activeAdminTab === "refund-requests" ? " active" : ""}`} onClick={() => selectTab("refund-requests")}>
                 <AlertTriangle size={16} strokeWidth={1.5} /> <span>{t("admin.refundRequests")}</span> <NotificationBadge count={adminCounts?.refund_requests ?? 0} /> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
-              </button>}
-              {matchesSearch("admin.donationFunds") && <button className={`admin-tree-item${activeAdminTab === "donation-funds" ? " active" : ""}`} onClick={() => selectTab("donation-funds")}>
+              </button>
+              <button className={`admin-tree-item${activeAdminTab === "donation-funds" ? " active" : ""}`} onClick={() => selectTab("donation-funds")}>
                 <Heart size={16} strokeWidth={1.5} /> <span>{t("admin.donationFunds")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
-              </button>}
-              {matchesSearch("admin.donationLinksQR") && <button className={`admin-tree-item${activeAdminTab === "donation-links" ? " active" : ""}`} onClick={() => selectTab("donation-links")}>
-                <Gift size={16} strokeWidth={1.5} /> <span>{t("admin.donationLinksQR")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
-              </button>}
+              </button>
             </div>
           </>
         ) : null}
 
-        <button className="admin-tree-group-toggle" onClick={() => toggleGroup("general")} aria-expanded={!isGroupCollapsed("general")}>
+        <button className="admin-tree-group-toggle" onClick={() => toggleGroup("general")} aria-expanded={!collapsedGroups.general}>
           <span>{t("admin.general")}</span>
-          {(() => {
-            const generalPending = (adminCounts?.membership_requests ?? 0) + (adminCounts?.family_requests ?? 0) + (adminCounts?.cancellation_requests ?? 0) + (adminCounts?.account_deletion_requests ?? 0);
-            return generalPending > 0 ? <NotificationBadge count={generalPending} /> : null;
-          })()}
-          <ChevronDown size={14} strokeWidth={1.5} className={`group-chevron${isGroupCollapsed("general") ? " collapsed" : ""}`} />
+          <ChevronDown size={14} strokeWidth={1.5} className={`group-chevron${collapsedGroups.general ? " collapsed" : ""}`} />
         </button>
-        <div className="admin-tree-group-items" data-collapsed={isGroupCollapsed("general") || undefined}>
-          {isChurchAdmin && !isSuperAdmin && matchesSearch("admin.members") ? (
+        <div className="admin-tree-group-items" data-collapsed={collapsedGroups.general || undefined}>
+          {isChurchAdmin ? (
             <button className={`admin-tree-item${activeAdminTab === "members" ? " active" : ""}`} onClick={() => selectTab("members")}>
               <Users size={16} strokeWidth={1.5} /> <span>{t("admin.members")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
             </button>
           ) : null}
-          {isChurchAdmin && !isSuperAdmin && matchesSearch("admin.leadership") ? (
+          {isChurchAdmin ? (
             <button className={`admin-tree-item${activeAdminTab === "leadership" ? " active" : ""}`} onClick={() => selectTab("leadership")}>
               <Crown size={16} strokeWidth={1.5} /> <span>{t("admin.leadership")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
             </button>
           ) : null}
-          {isAdminUser && matchesSearch("admin.preRegister") ? (
+          {isAdminUser ? (
             <button className={`admin-tree-item${activeAdminTab === "pre-register" ? " active" : ""}`} onClick={() => selectTab("pre-register")}>
               <UserPlus size={16} strokeWidth={1.5} /> <span>{t("admin.preRegister")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
             </button>
           ) : null}
-          {isAdminUser && matchesSearch("admin.joinRequests") ? (
+          {isAdminUser ? (
             <button className={`admin-tree-item${activeAdminTab === "membership-requests" ? " active" : ""}`} onClick={() => selectTab("membership-requests")}>
               <ClipboardList size={16} strokeWidth={1.5} /> <span>{t("admin.joinRequests")}</span> <NotificationBadge count={adminCounts?.membership_requests ?? 0} /> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
             </button>
           ) : null}
-          {isAdminUser && matchesSearch("admin.familyRequests") ? (
+          {isAdminUser ? (
             <button className={`admin-tree-item${activeAdminTab === "family-requests" ? " active" : ""}`} onClick={() => selectTab("family-requests")}>
               <Users size={16} strokeWidth={1.5} /> <span>{t("admin.familyRequests")}</span> <NotificationBadge count={adminCounts?.family_requests ?? 0} /> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
             </button>
           ) : null}
-          {isAdminUser && matchesSearch("admin.cancellations") ? (
+          {isAdminUser ? (
             <button className={`admin-tree-item${activeAdminTab === "cancellation-requests" ? " active" : ""}`} onClick={() => selectTab("cancellation-requests")}>
               <XCircle size={16} strokeWidth={1.5} /> <span>{t("admin.cancellations")}</span> <NotificationBadge count={adminCounts?.cancellation_requests ?? 0} /> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
             </button>
           ) : null}
-          {isAdminUser && matchesSearch("admin.accountDeletionRequests") ? (
+          {isAdminUser ? (
             <button className={`admin-tree-item${activeAdminTab === "account-deletion-requests" ? " active" : ""}`} onClick={() => selectTab("account-deletion-requests")}>
               <Trash2 size={16} strokeWidth={1.5} /> <span>{t("admin.accountDeletionRequests")}</span> <NotificationBadge count={adminCounts?.account_deletion_requests ?? 0} /> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
             </button>
           ) : null}
-          {isAdminUser && matchesSearch("admin.bulkImport") ? (
+          {isAdminUser ? (
             <button className={`admin-tree-item${activeAdminTab === "bulk-import" ? " active" : ""}`} onClick={() => selectTab("bulk-import")}>
               <Upload size={16} strokeWidth={1.5} /> <span>{t("admin.bulkImport")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
             </button>
           ) : null}
-          {isChurchAdmin && matchesSearch("admin.churchLogo") ? (
+          {isChurchAdmin ? (
             <button className={`admin-tree-item${activeAdminTab === "church-logo" ? " active" : ""}`} onClick={() => selectTab("church-logo")}>
               <Image size={16} strokeWidth={1.5} /> <span>{t("admin.churchLogo")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
             </button>
           ) : null}
-          {isSuperAdmin && matchesSearch("admin.scheduledReports") ? (
+          {isSuperAdmin ? (
             <button className={`admin-tree-item${activeAdminTab === "scheduled-reports" ? " active" : ""}`} onClick={() => selectTab("scheduled-reports")}>
               <Clock size={16} strokeWidth={1.5} /> <span>{t("admin.scheduledReports")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
             </button>
           ) : null}
-          {isSuperAdmin && matchesSearch("admin.dataExport") ? (
+          {isSuperAdmin ? (
             <button className={`admin-tree-item${activeAdminTab === "export" ? " active" : ""}`} onClick={() => selectTab("export")}>
               <Download size={16} strokeWidth={1.5} /> <span>{t("admin.dataExport")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
             </button>
           ) : null}
-          {isAdminUser && matchesSearch("admin.specialDates") ? (
+          {isAdminUser ? (
             <button className={`admin-tree-item${activeAdminTab === "special-dates" ? " active" : ""}`} onClick={() => selectTab("special-dates")}>
               <Gift size={16} strokeWidth={1.5} /> <span>{t("admin.specialDates")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
             </button>
           ) : null}
-          {isAdminUser && matchesSearch("admin.auditLog") ? (
+          {isAdminUser ? (
             <button className={`admin-tree-item${activeAdminTab === "audit-log" ? " active" : ""}`} onClick={() => selectTab("audit-log")}>
               <FileText size={16} strokeWidth={1.5} /> <span>{t("admin.auditLog")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
             </button>
           ) : null}
-          {isAdminUser && matchesSearch("admin.announcements") ? (
+          {isAdminUser ? (
             <button className={`admin-tree-item${activeAdminTab === "announcements" ? " active" : ""}`} onClick={() => selectTab("announcements")}>
               <Megaphone size={16} strokeWidth={1.5} /> <span>{t("admin.announcements")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
             </button>
           ) : null}
-          {isAdminUser && matchesSearch("admin.eventsAlerts") ? (
+          {isAdminUser ? (
             <button className={`admin-tree-item${activeAdminTab === "events" ? " active" : ""}`} onClick={() => selectTab("events")}>
               <CalendarDays size={16} strokeWidth={1.5} /> <span>{t("admin.eventsAlerts")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
             </button>
           ) : null}
-          {isAdminUser && matchesSearch("admin.activityLog") ? (
+          {isAdminUser ? (
             <button className={`admin-tree-item${activeAdminTab === "activity" ? " active" : ""}`} onClick={() => selectTab("activity")}>
               <Activity size={16} strokeWidth={1.5} /> <span>{t("admin.activityLog")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
             </button>
@@ -506,7 +464,6 @@ export default function AdminConsolePage() {
         {activeAdminTab === "audit-log" && isAdminUser ? <Suspense fallback={<LoadingSkeleton />}><AuditLogTab /></Suspense> : null}
         {activeAdminTab === "push-notifications" && isSuperAdmin ? <Suspense fallback={<LoadingSkeleton />}><PushNotificationTab /></Suspense> : null}
         {activeAdminTab === "donation-funds" && isAdminUser ? <Suspense fallback={<LoadingSkeleton />}><DonationFundsTab /></Suspense> : null}
-        {activeAdminTab === "donation-links" && isAdminUser ? <Suspense fallback={<LoadingSkeleton />}><DonationLinksTab /></Suspense> : null}
       </section>
     </div>
   );

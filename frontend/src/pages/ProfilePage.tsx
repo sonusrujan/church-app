@@ -1,6 +1,4 @@
 import { useEffect, useState, useRef, useCallback } from "react";
-import { Link } from "react-router-dom";
-import { Settings, Crown } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import { apiRequest } from "../lib/api";
 import { useI18n } from "../i18n";
@@ -73,7 +71,6 @@ export default function ProfilePage() {
   // ── Profile form state ──
   const [profileName, setProfileName] = useState("");
   const [profileAvatarUrl, setProfileAvatarUrl] = useState("");
-  const [avatarDirty, setAvatarDirty] = useState(false);
   const [profileAddress, setProfileAddress] = useState("");
   const [profilePhone, setProfilePhone] = useState("");
   const [profileAltPhone, setProfileAltPhone] = useState("");
@@ -85,10 +82,8 @@ export default function ProfilePage() {
   const [profileEditing, setProfileEditing] = useState(false);
 
   const occupationOptions = [
-    t("profile.occupationFarmer"), t("profile.occupationTeacher"), t("profile.occupationBusiness"),
-    t("profile.occupationGovEmployee"), t("profile.occupationPrivEmployee"),
-    t("profile.occupationSelfEmployed"), t("profile.occupationStudent"), t("profile.occupationRetired"),
-    t("profile.occupationHomemaker"), t("profile.occupationPastor"), t("profile.occupationOther"),
+    "Farmer", "Teacher", "Business", "Government Employee", "Private Employee",
+    "Self Employed", "Student", "Retired", "Homemaker", "Pastor", "Other",
   ];
 
   // ── Phone change OTP state ──
@@ -197,8 +192,9 @@ export default function ProfilePage() {
               t("profile.dobConflictConfirm"),
               "CONFIRM",
               () => { resolve(true); },
-              () => { resolve(false); },
             );
+            // If dialog is dismissed without confirming, resolve false after a timeout
+            setTimeout(() => resolve(false), 60000);
           });
           if (!confirmed) return;
         }
@@ -379,7 +375,6 @@ export default function ProfilePage() {
     setMemberDashboard(result);
     setAuthContext({ ...authContext, profile: result.profile });
     setProfileEditing(false);
-    setAvatarDirty(false);
   }
 
   // ── Debounced member search ──
@@ -672,23 +667,37 @@ export default function ProfilePage() {
       {/* ── Profile Header Card ── */}
       <article className="panel panel-wide profile-header-card">
         <div className="profile-header">
-          <div className="profile-avatar-lg" style={{ position: "relative" }}>
-            {avatarDirty && (
-              <span style={{ position: "absolute", top: -4, right: -4, zIndex: 1, fontSize: "0.65rem", fontWeight: 600, background: "var(--warning, #f59e0b)", color: "#fff", borderRadius: "8px", padding: "0.1rem 0.4rem" }}>
-                {t("profile.unsaved")}
-              </span>
-            )}
+          <div className="profile-avatar-lg">
             <PhotoUpload
               currentUrl={profileAvatarUrl}
               onUploaded={(url) => {
                 setProfileAvatarUrl(url);
-                setAvatarDirty(true);
-                setNotice({ tone: "info", text: t("profile.photoSelectedSaveProfile") });
+                // Auto-save avatar immediately
+                apiRequest<MemberDashboard>("/api/auth/update-profile", {
+                  method: "POST",
+                  token,
+                  body: { avatar_url: url },
+                }).then((result) => {
+                  if (result && authContext) {
+                    setMemberDashboard(result);
+                    setAuthContext({ ...authContext, profile: { ...authContext.profile, avatar_url: url } });
+                    setNotice({ tone: "success", text: t("profile.successPhotoUpdated") });
+                  }
+                }).catch(() => setNotice({ tone: "error", text: t("profile.errorPhotoUploadedProfileSaveFailed") }));
               }}
               onDeleted={() => {
                 setProfileAvatarUrl("");
-                setAvatarDirty(true);
-                setNotice({ tone: "info", text: t("profile.photoRemovedSaveProfile") });
+                apiRequest<MemberDashboard>("/api/auth/update-profile", {
+                  method: "POST",
+                  token,
+                  body: { avatar_url: "" },
+                }).then((result) => {
+                  if (result && authContext) {
+                    setMemberDashboard(result);
+                    setAuthContext({ ...authContext, profile: { ...authContext.profile, avatar_url: "" } });
+                    setNotice({ tone: "success", text: t("profile.successPhotoRemoved") });
+                  }
+                }).catch(() => setNotice({ tone: "error", text: t("profile.errorPhotoDeletedProfileSaveFailed") }));
               }}
               token={token || ""}
               folder="avatars"
@@ -708,9 +717,6 @@ export default function ProfilePage() {
             <p className="muted">{userPhone || authContext?.profile.email}</p>
 
           </div>
-          <Link to="/settings" className="btn btn-ghost" style={{ marginLeft: "auto", alignSelf: "flex-start" }} title={t("nav.settings")}>
-            <Settings size={20} strokeWidth={1.5} />
-          </Link>
         </div>
       </article>
 
@@ -961,13 +967,10 @@ export default function ProfilePage() {
               </div>
             </label>
             <div className="actions-row" style={{ marginTop: "0.75rem" }}>
-              {phoneChanged && !phoneVerified ? (
-                <p className="muted" style={{ fontSize: "0.85rem", color: "var(--error, #c0392b)" }}>{t("profile.phoneChangeVerifyFirst")}</p>
-              ) : null}
               <button
                 className="btn btn-primary"
                 onClick={updateProfile}
-                disabled={busyKey === "update-profile" || (phoneChanged && !phoneVerified)}
+                disabled={busyKey === "update-profile"}
               >
                 {busyKey === "update-profile" ? t("common.saving") : t("profile.saveProfile")}
               </button>
@@ -989,24 +992,7 @@ export default function ProfilePage() {
       {activeProfileTab === "family" && !isSuperAdmin ? (
         <article className="panel panel-wide">
           <h3>{t("profile.familyMembers")}</h3>
-
-          {/* Head of household */}
-          {memberDashboard?.member && (
-            <div className="list-item" style={{ borderLeft: "3px solid var(--primary)", marginBottom: "0.5rem" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                <Crown size={16} style={{ color: "var(--primary)" }} />
-                <div>
-                  <strong>{memberDashboard.member.full_name}</strong>
-                  <span style={{ fontSize: "0.75rem", fontWeight: 600, padding: "0.1rem 0.4rem", borderRadius: "4px", background: "var(--badge-success-bg, #e6f4ea)", color: "var(--badge-success-text, #1b5e20)", marginLeft: 6 }}>{t("profile.head")}</span>
-                  <span style={{ display: "block", fontSize: "0.85rem", color: "var(--text-muted)" }}>
-                    {memberDashboard.member.gender || ""}
-                  </span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div className="list-stack" style={{ paddingLeft: "1rem" }}>
+          <div className="list-stack">
             {memberDashboard?.family_members?.length ? (
               <>
               {paginate(memberDashboard.family_members, familyPage, ITEMS_PER_PAGE).map((fm) => {
@@ -1072,9 +1058,7 @@ export default function ProfilePage() {
                                 </label>
                                 <label>
                                   {t("profile.phoneNumber")}
-                                  <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
-                                    <span style={{ padding: "0.5rem 0.5rem", background: "var(--surface-variant, #f0f0f0)", borderRadius: "6px 0 0 6px", border: "1px solid var(--border)", borderRight: "none", fontSize: "0.9rem", fontWeight: 600 }}>+91</span>
-                                    <input style={{ borderRadius: "0 6px 6px 0" }} value={editLinkedPhone} onChange={(e) => {
+                                  <input value={editLinkedPhone} onChange={(e) => {
                                     setEditLinkedPhone(e.target.value);
                                     // Reset OTP state when phone changes
                                     if (e.target.value !== origLinkedPhone) {
@@ -1083,8 +1067,7 @@ export default function ProfilePage() {
                                       setFamPhoneChangeToken("");
                                       setFamPhoneVerified(false);
                                     }
-                                  }} placeholder="XXXXXXXXXX" />
-                                  </div>
+                                  }} />
                                 </label>
                                 {/* Family phone OTP verification */}
                                 {famPhoneChanged && editLinkedPhone.length === 10 && isValidIndianPhone(normalizeIndianPhone(editLinkedPhone)) && (

@@ -21,6 +21,7 @@ vi.mock("../lib/api", () => ({
   setActiveChurchId: (...args: unknown[]) => mockSetActiveChurchId(...args),
   getActiveChurchId: () => null,
   setTokenRefreshCallback: vi.fn(),
+  setAuthFailureCallback: vi.fn(),
   tryRefreshToken: vi.fn().mockResolvedValue(null),
   API_BASE_URL: "http://localhost:4000",
 }));

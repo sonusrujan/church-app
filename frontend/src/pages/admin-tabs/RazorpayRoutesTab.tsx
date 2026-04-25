@@ -9,6 +9,7 @@ type LinkedAccount = {
   church_name?: string;
   razorpay_account_id: string;
   account_status: string;
+  routes_enabled: boolean;
   business_name: string | null;
   contact_name: string | null;
   email: string | null;
@@ -62,8 +63,8 @@ export default function RazorpayRoutesTab() {
         () => apiRequest<TransferSummaryRow[]>("/api/razorpay-routes/transfers/summary", { token }),
       ),
     ]);
-    if (accts) setAccounts(accts);
-    if (sum) setSummary(sum);
+    if (accts && Array.isArray(accts)) setAccounts(accts);
+    if (sum && Array.isArray(sum)) setSummary(sum);
     setLoaded(true);
   }, [token, withAuthRequest]);
 
@@ -71,8 +72,12 @@ export default function RazorpayRoutesTab() {
     void loadAll();
     // load churches for the dropdown
     void (async () => {
-      const data = await apiRequest<ChurchOption[]>("/api/churches", { token });
-      if (data) setChurches(data);
+      const data = await apiRequest<ChurchOption[] | { churches: ChurchOption[] }>("/api/churches", { token });
+      if (Array.isArray(data)) {
+        setChurches(data);
+      } else if (data && Array.isArray((data as any).churches)) {
+        setChurches((data as any).churches);
+      }
     })();
   }, [loadAll, token]);
 
@@ -85,7 +90,7 @@ export default function RazorpayRoutesTab() {
         token,
         body: form,
       }),
-      "Linked account created successfully",
+      t("adminTabs.razorpayRoutes.successAccountCreated"),
     );
     if (result) {
       setShowForm(false);
@@ -101,7 +106,7 @@ export default function RazorpayRoutesTab() {
         method: "POST",
         token,
       }),
-      "Account synced",
+      t("adminTabs.razorpayRoutes.successSynced"),
     );
     void loadAll();
   }
@@ -114,7 +119,7 @@ export default function RazorpayRoutesTab() {
         token,
         body: { routes_enabled: !currentEnabled },
       }),
-      `Routes ${currentEnabled ? "disabled" : "enabled"}`,
+      currentEnabled ? t("adminTabs.razorpayRoutes.successRoutesDisabled") : t("adminTabs.razorpayRoutes.successRoutesEnabled"),
     );
     void loadAll();
   }
@@ -135,93 +140,90 @@ export default function RazorpayRoutesTab() {
 
   return (
     <article className="panel">
-      <h3>Razorpay Routes — Fund Splitting</h3>
-      <p className="muted">
-        Manage linked accounts for automatic fund splitting between the platform and churches.
-        Churches with activated linked accounts will have payments automatically routed.
-      </p>
+      <h3>{t("adminTabs.razorpayRoutes.title")}</h3>
+      <p className="muted">{t("adminTabs.razorpayRoutes.description")}</p>
 
       {/* ── Linked Accounts ── */}
       <section style={{ marginTop: "1.25rem" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h4 style={{ margin: 0 }}>Linked Accounts ({accounts.length})</h4>
-          <button className="btn btn-primary btn-sm" onClick={() => setShowForm(!showForm)}>
-            {showForm ? "Cancel" : "+ Onboard Church"}
+        <div className="actions-row" style={{ marginBottom: "0.75rem" }}>
+          <h4 style={{ margin: 0 }}>{t("adminTabs.razorpayRoutes.linkedAccountsTitle", { count: accounts.length })}</h4>
+          <button className="btn btn-primary btn-sm" style={{ marginLeft: "auto" }} onClick={() => setShowForm(!showForm)}>
+            {showForm ? t("adminTabs.razorpayRoutes.cancelButton") : t("adminTabs.razorpayRoutes.onboardChurch")}
           </button>
         </div>
 
         {showForm && (
-          <form onSubmit={(e) => void onCreateAccount(e)} style={{ marginTop: "1rem", padding: "1rem", borderRadius: 8, background: "var(--bg-secondary, #f9fafb)" }}>
+          <form onSubmit={(e) => void onCreateAccount(e)} style={{ marginBottom: "1rem", padding: "1rem", borderRadius: "var(--radius-md)", background: "var(--surface-container)" }}>
             <div className="field-stack">
               <label>
-                Church
+                {t("adminTabs.razorpayRoutes.churchLabel")}
                 <select value={form.church_id} onChange={(e) => setForm({ ...form, church_id: e.target.value })} required>
-                  <option value="">Select a church...</option>
+                  <option value="">{t("adminTabs.razorpayRoutes.selectChurchPlaceholder")}</option>
                   {availableChurches.map((c) => (
                     <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
                 </select>
               </label>
               <label>
-                Legal Business Name
+                {t("adminTabs.razorpayRoutes.legalBusinessNameLabel")}
                 <input value={form.legal_business_name} onChange={(e) => setForm({ ...form, legal_business_name: e.target.value })} required />
               </label>
               <label>
-                Contact Name
+                {t("adminTabs.razorpayRoutes.contactNameLabel")}
                 <input value={form.contact_name} onChange={(e) => setForm({ ...form, contact_name: e.target.value })} required />
               </label>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
                 <label>
-                  Email
+                  {t("adminTabs.razorpayRoutes.emailLabel")}
                   <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
                 </label>
                 <label>
-                  Phone
-                  <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} required placeholder="+91..." />
+                  {t("adminTabs.razorpayRoutes.phoneLabel")}
+                  <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} required placeholder={t("adminTabs.razorpayRoutes.phonePlaceholder")} />
                 </label>
               </div>
               <label>
-                Business Type
+                {t("adminTabs.razorpayRoutes.businessTypeLabel")}
                 <select value={form.business_type} onChange={(e) => setForm({ ...form, business_type: e.target.value })}>
-                  <option value="not_yet_categorised">Not Yet Categorised</option>
-                  <option value="trust">Trust</option>
-                  <option value="society">Society</option>
-                  <option value="ngo">NGO</option>
-                  <option value="individual">Individual</option>
+                  <option value="not_yet_categorised">{t("adminTabs.razorpayRoutes.typeNotCategorised")}</option>
+                  <option value="trust">{t("adminTabs.razorpayRoutes.typeTrust")}</option>
+                  <option value="society">{t("adminTabs.razorpayRoutes.typeSociety")}</option>
+                  <option value="ngo">{t("adminTabs.razorpayRoutes.typeNgo")}</option>
+                  <option value="individual">{t("adminTabs.razorpayRoutes.typeIndividual")}</option>
                 </select>
               </label>
-              <h5 style={{ margin: "0.75rem 0 0.25rem" }}>Bank Details</h5>
+              <h5 style={{ margin: "0.25rem 0" }}>{t("adminTabs.razorpayRoutes.bankDetailsTitle")}</h5>
               <label>
-                Account Holder Name
+                {t("adminTabs.razorpayRoutes.accountHolderNameLabel")}
                 <input value={form.bank_account_name} onChange={(e) => setForm({ ...form, bank_account_name: e.target.value })} required />
               </label>
               <label>
-                Account Number
+                {t("adminTabs.razorpayRoutes.accountNumberLabel")}
                 <input value={form.bank_account_number} onChange={(e) => setForm({ ...form, bank_account_number: e.target.value })} required />
               </label>
               <label>
-                IFSC Code
-                <input value={form.bank_ifsc_code} onChange={(e) => setForm({ ...form, bank_ifsc_code: e.target.value.toUpperCase() })} required placeholder="e.g. SBIN0001234" />
+                {t("adminTabs.razorpayRoutes.ifscLabel")}
+                <input value={form.bank_ifsc_code} onChange={(e) => setForm({ ...form, bank_ifsc_code: e.target.value.toUpperCase() })} required placeholder={t("adminTabs.razorpayRoutes.ifscPlaceholder")} />
               </label>
             </div>
             <div className="actions-row" style={{ marginTop: "0.75rem" }}>
               <button type="submit" className="btn btn-primary" disabled={busyKey === "create-linked-account"}>
-                {busyKey === "create-linked-account" ? "Creating..." : "Create Linked Account"}
+                {busyKey === "create-linked-account" ? t("adminTabs.razorpayRoutes.creatingAccount") : t("adminTabs.razorpayRoutes.createLinkedAccount")}
               </button>
             </div>
           </form>
         )}
 
         {accounts.length === 0 ? (
-          <p style={{ marginTop: "0.75rem", color: "var(--text-secondary)" }}>No linked accounts yet. Onboard a church to get started.</p>
+          <p className="muted">{t("adminTabs.razorpayRoutes.noLinkedAccounts")}</p>
         ) : (
-          <div style={{ marginTop: "0.75rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+          <div className="list-stack">
             {accounts.map((account) => (
-              <div key={account.id} style={{ padding: "0.75rem", borderRadius: 8, background: "var(--bg-secondary, #f9fafb)", border: "1px solid var(--border, #e5e7eb)" }}>
+              <div key={account.id} className="list-item">
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                   <div>
                     <strong>{account.church_name || account.church_id}</strong>
-                    <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+                    <div className="muted" style={{ fontSize: "0.85rem" }}>
                       {account.business_name} — {account.contact_name}
                     </div>
                     <div style={{ fontSize: "0.8rem", marginTop: "0.25rem" }}>
@@ -237,14 +239,14 @@ export default function RazorpayRoutesTab() {
                       onClick={() => void syncAccount(account.church_id)}
                       disabled={busyKey === `sync-${account.church_id}`}
                     >
-                      Sync
+                      {t("adminTabs.razorpayRoutes.syncButton")}
                     </button>
                     <button
                       className="btn btn-sm"
-                      onClick={() => void toggleRoutes(account.church_id, account.account_status === "activated")}
+                      onClick={() => void toggleRoutes(account.church_id, account.routes_enabled)}
                       disabled={busyKey === `toggle-${account.church_id}`}
                     >
-                      {account.account_status === "activated" ? "Disable" : "Enable"}
+                      {account.routes_enabled ? t("adminTabs.razorpayRoutes.disableButton") : t("adminTabs.razorpayRoutes.enableButton")}
                     </button>
                   </div>
                 </div>
@@ -256,27 +258,27 @@ export default function RazorpayRoutesTab() {
 
       {/* ── Transfer Summary ── */}
       <section style={{ marginTop: "1.5rem" }}>
-        <h4>Transfer Summary by Church</h4>
+        <h4>{t("adminTabs.razorpayRoutes.transferSummaryTitle")}</h4>
         {summary.length === 0 ? (
-          <p style={{ color: "var(--text-secondary)" }}>No transfers recorded yet.</p>
+          <p className="muted">{t("adminTabs.razorpayRoutes.noTransfers")}</p>
         ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", fontSize: "0.85rem", borderCollapse: "collapse" }}>
+          <div className="table-wrapper">
+            <table className="data-table">
               <thead>
-                <tr style={{ borderBottom: "2px solid var(--border, #e5e7eb)", textAlign: "left" }}>
-                  <th style={{ padding: "0.5rem" }}>Church</th>
-                  <th style={{ padding: "0.5rem", textAlign: "right" }}>Transfers</th>
-                  <th style={{ padding: "0.5rem", textAlign: "right" }}>Amount (₹)</th>
-                  <th style={{ padding: "0.5rem", textAlign: "right" }}>Platform Fee (₹)</th>
+                <tr>
+                  <th>{t("adminTabs.razorpayRoutes.columnChurch")}</th>
+                  <th style={{ textAlign: "right" }}>{t("adminTabs.razorpayRoutes.columnTransfers")}</th>
+                  <th style={{ textAlign: "right" }}>{t("adminTabs.razorpayRoutes.columnAmount")}</th>
+                  <th style={{ textAlign: "right" }}>{t("adminTabs.razorpayRoutes.columnPlatformFee")}</th>
                 </tr>
               </thead>
               <tbody>
                 {summary.map((row) => (
-                  <tr key={row.church_id} style={{ borderBottom: "1px solid var(--border, #e5e7eb)" }}>
-                    <td style={{ padding: "0.5rem" }}>{row.church_name}</td>
-                    <td style={{ padding: "0.5rem", textAlign: "right" }}>{row.total_transfers}</td>
-                    <td style={{ padding: "0.5rem", textAlign: "right" }}>{Number(row.total_amount).toLocaleString("en-IN")}</td>
-                    <td style={{ padding: "0.5rem", textAlign: "right" }}>{Number(row.total_platform_fee).toLocaleString("en-IN")}</td>
+                  <tr key={row.church_id}>
+                    <td>{row.church_name}</td>
+                    <td style={{ textAlign: "right" }}>{row.total_transfers}</td>
+                    <td style={{ textAlign: "right" }}>{Number(row.total_amount).toLocaleString("en-IN")}</td>
+                    <td style={{ textAlign: "right" }}>{Number(row.total_platform_fee).toLocaleString("en-IN")}</td>
                   </tr>
                 ))}
               </tbody>

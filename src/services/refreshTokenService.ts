@@ -43,12 +43,12 @@ export async function rotateRefreshToken(token: string): Promise<{ userId: strin
     return null;
   }
 
-  // RT-001: Grace period reduced to 5s for concurrent tab refreshes.
-  // If the token was revoked within the last 5s (another tab just rotated it),
+  // RT-001: 30s grace window for concurrent tab refreshes.
+  // If the token was revoked within the last 30s (another tab just rotated it),
   // find and return the newest active token for this user instead of failing.
   if (row.revoked) {
     const revokedAt = row.updated_at ? new Date(row.updated_at).getTime() : 0;
-    if (Date.now() - revokedAt < 5_000) {
+    if (Date.now() - revokedAt < 30_000) {
       const { data: latest } = await db
         .from("refresh_tokens")
         .select("id, user_id, token_hash, expires_at")
@@ -72,14 +72,34 @@ export async function rotateRefreshToken(token: string): Promise<{ userId: strin
         return { userId: row.user_id, churchId: row.church_id || null, newToken, expiresAt };
       }
     }
-    // RT-001: Token family revocation — revoked token reused outside grace window
-    // This indicates potential token theft. Revoke ALL tokens for this user.
-    logger.warn({ userId: row.user_id }, "Revoked refresh token reused outside grace window — revoking all tokens (possible theft)");
+    // RT-001 softened: a single revoked-token reuse is not conclusive theft
+    // (stale tabs, offline clients). Mark it as suspicious. Only revoke the
+    // entire family when we see 2+ suspicious reuses within a 5-minute window
+    // for this user.
+    const nowIso = new Date().toISOString();
     await db
       .from("refresh_tokens")
-      .update({ revoked: true })
+      .update({ suspicious_at: nowIso })
+      .eq("id", row.id);
+
+    const fiveMinsAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const { data: recentSuspicious } = await db
+      .from("refresh_tokens")
+      .select("id")
       .eq("user_id", row.user_id)
-      .eq("revoked", false);
+      .gte("suspicious_at", fiveMinsAgo);
+
+    const suspiciousCount = (recentSuspicious || []).length;
+    if (suspiciousCount >= 2) {
+      logger.warn({ userId: row.user_id, suspiciousCount }, "Multiple revoked refresh tokens reused within window — revoking family (theft suspected)");
+      await db
+        .from("refresh_tokens")
+        .update({ revoked: true })
+        .eq("user_id", row.user_id)
+        .eq("revoked", false);
+    } else {
+      logger.info({ userId: row.user_id, tokenId: row.id }, "Single revoked refresh token reuse — flagged, family preserved");
+    }
     return null;
   }
 

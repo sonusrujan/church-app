@@ -121,6 +121,7 @@ export const createSubscriptionSchema = z.object({
     .transform((v) => Number(v))
     .pipe(z.number().min(200, "amount must be at least 200").max(1_00_00_000, "amount cannot exceed 10000000")),
   billing_cycle: z.enum(["monthly", "yearly"]).optional().default("monthly"),
+  start_date: z.string().optional(),
 });
 
 /** Manual payment: POST /api/ops/payments/manual */
@@ -153,6 +154,7 @@ export const updateSubscriptionSchema = z.object({
 
 export const otpSendSchema = z.object({
   phone: indianPhoneSchema,
+  channel: z.enum(["sms", "call"]).optional(),
 });
 
 export const otpVerifySchema = z.object({
@@ -644,6 +646,12 @@ export const createRefundRequestSchema = z.object({
 });
 
 export const reviewRefundRequestSchema = z.object({
+  decision: z.enum(["approved", "rejected"]),
+  review_note: z.string().max(1000).optional(),
+});
+
+export const batchReviewSchema = z.object({
+  request_ids: z.array(uuidSchema).min(1, "At least one request_id is required").max(200, "Cannot review more than 200 requests at once"),
   decision: z.enum(["approved", "rejected"]),
   review_note: z.string().max(1000).optional(),
 });

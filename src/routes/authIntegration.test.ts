@@ -174,6 +174,10 @@ describe("Auth Integration Flow", () => {
     });
     // member check
     mockMaybeSingle.mockResolvedValueOnce({ data: { id: "member-1" } });
+    // family-dependent check: member lookup by phone
+    mockMaybeSingle.mockResolvedValueOnce({ data: { id: "member-1" } });
+    // family-dependent check: family_members link (not a dependent)
+    mockMaybeSingle.mockResolvedValueOnce({ data: null });
     // getUserProfileForJwt
     mockMaybeSingle.mockResolvedValueOnce({ data: { role: "member", church_id: "church-1" } });
 

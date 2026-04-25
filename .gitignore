@@ -8,3 +8,4 @@ pnpm-debug.log*
 .DS_Store
 PROJECT_HANDOFF.md
 DEVELOPER_GUIDE.md
+.claude/

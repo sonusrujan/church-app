@@ -21,7 +21,9 @@ type ReportPeriod = "daily" | "monthly" | "yearly" | "custom";
 const currentYear = new Date().getFullYear();
 const currentMonth = new Date().getMonth() + 1;
 const yearOptions = Array.from({ length: 5 }, (_, i) => currentYear - i);
-const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const monthNames = Array.from({ length: 12 }, (_, i) =>
+  new Intl.DateTimeFormat(navigator.language, { month: "long" }).format(new Date(2000, i, 1))
+);
 
 export default function IncomeDashboardTab() {
   const { t } = useI18n();
@@ -29,7 +31,7 @@ export default function IncomeDashboardTab() {
 
   const [incomeDetail, setIncomeDetail] = useState<IncomeDetail | null>(null);
   const [incomeDetailLoading, setIncomeDetailLoading] = useState(false);
-  const [incomeChurchId, setIncomeChurchId] = useState(churches[0]?.id || "");
+  const [incomeChurchId, setIncomeChurchId] = useState("");
 
   /* ── Report download state ── */
   const [reportPeriod, setReportPeriod] = useState<ReportPeriod>("monthly");
@@ -42,10 +44,10 @@ export default function IncomeDashboardTab() {
   const loadIncomeDetail = useCallback(async () => {
     if (!token) return;
     const churchId = isSuperAdmin ? incomeChurchId : (authContext?.auth.church_id || "");
-    if (!churchId) { setIncomeDetail(null); return; }
+    if (!churchId && !isSuperAdmin) { setIncomeDetail(null); return; }
     setIncomeDetailLoading(true);
     try {
-      const query = isSuperAdmin ? `?church_id=${encodeURIComponent(churchId)}` : "";
+      const query = isSuperAdmin && churchId ? `?church_id=${encodeURIComponent(churchId)}` : "";
       const data = await apiRequest<IncomeDetail>(`/api/admins/income-detail${query}`, { token });
       setIncomeDetail(data);
     } catch {
@@ -92,10 +94,12 @@ export default function IncomeDashboardTab() {
           <label>
             {t("admin.church")}
             <select value={incomeChurchId} onChange={(e) => setIncomeChurchId(e.target.value)}>
-              <option value="">{t("admin.selectChurch")}</option>
+              <option value="">{t("adminTabs.incomeDashboard.allChurches")}</option>
               {churches.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.church_code || c.id.slice(0, 8)})</option>)}
             </select>
           </label>
+          {!churches.length ? <p className="muted">{t("adminTabs.incomeDashboard.loadChurchesFirst")}</p> : null}
+          {!incomeChurchId ? <p className="muted">{t("adminTabs.incomeDashboard.viewingPlatformTotals")}</p> : null}
         </div>
       ) : null}
       {incomeDetailLoading && !incomeDetail ? (
@@ -136,9 +140,9 @@ export default function IncomeDashboardTab() {
               <div style={{ width: "100%", height: 200 }}>
                 <ResponsiveContainer>
                   <BarChart data={incomeDetail.subscription_income.weekly.length ? incomeDetail.subscription_income.weekly : emptyWeeklyIncome} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" opacity={0.5} />
-                    <XAxis dataKey="day" tick={{ fontSize: 11 }} stroke="#94a3b8" tickLine={false} axisLine={false} />
-                    <YAxis tick={{ fontSize: 11 }} stroke="#94a3b8" tickLine={false} axisLine={false} />
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--outline-variant, #e2e8f0)" opacity={0.5} />
+                    <XAxis dataKey="day" tick={{ fontSize: 11 }} stroke="var(--on-surface-variant, #94a3b8)" tickLine={false} axisLine={false} />
+                    <YAxis tick={{ fontSize: 11 }} stroke="var(--on-surface-variant, #94a3b8)" tickLine={false} axisLine={false} />
                     <Tooltip contentStyle={{ borderRadius: 8, border: "none", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)" }} />
                     <Bar dataKey="income" fill="var(--accent, #0071e3)" radius={[4, 4, 0, 0]} name={t("adminTabs.incomeDashboard.chartSubscriptions")} />
                   </BarChart>
@@ -148,11 +152,11 @@ export default function IncomeDashboardTab() {
               <div style={{ width: "100%", height: 200 }}>
                 <ResponsiveContainer>
                   <BarChart data={incomeDetail.subscription_income.monthly_trend.length ? incomeDetail.subscription_income.monthly_trend : emptyMonthlyTrend} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" opacity={0.5} />
-                    <XAxis dataKey="month" tick={{ fontSize: 11 }} stroke="#94a3b8" tickLine={false} axisLine={false} />
-                    <YAxis tick={{ fontSize: 11 }} stroke="#94a3b8" tickLine={false} axisLine={false} />
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--outline-variant, #e2e8f0)" opacity={0.5} />
+                    <XAxis dataKey="month" tick={{ fontSize: 11 }} stroke="var(--on-surface-variant, #94a3b8)" tickLine={false} axisLine={false} />
+                    <YAxis tick={{ fontSize: 11 }} stroke="var(--on-surface-variant, #94a3b8)" tickLine={false} axisLine={false} />
                     <Tooltip contentStyle={{ borderRadius: 8, border: "none", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)" }} />
-                    <Bar dataKey="income" fill="var(--accent, #0071e3)" radius={[4, 4, 0, 0]} name="Subscriptions" />
+                    <Bar dataKey="income" fill="var(--accent, #0071e3)" radius={[4, 4, 0, 0]} name={t("adminTabs.incomeDashboard.chartSubscriptions")} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -171,11 +175,11 @@ export default function IncomeDashboardTab() {
               <div style={{ width: "100%", height: 200 }}>
                 <ResponsiveContainer>
                   <BarChart data={incomeDetail.donation_income.weekly.length ? incomeDetail.donation_income.weekly : emptyWeeklyIncome} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" opacity={0.5} />
-                    <XAxis dataKey="day" tick={{ fontSize: 11 }} stroke="#94a3b8" tickLine={false} axisLine={false} />
-                    <YAxis tick={{ fontSize: 11 }} stroke="#94a3b8" tickLine={false} axisLine={false} />
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--outline-variant, #e2e8f0)" opacity={0.5} />
+                    <XAxis dataKey="day" tick={{ fontSize: 11 }} stroke="var(--on-surface-variant, #94a3b8)" tickLine={false} axisLine={false} />
+                    <YAxis tick={{ fontSize: 11 }} stroke="var(--on-surface-variant, #94a3b8)" tickLine={false} axisLine={false} />
                     <Tooltip contentStyle={{ borderRadius: 8, border: "none", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)" }} />
-                    <Bar dataKey="income" fill="#8b5cf6" radius={[4, 4, 0, 0]} name={t("adminTabs.incomeDashboard.chartDonations")} />
+                    <Bar dataKey="income" fill="var(--color-secondary, #8b5cf6)" radius={[4, 4, 0, 0]} name={t("adminTabs.incomeDashboard.chartDonations")} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -183,11 +187,11 @@ export default function IncomeDashboardTab() {
               <div style={{ width: "100%", height: 200 }}>
                 <ResponsiveContainer>
                   <BarChart data={incomeDetail.donation_income.monthly_trend.length ? incomeDetail.donation_income.monthly_trend : emptyMonthlyTrend} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" opacity={0.5} />
-                    <XAxis dataKey="month" tick={{ fontSize: 11 }} stroke="#94a3b8" tickLine={false} axisLine={false} />
-                    <YAxis tick={{ fontSize: 11 }} stroke="#94a3b8" tickLine={false} axisLine={false} />
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--outline-variant, #e2e8f0)" opacity={0.5} />
+                    <XAxis dataKey="month" tick={{ fontSize: 11 }} stroke="var(--on-surface-variant, #94a3b8)" tickLine={false} axisLine={false} />
+                    <YAxis tick={{ fontSize: 11 }} stroke="var(--on-surface-variant, #94a3b8)" tickLine={false} axisLine={false} />
                     <Tooltip contentStyle={{ borderRadius: 8, border: "none", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)" }} />
-                    <Bar dataKey="income" fill="#8b5cf6" radius={[4, 4, 0, 0]} name="Donations" />
+                    <Bar dataKey="income" fill="var(--color-secondary, #8b5cf6)" radius={[4, 4, 0, 0]} name={t("adminTabs.incomeDashboard.chartDonations")} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -253,11 +257,11 @@ export default function IncomeDashboardTab() {
             </div>
 
             <p className="muted" style={{ fontSize: "0.8rem", marginBottom: "1rem" }}>
-              {reportPeriod === "daily" && "Report for today's payments."}
-              {reportPeriod === "monthly" && `Report for ${monthNames[reportMonth - 1]} ${reportYear}.`}
-              {reportPeriod === "yearly" && `Full year report for ${reportYear} — includes monthly breakdown.`}
-              {reportPeriod === "custom" && customStart && customEnd && `Report from ${customStart} to ${customEnd}.`}
-              {reportPeriod === "custom" && (!customStart || !customEnd) && "Select start and end dates."}
+              {reportPeriod === "daily" && t("adminTabs.incomeDashboard.reportPreviewToday")}
+              {reportPeriod === "monthly" && t("adminTabs.incomeDashboard.reportPreviewMonthly", { month: monthNames[reportMonth - 1], year: reportYear })}
+              {reportPeriod === "yearly" && t("adminTabs.incomeDashboard.reportPreviewYearly", { year: reportYear })}
+              {reportPeriod === "custom" && customStart && customEnd && t("adminTabs.incomeDashboard.reportPreviewCustom", { start: customStart, end: customEnd })}
+              {reportPeriod === "custom" && (!customStart || !customEnd) && t("adminTabs.incomeDashboard.reportPreviewSelectDates")}
             </p>
 
             <button className="btn" onClick={() => void downloadReport()} disabled={downloading} style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem" }}>

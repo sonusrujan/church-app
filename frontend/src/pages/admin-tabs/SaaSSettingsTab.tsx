@@ -88,7 +88,11 @@ export default function SaaSSettingsTab() {
             </label>
             {settings.platform_fee_enabled ? (
               <label>{t("adminTabs.saasSettings.platformFeeLabel")}
-                <input type="number" min="0" max="100" step="0.5" value={settings.platform_fee_percentage} onChange={(e) => setSettings({ ...settings, platform_fee_percentage: parseFloat(e.target.value) || 0 })} />
+                <input type="number" min="0" max="10" step="0.5" value={settings.platform_fee_percentage} onChange={(e) => {
+                  const n = parseFloat(e.target.value);
+                  const clamped = Number.isFinite(n) ? Math.max(0, Math.min(10, n)) : 0;
+                  setSettings({ ...settings, platform_fee_percentage: clamped });
+                }} />
               </label>
             ) : null}
             <div className="actions-row" style={{ marginTop: "0.75rem" }}>

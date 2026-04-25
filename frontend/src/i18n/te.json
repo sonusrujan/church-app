@@ -53,14 +53,7 @@
     "photoUpdated": "Photo updated",
     "photoUploaded": "Photo uploaded",
     "sessionExpired": "Session expired",
-    "unexpectedError": "An unexpected error occurred.",
-    "done": "పూర్తయింది",
-    "member": "సభ్యుడు",
-    "change": "మార్చు",
-    "copy": "కాపీ",
-    "copied": "కాపీ అయింది!",
-    "prev": "మునుపటి",
-    "name": "పేరు"
+    "unexpectedError": "An unexpected error occurred."
   },
   "auth": {
     "welcome": "షాలోమ్‌కు స్వాగతం",
@@ -86,6 +79,9 @@
     "familyMemberAccount": "కుటుంబ సభ్యుడి ఖాతా",
     "familyMemberDescription": "మీరు {{name}} క్రింద కుటుంబ సభ్యుడిగా నమోదు చేయబడ్డారు.",
     "familyMemberHint": "ఈ యాప్‌ను స్వతంత్రంగా ఉపయోగించడానికి, దయచేసి {{name}}ని వారి కుటుంబ సభ్యుల జాబితా నుండి మిమ్మల్ని తీసివేయమని అడగండి.",
+    "familyStep1": "{{name}}ని సంప్రదించి వారి యాప్ తెరవమని అడగండి.",
+    "familyStep2": "వారు సెట్టింగ్‌లు → కుటుంబ సభ్యులు నుండి మిమ్మల్ని తీసివేయగలరు.",
+    "familyStep3": "తీసివేసిన తర్వాత, కొనసాగించడానికి క్రింద 'మళ్ళీ ప్రయత్నించు' నొక్కండి.",
     "yourFamilyHead": "మీ కుటుంబ ప్రధానుడు",
     "workspaceError": "ఏదో తప్పు జరిగింది",
     "preparingWorkspace": "వర్క్‌స్పేస్ సిద్ధమవుతోంది",
@@ -114,16 +110,7 @@
     "memberDashboardReady": "Welcome back. Member dashboard is ready.",
     "otpSentSuccess": "OTP sent! Check your phone and enter the code below.",
     "pleaseSignInFirst": "Please sign in first.",
-    "signedOut": "You have been signed out.",
-    "familyWhatCanYouDo": "మీరు ఏమి చేయగలరు?",
-    "familyTipContactHead": "మీ కుటుంబ పెద్దను సంప్రదించండి.",
-    "familyTipContactAdmin": "మరింత సహాయం కోసం మీ చర్చి నిర్వాహకుని సంప్రదించండి.",
-    "phoneInvalid10Digits": "ఫోన్ నంబర్ సరిగ్గా 10 అంకెలు ఉండాలి.",
-    "resendOtp": "OTP మళ్ళీ పంపండి",
-    "resendOtpIn": "{{seconds}}s లో OTP మళ్ళీ పంపండి",
-    "paymentConfigCheckFailed": "Payment config check failed: {{message}}",
-    "paymentsDisabledFallback": "Payments are disabled for this church.",
-    "workspaceLoadError": "Something went wrong while loading your workspace. Please try again."
+    "signedOut": "You have been signed out."
   },
   "nav": {
     "dashboard": "డాష్‌బోర్డ్",
@@ -144,8 +131,7 @@
     "shalomSuperAdmin": "SHALOM సూపర్ అడ్మిన్ కన్సోల్",
     "shalomChurchAdmin": "SHALOM చర్చి అడ్మిన్ వర్క్‌స్పేస్",
     "shalomMember": "SHALOM సభ్యుడి వర్క్‌స్పేస్",
-    "toggleNavigation": "Toggle navigation",
-    "switchChurch": "చర్చి మార్చు"
+    "toggleNavigation": "Toggle navigation"
   },
   "dashboard": {
     "welcomeUser": "స్వాగతం, {{name}}.",
@@ -247,21 +233,7 @@
     "subscriptionDuePayment": "Subscription Due Payment",
     "month": "నెల",
     "months": "నెలలు",
-    "pendingMonths": "పెండింగ్ నెలలు",
-    "paymentSuccessTitle": "చెల్లింపు విజయవంతం!",
-    "amountPaid": "చెల్లించిన మొత్తం",
-    "transactionId": "లావాదేవీ ఐడి",
-    "paidOn": "చెల్లించిన తేదీ",
-    "paymentSuccessHint": "రసీదు మీ చెల్లింపు చరిత్రలో సేవ్ చేయబడింది.",
-    "requestCancellation": "రద్దు అభ్యర్థన",
-    "cancelWarning": "సబ్మిట్ చేసిన తర్వాత, మీ అడ్మిన్ రద్దు అభ్యర్థనను సమీక్షిస్తారు. ఆమోదం వరకు మీ చందా చురుకుగా ఉంటుంది.",
-    "selectSubscriptionsToPay": "చెల్లించడానికి చందాలను ఎంచుకోండి.",
-    "noDueSubscriptions": "బకాయి చందాలు లేవు.",
-    "statusActive": "చురుకు",
-    "statusOverdue": "బకాయి",
-    "statusPending": "పెండింగ్",
-    "growthMetricsError": "Failed to load growth metrics.",
-    "openingPaymentGateway": "Opening payment gateway..."
+    "pendingMonths": "పెండింగ్ నెలలు"
   },
   "profile": {
     "tabPersonal": "వ్యక్తిగత",
@@ -406,24 +378,7 @@
     "subscriptionAmount": "చందా మొత్తం",
     "memberDetails": "లింక్ చేయబడిన సభ్యుల వివరాలు",
     "manualFamilyMember": "ఈ సభ్యుడు నమోదిత ప్రొఫైల్‌కు లింక్ చేయబడలేదు.",
-    "verifyPhoneBeforeSave": "సేవ్ చేయడానికి ముందు దయచేసి కొత్త ఫోన్ నంబర్‌ను OTP తో ధృవీకరించండి",
-    "deleteSpecialDateTitle": "Delete Special Date",
-    "head": "Head",
-    "occupationBusiness": "Business",
-    "occupationFarmer": "Farmer",
-    "occupationGovEmployee": "Govt. Employee",
-    "occupationHomemaker": "Homemaker",
-    "occupationOther": "Other",
-    "occupationPastor": "Pastor",
-    "occupationPrivEmployee": "Private Employee",
-    "occupationRetired": "Retired",
-    "occupationSelfEmployed": "Self-Employed",
-    "occupationStudent": "Student",
-    "occupationTeacher": "Teacher",
-    "phoneChangeVerifyFirst": "Verify the new phone number before saving.",
-    "photoRemovedSaveProfile": "Photo removed. Click Save Profile to apply.",
-    "photoSelectedSaveProfile": "Photo selected. Click Save Profile to apply.",
-    "unsaved": "Unsaved"
+    "verifyPhoneBeforeSave": "సేవ్ చేయడానికి ముందు దయచేసి కొత్త ఫోన్ నంబర్‌ను OTP తో ధృవీకరించండి"
   },
   "history": {
     "heading": "చరిత్ర",
@@ -478,11 +433,7 @@
     "prayerPlaceholder": "పాస్టర్లు దేనికోసం ప్రార్థించాలో పంచుకోండి",
     "sendPrayerRequest": "ప్రార్థన అభ్యర్థన పంపు",
     "prayerCallToAction": "ప్రార్థన కావాలా? ప్రార్థన అభ్యర్థన సమర్పించండి, పాస్టర్ మీ కోసం ప్రార్థిస్తారు.",
-    "goToPrayerRequests": "ప్రార్థన అభ్యర్థనలకు వెళ్ళు",
-    "addToCalendar": "క్యాలెండర్‌కి జోడించు",
-    "markAllRead": "అన్నీ చదివినట్టు",
-    "going": "Going",
-    "interested": "Interested"
+    "goToPrayerRequests": "ప్రార్థన అభ్యర్థనలకు వెళ్ళు"
   },
   "prayer": {
     "selectPastor": "పాస్టర్‌ని ఎంచుకోండి",
@@ -558,25 +509,7 @@
     "errorVerificationFailed": "Verification failed",
     "offeringDonation": "Offering / Donation",
     "scriptureRef": "— 2 Corinthians 9:7",
-    "scriptureVerse": "\"Each of you should give what you have decided in your heart to give, not reluctantly or under compulsion, for God loves a cheerful giver.\"",
-    "selectChurch": "చర్చి ఎంచుకోండి",
-    "chooseDiocese": "డయోసిస్ ఎంచుకోండి",
-    "selectDiocesePlaceholder": "— డయోసిస్ ఎంచుకోండి —",
-    "noChurchesInDiocese": "ఈ డయోసిస్‌లో చర్చిలు లేవు.",
-    "churchSelected": "చర్చి ఎంచుకోబడింది",
-    "invalidEmail": "చెల్లని ఇమెయిల్ చిరునామా",
-    "phoneNumber": "ఫోన్ నంబర్",
-    "selectedChurch": "ఎంచుకున్న చర్చి",
-    "donateToAnotherChurch": "Donate to another church",
-    "donateToYourChurch": "Donate to Your Church",
-    "fundBuildingFund": "Building Fund",
-    "fundCommunityAid": "Community Aid",
-    "fundGeneralOffering": "General Offering",
-    "fundMissionOutreach": "Mission & Outreach",
-    "fundOther": "Other",
-    "fundYouthMinistry": "Youth Ministry",
-    "receiptWarning": "Please save your receipt now. As a guest donor, this receipt will not be available once you leave this page.",
-    "saveReceipt": "Save Receipt"
+    "scriptureVerse": "\"Each of you should give what you have decided in your heart to give, not reluctantly or under compulsion, for God loves a cheerful giver.\""
   },
   "home": {
     "title": "షాలోమ్‌కి స్వాగతం",
@@ -607,9 +540,7 @@
     "codeRequired": "చర్చి కోడ్ అవసరం. కోడ్ కోసం మీ చర్చి నిర్వాహకుడిని అడగండి.",
     "codeMustBe8Digits": "చర్చి కోడ్ సరిగ్గా 8 అంకెలు ఉండాలి.",
     "joinButton": "చర్చిలో చేరు",
-    "errorJoinFailed": "Failed to join church.",
-    "noCodeHint": "కోడ్ లేదా? మీ చర్చి నిర్వాహకుడిని అడగండి.",
-    "exploreChurches": "చర్చిలను అన్వేషించండి"
+    "errorJoinFailed": "Failed to join church."
   },
   "admin": {
     "console": "కన్సోల్",
@@ -668,9 +599,7 @@
     "pushSms": "Push / SMS",
     "refundRequests": "Refund Requests",
     "saasPlatform": "SaaS Platform",
-    "specialDates": "Special Dates",
-    "donationLinksQR": "Donation Links & QR",
-    "searchTools": "Search tools..."
+    "specialDates": "Special Dates"
   },
   "relations": {
     "spouse": "భార్య/భర్త",
@@ -696,7 +625,6 @@
   },
   "settings": {
     "title": "సెట్టింగ్‌లు",
-    "editProfile": "ప్రొఫైల్ సవరించండి",
     "lightMode": "లైట్ మోడ్",
     "darkMode": "డార్క్ మోడ్",
     "switchToLight": "లైట్‌కు మారు",
@@ -723,26 +651,7 @@
     "deleteWarning2": "సక్రియ సబ్‌స్క్రిప్షన్‌లు వెంటనే రద్దు చేయబడతాయి.",
     "deleteWarning3": "మీ ఖాతాకు లింక్ చేయబడిన కుటుంబ సభ్యులు అన్‌లింక్ చేయబడతారు.",
     "deleteWarning4": "అడ్మిన్ ఆమోదించిన తర్వాత ఈ చర్యను రద్దు చేయడం సాధ్యం కాదు.",
-    "deleteWarningTitle": "హెచ్చరిక: ఈ చర్యకు తీవ్రమైన పరిణామాలు ఉన్నాయి",
-    "typeDeleteToConfirm": "నిర్ధారించడానికి DELETE టైప్ చేయండి",
-    "signOutConfirmTitle": "సైన్ అవుట్ చేయాలా?",
-    "signOutConfirmDesc": "మీరు ఖచ్చితంగా మీ ఖాతా నుండి సైన్ అవుట్ చేయాలనుకుంటున్నారా?",
-    "deleteReasonMinLength": "Please provide at least 10 characters.",
-    "goToProfile": "Go to Profile",
-    "exportMyData": "Export My Data",
-    "exportMyDataHint": "Download all your personal data (profile, subscriptions, payments) as a JSON file.",
-    "downloadData": "Download",
-    "exportSuccess": "Your data has been downloaded successfully.",
-    "exportFailed": "Failed to export data. Please try again.",
-    "pushBlockedInstructions": "To enable: open your browser settings → Site Settings → Notifications → allow this site.",
-    "notifyCat_announcements": "Announcements",
-    "notifyCat_events": "Events & Calendar",
-    "notifyCat_family": "Family & Membership",
-    "notifyCat_payments": "Payments & Subscriptions",
-    "notifyCat_prayer": "Prayer Requests",
-    "notifyCategories": "Notification Categories",
-    "off": "Off",
-    "on": "On"
+    "deleteWarningTitle": "హెచ్చరిక: ఈ చర్యకు తీవ్రమైన పరిణామాలు ఉన్నాయి"
   },
   "banner": {
     "pushPrompt": "🔔 ప్రకటనలు మరియు రిమైండర్లతో అప్‌డేట్‌గా ఉండటానికి పుష్ నోటిఫికేషన్లను ప్రారంభించండి.",
@@ -937,10 +846,7 @@
       "impactEvents": "Events:",
       "impactNotifications": "Notifications:",
       "impactPrayerRequests": "Prayer Requests:",
-      "impactPayments": "Payments:",
-      "downloadQr": "Download QR",
-      "generateJoinQr": "Generate Join QR Code",
-      "joinQrHint": "Members can scan this QR code with their phone camera to join your church."
+      "impactPayments": "Payments:"
     },
     "createChurch": {
       "title": "Create Church",
@@ -1115,7 +1021,13 @@
       "errorNoField": "At least one field to update is required.",
       "errorNoSubscriptions": "This member has no subscriptions.",
       "errorLoadFailed": "Failed to load member subscriptions",
-      "successUpdated": "Subscription updated."
+      "successUpdated": "Subscription updated.",
+      "pauseSubButton": "Pause",
+      "pausing": "Pausing…",
+      "pauseSubscriptionTitle": "Pause subscription?",
+      "pauseSubscriptionMessage": "This will temporarily stop reminders and due tracking. You can resume it anytime.",
+      "pauseKeyword": "PAUSE",
+      "successPaused": "Subscription paused."
     },
     "events": {
       "title": "Events & Notifications",
@@ -1128,16 +1040,16 @@
       "addressHeader": "Address",
       "selectButton": "Select",
       "eventsToggle": "Events",
-      "notificationsToggle": "ప్రకటనలు",
+      "notificationsToggle": "Notifications",
       "newEvent": "New Event",
-      "newNotification": "కొత్త ప్రకటన",
+      "newNotification": "New Notification",
       "editEvent": "Edit Event",
-      "editNotification": "ప్రకటన సవరించు",
+      "editNotification": "Edit Notification",
       "createEvent": "Create Event",
-      "createNotification": "ప్రకటన సృష్టించు",
+      "createNotification": "Create Notification",
       "titleLabel": "Title",
       "titlePlaceholderEvent": "Sunday Service",
-      "titlePlaceholderNotification": "ముఖ్యమైన ప్రకటన",
+      "titlePlaceholderNotification": "Important Notice",
       "messageLabel": "Message",
       "messagePlaceholder": "Details...",
       "eventDateLabel": "Event Date",
@@ -1152,21 +1064,15 @@
       "createdHeader": "Created",
       "actionsHeader": "Actions",
       "noEventsYet": "No events yet.",
-      "noNotificationsYet": "ఇంకా ప్రకటనలు లేవు.",
+      "noNotificationsYet": "No notifications yet.",
       "errorTitleMessageRequired": "Title and message are required.",
       "errorUploadFailed": "Failed to upload image",
       "successEventCreated": "Event created.",
       "successEventUpdated": "Event updated.",
       "successEventDeleted": "Event deleted.",
-      "successNotificationCreated": "ప్రకటన సృష్టించబడింది.",
-      "successNotificationUpdated": "ప్రకటన నవీకరించబడింది.",
-      "successNotificationDeleted": "ప్రకటన తొలగించబడింది.",
-      "confirmDeleteEvent": "మీరు ఖచ్చితంగా ఈ ఈవెంట్‌ను తొలగించాలనుకుంటున్నారా?",
-      "confirmDeleteNotification": "ఈ ప్రకటనను తొలగించాలనుకుంటున్నారా?",
-      "endTimeLabel": "End Time",
-      "locationHeader": "Location",
-      "locationLabel": "Location",
-      "locationPlaceholder": "e.g. Church Main Hall, 123 Main St"
+      "successNotificationCreated": "Notification created.",
+      "successNotificationUpdated": "Notification updated.",
+      "successNotificationDeleted": "Notification deleted."
     },
     "export": {
       "title": "Data Export",
@@ -1197,9 +1103,7 @@
       "emptyDescription": "Family member addition requests will appear here.",
       "errorLoadFailed": "Failed to load family requests",
       "successApproved": "Family request approved.",
-      "successRejected": "Family request rejected.",
-      "memberIdLabel": "సభ్యుడి ఐడి:",
-      "familyCountLabel": "కుటుంబ సభ్యులు:"
+      "successRejected": "Family request rejected."
     },
     "incomeDashboard": {
       "title": "Income Dashboard",
@@ -1468,10 +1372,7 @@
       "emptyTitle": "No payments found",
       "emptyDescription": "This member has no recorded payments yet.",
       "errorSelectMember": "Please select a member first.",
-      "errorDownloadFailed": "Failed to download receipt",
-      "filterByPerson": "వ్యక్తి పేరు ద్వారా ఫిల్టర్",
-      "paginationInfo": "తగ్గుతున్న క్రమంలో పేజీకి 10 ఎంట్రీలు చూపుతోంది.",
-      "loadFailed": "చెల్లింపు చరిత్ర లోడ్ చేయడం విఫలమైంది"
+      "errorDownloadFailed": "Failed to download receipt"
     },
     "platformRazorpay": {
       "title": "Platform Razorpay Configuration",
@@ -1486,9 +1387,7 @@
       "configLoadedSuccess": "Platform config loaded.",
       "configSavedSuccess": "Platform Razorpay config saved.",
       "statusConfigured": "Configured — churches can pay platform fees online",
-      "statusNotConfigured": "Not configured — set both Key ID and Key Secret to enable online SaaS payments",
-      "donationFeeLabel": "పబ్లిక్ విరాళం ప్లాట్‌ఫారం ఫీజు (%)",
-      "donationFeeHint": "పబ్లిక్ (సభ్యులు కాని) విరాళాలపై వసూలు చేయబడే ఫీజు శాతం. నిలిపివేయడానికి 0 ఇవ్వండి."
+      "statusNotConfigured": "Not configured — set both Key ID and Key Secret to enable online SaaS payments"
     },
     "preRegister": {
       "title": "Pre-register Member",
@@ -1585,12 +1484,7 @@
       "pillSent": "Sent",
       "pillFailed": "Failed",
       "pillCancelled": "Cancelled",
-      "charsCount": "{{count}}/320 characters",
-      "confirmSend": "ఈ నోటిఫికేషన్ {{target}} కు పంపాలా?",
-      "confirmTargetMember": "ఎంచుకున్న సభ్యుడు",
-      "confirmTargetChurch": "ఎంచుకున్న చర్చి సభ్యులందరూ",
-      "confirmTargetDiocese": "ఎంచుకున్న డయోసిస్ సభ్యులందరూ",
-      "confirmTargetAll": "అన్ని సభ్యులు ప్రపంచవ్యాప్తంగా"
+      "charsCount": "{{count}}/320 characters"
     },
     "refundRequests": {
       "title": "Refund Requests",
@@ -1689,8 +1583,7 @@
       "grantPhoneLabel": "Phone Number",
       "grantPhoneRequired": "Phone number is required.",
       "revokePhoneLabel": "Phone Number",
-      "revokePhoneRequired": "Phone number is required.",
-      "alreadyAdmin": "This user is already an admin."
+      "revokePhoneRequired": "Phone number is required."
     },
     "saasSettings": {
       "title": "Platform Settings",
@@ -1810,18 +1703,6 @@
       "successReviewed": "Deletion request {{decision}}.",
       "title": "Account Deletion Requests",
       "unknownMember": "Unknown Member"
-    },
-    "donationLinks": {
-      "title": "విరాళ లింక్‌లు & QR కోడ్‌లు",
-      "description": "మీ చర్చి కోసం భాగస్వామ్యం చేయగల విరాళ లింక్‌లు మరియు QR కోడ్‌లను రూపొందించండి.",
-      "diocese": "డయోసిస్",
-      "selectDiocese": "— డయోసిస్ ఎంచుకోండి —",
-      "church": "చర్చి",
-      "selectChurch": "— చర్చి ఎంచుకోండి —",
-      "fund": "ఫండ్",
-      "donationLink": "విరాళ లింక్",
-      "qrCode": "QR కోడ్",
-      "downloadQR": "QR కోడ్ డౌన్‌లోడ్"
     }
   },
   "photo": {
@@ -1909,50 +1790,14 @@
     "shalomHelpsYou": "Shalom helps you to",
     "signInToJoin": "Sign in to join →",
     "whyIntro": "Shalom is an all-in-one church management app that helps your church stay connected, organized, and future-ready. Built to bring your entire congregation closer together.",
-    "whyShalom": "Why Shalom?",
-    "churchCode": "Church Code",
-    "members": "members"
+    "whyShalom": "Why Shalom?"
   },
   "historyPage": {
-    "errorDownloadReceiptFailed": "రసీదు డౌన్‌లోడ్ చేయడం విఫలమైంది.",
-    "title": "చెల్లింపు చరిత్ర",
-    "subtitle": "మీ కుటుంబ చెల్లింపు రికార్డులు చూడండి.",
-    "allFamilyMembers": "అన్ని కుటుంబ సభ్యులు",
-    "selectPerson": "వ్యక్తిని ఎంచుకోండి",
-    "newerEntries": "కొత్తవి",
-    "olderEntries": "పాతవి",
-    "monthAndYear": "నెల & సంవత్సరం",
-    "paidAmount": "చెల్లించిన మొత్తం",
-    "paidBy": "చెల్లించినవారు",
-    "paidDate": "చెల్లించిన తేదీ",
-    "downloadReceipt": "రసీదు డౌన్‌లోడ్",
-    "downloadBtn": "డౌన్‌లోడ్",
-    "receipt": "రసీదు",
-    "noEntries": "చెల్లింపు చరిత్ర కనుగొనబడలేదు.",
-    "paginationInfo": "{{start}}–{{end}} / {{total}} చూపుతోంది",
-    "errorLoadFailed": "చెల్లింపు చరిత్ర లోడ్ చేయడం విఫలమైంది.",
-    "goToDashboard": "డాష్‌బోర్డ్‌కి వెళ్ళు",
-    "refundHint": "రిఫండ్ కోసం, దయచేసి మీ చర్చి నిర్వాహకుడిని సంప్రదించండి.",
-    "adminNote": "Admin Note",
-    "myRefundRequests": "My Refund Requests",
-    "refund": "Refund",
-    "refundReasonLabel": "Reason for refund",
-    "refundReasonPlaceholder": "Please explain why you want a refund...",
-    "refundRequestFailed": "Failed to submit refund request.",
-    "refundRequestInfo": "Your request will be reviewed by the church administrator. Refunds are subject to approval.",
-    "refundRequestSubmitted": "Refund request submitted successfully.",
-    "requestRefund": "Request Refund",
-    "requestRefundTitle": "Request a Refund",
-    "submitRefundRequest": "Submit Refund Request",
-    "status": "స్థితి",
-    "statusPaid": "చెల్లించారు",
-    "statusUnpaid": "బకాయి",
-    "statusImported": "దిగుమతి"
+    "errorDownloadReceiptFailed": "రసీదు డౌన్‌లోడ్ చేయడం విఫలమైంది."
   },
   "checkout": {
     "title": "చెల్లింపు సారాంశం",
     "subtotal": "ఉప మొత్తం",
-    "feeExplanation": "మీరు ఇచ్చేటప్పుడు, ఒక చిన్న భాగం మీ అర్పణను ముందుకు తీసుకెళ్ళే మార్గాలకు మద్దతు ఇస్తుంది, మీ బహుమతి చర్చికి పూర్తిగా మరియు అడ్డంకి లేకుండా చేరుకునేలా చేస్తుంది.",
     "processingFee": "ప్రాసెసింగ్ ఫీజు ({{percent}}%)",
     "waived": "మినహాయింపు",
     "total": "మొత్తం",
@@ -1973,12 +1818,5 @@
   },
   "offline": {
     "message": "మీరు ఆఫ్లైన్లో ఉన్నారు. కొన్ని ఫీచర్లు అందుబాటులో ఉండకపోవచ్చు."
-  },
-  "churchPicker": {
-    "title": "మీ చర్చిని ఎంచుకోండి",
-    "subtitle": "మీరు అనేక చర్చిలలో సభ్యులు. కొనసాగించడానికి ఒకదాన్ని ఎంచుకోండి.",
-    "unnamedChurch": "పేరు లేని చర్చి",
-    "admin": "అడ్మిన్",
-    "member": "సభ్యుడు"
   }
 }

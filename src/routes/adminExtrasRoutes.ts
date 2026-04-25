@@ -49,7 +49,7 @@ router.get("/trial", requireAuth, requireRegisteredUser, requireSuperAdmin, asyn
 
 router.post("/trial/grant", requireAuth, requireRegisteredUser, requireSuperAdmin, async (req: AuthRequest, res: Response) => {
   try {
-    const { church_id, months } = req.body;
+    const { church_id, months, reason, override } = req.body;
     if (!church_id || typeof church_id !== "string") {
       return res.status(400).json({ error: "church_id required." });
     }
@@ -57,10 +57,20 @@ router.post("/trial/grant", requireAuth, requireRegisteredUser, requireSuperAdmi
     if (!Number.isInteger(monthsNum) || monthsNum < 1 || monthsNum > 24) {
       return res.status(400).json({ error: "months must be 1–24." });
     }
+    if (override && (!reason || typeof reason !== "string" || reason.trim().length < 5)) {
+      return res.status(400).json({ error: "reason (min 5 chars) required when override=true." });
+    }
 
-    const result = await grantFreeTrial(church_id, monthsNum, req.user!.id);
+    const result = await grantFreeTrial(church_id, monthsNum, req.user!.id, {
+      reason: typeof reason === "string" ? reason : undefined,
+      override: !!override,
+    });
 
-    await persistAuditLog(req, "trial.granted", "church", church_id, { months: monthsNum });
+    await persistAuditLog(req, "trial.granted", "church", church_id, {
+      months: monthsNum,
+      reason: reason || null,
+      override: !!override,
+    });
 
     return res.json(result);
   } catch (err: any) {

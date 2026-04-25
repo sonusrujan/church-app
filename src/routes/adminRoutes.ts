@@ -15,7 +15,7 @@ import {
   searchAdmins,
   updateAdminById,
 } from "../services/adminService";
-import { getChurchIncomeSummary, getChurchGrowthMetrics, getChurchIncomeDetail, generatePaymentReport } from "../services/analyticsService";
+import { getChurchIncomeSummary, getPlatformIncomeSummary, getChurchGrowthMetrics, getChurchIncomeDetail, getPlatformIncomeDetail, generatePaymentReport } from "../services/analyticsService";
 import { logSuperAdminAudit } from "../utils/superAdminAudit";
 import { persistAuditLog } from "../utils/auditLog";
 
@@ -176,8 +176,13 @@ router.get(
         ? requestedChurchId || req.user.church_id
         : req.user.church_id;
 
-      if (!churchId) {
+      if (!churchId && !isSuperAdminEmail(req.user.email, req.user.phone)) {
         return res.status(400).json({ error: "church_id is required" });
+      }
+
+      if (!churchId) {
+        const summary = await getPlatformIncomeSummary();
+        return res.json({ church_id: "all", ...summary });
       }
 
       const summary = await getChurchIncomeSummary(churchId);
@@ -242,11 +247,12 @@ router.get(
       const churchId = isSuperAdminEmail(req.user.email, req.user.phone)
         ? requestedChurchId || req.user.church_id
         : req.user.church_id;
-      if (!churchId) {
+      if (!churchId && !isSuperAdminEmail(req.user.email, req.user.phone)) {
         return res.status(400).json({ error: "church_id is required" });
       }
-      const detail = await getChurchIncomeDetail(churchId);
-      return res.json({ church_id: churchId, ...detail });
+
+      const detail = churchId ? await getChurchIncomeDetail(churchId) : await getPlatformIncomeDetail();
+      return res.json({ church_id: churchId || "all", ...detail });
     } catch (err: any) {
       return res.status(400).json({ error: safeErrorMessage(err, "Failed to load income detail") });
     }
