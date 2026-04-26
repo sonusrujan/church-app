@@ -1223,6 +1223,20 @@ pre {
   text-align: center;
 }
 
+.profile-avatar-lg {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.profile-avatar-hint {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--primary);
+  line-height: 1;
+}
+
 /* ── Profile Tab Bar ── */
 .profile-tabs {
   display: flex;
@@ -1246,9 +1260,18 @@ pre {
   border-bottom: 2px solid transparent;
 }
 
+.profile-tab:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
 .profile-tab:hover {
   background: var(--surface-container);
   color: var(--on-surface);
+}
+
+.profile-tab:focus {
+  outline: none;
 }
 
 .profile-tab.active {
@@ -2129,6 +2152,83 @@ pre {
   font-size: 0.78rem;
 }
 
+.profile-empty-callout {
+  padding: 1rem;
+  border: 1px dashed var(--outline-variant, #d7d0e8);
+  border-radius: var(--radius-md, 8px);
+  background: var(--surface-container-lowest, #fff);
+  text-align: center;
+  color: var(--on-surface-variant, #64748b);
+}
+
+.profile-empty-callout p {
+  margin: 0;
+  font-weight: 600;
+}
+
+.profile-empty-callout span {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.profile-request-list,
+.profile-request-list .list-item {
+  list-style: none;
+}
+
+.profile-request-list {
+  padding-left: 0;
+}
+
+.profile-subscription-card {
+  gap: 0.5rem;
+}
+
+.profile-subscription-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.profile-status-chip {
+  flex: 0 0 auto;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.profile-status-chip--active {
+  background: #e6f4ea;
+  color: #1b7a3d;
+}
+
+.profile-status-chip--cancelled {
+  background: #fde8e8;
+  color: #c0392b;
+}
+
+.profile-status-chip--pending {
+  background: #fff8e1;
+  color: #8a6500;
+}
+
+.profile-subscription-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  color: var(--on-surface-variant, #64748b);
+  font-size: 0.82rem;
+}
+
+.profile-subscription-meta span {
+  padding: 0.18rem 0.45rem;
+  border-radius: 999px;
+  background: var(--surface-container, #f5f2fb);
+}
+
 /* Special dates form grid: 2 cols desktop, 1 col mobile */
 .profile-sd-form-grid {
   display: grid;
@@ -2141,6 +2241,10 @@ pre {
 }
 
 @media (max-width: 640px) {
+  .profile-page-grid {
+    padding-bottom: 7rem;
+  }
+
   .profile-sd-form-grid {
     grid-template-columns: 1fr;
   }
