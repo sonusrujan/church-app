@@ -340,7 +340,11 @@ export default function DashboardPage() {
       });
 
       try {
-        await apiRequest<{ success: true }>("/api/payments/subscription/verify", {
+        const verifyResult = await apiRequest<{
+          success?: boolean;
+          reconciliation_queued?: boolean;
+          error?: string;
+        }>("/api/payments/subscription/verify", {
           method: "POST",
           token,
           body: {
@@ -354,6 +358,17 @@ export default function DashboardPage() {
             razorpay_signature: response.razorpay_signature,
           },
         });
+        if (!verifyResult.success) {
+          await refreshMemberDashboard();
+          void loadIncomeSummary();
+          setNotice({
+            tone: "warning",
+            text: verifyResult.reconciliation_queued
+              ? t("dashboard.verificationPending")
+              : verifyResult.error || t("dashboard.errorSubscriptionPaymentFailed"),
+          });
+          return;
+        }
         setSelectedDueSubscriptionIds([]);
         setSelectedDueMonthsBySubscription({});
         await refreshMemberDashboard();

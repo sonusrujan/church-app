@@ -155,8 +155,47 @@ export async function getPendingMonthsForSubscription(subscriptionId: string) {
   return (data || []) as DueMonthRow[];
 }
 
+export async function ensurePendingMonthsForPaymentAtomic(input: {
+  subscription_id: string;
+  member_id: string;
+  church_id: string;
+  start_month: string;
+  months_to_ensure: number;
+  existingClient: import("pg").PoolClient;
+}) {
+  if (!Number.isInteger(input.months_to_ensure) || input.months_to_ensure <= 0) {
+    throw new Error("months_to_ensure must be a positive integer");
+  }
+
+  const start = monthStartIso(input.start_month);
+  const pendingRes = await input.existingClient.query<{ cnt: number }>(
+    `SELECT COUNT(*)::int AS cnt
+     FROM subscription_monthly_dues
+     WHERE subscription_id = $1 AND status = 'pending'`,
+    [input.subscription_id],
+  );
+  const existingPendingCount = Number(pendingRes.rows[0]?.cnt || 0);
+  if (existingPendingCount >= input.months_to_ensure) return;
+
+  const missingCount = input.months_to_ensure - existingPendingCount;
+  const rows = Array.from({ length: missingCount }, (_, idx) => ({
+    due_month: addMonthsIso(start, idx),
+  }));
+
+  for (const row of rows) {
+    await input.existingClient.query(
+      `INSERT INTO subscription_monthly_dues
+         (subscription_id, member_id, church_id, due_month, status, source)
+       VALUES ($1, $2, $3, $4, 'pending', 'payment_repair')
+       ON CONFLICT (subscription_id, due_month) DO NOTHING`,
+      [input.subscription_id, input.member_id, input.church_id, row.due_month],
+    );
+  }
+}
+
 export async function listMonthlyHistoryForMember(input: {
   member_id: string;
+  person_key?: string;
   person_name?: string;
   from_date?: string;
   limit: number;
@@ -170,9 +209,16 @@ export async function listMonthlyHistoryForMember(input: {
   // keyed by their payment_date.
   try {
     const params: unknown[] = [input.member_id];
+    const personKey = typeof input.person_key === "string" ? input.person_key.trim() : "";
+    const familyId = personKey.startsWith("family:") ? personKey.slice("family:".length) : "";
+    const isSelf = personKey === "self";
     const personFilterDues = input.person_name && input.person_name !== "all"
       ? ` AND COALESCE(fm.full_name, m.full_name) = $${params.push(input.person_name)}`
-      : "";
+      : familyId
+        ? ` AND s.family_member_id = $${params.push(familyId)}`
+        : isSelf
+          ? " AND s.family_member_id IS NULL"
+          : "";
     const fromDateFilterDues = input.from_date
       ? ` AND smd.due_month >= $${params.push(input.from_date)}`
       : "";
@@ -180,7 +226,9 @@ export async function listMonthlyHistoryForMember(input: {
     // Donation rows reuse the same param array (member_id stays at $1).
     const personFilterDonations = input.person_name && input.person_name !== "all"
       ? ` AND COALESCE(m.full_name, 'Member') = $${params.push(input.person_name)}`
-      : "";
+      : familyId
+        ? " AND 1 = 0"
+        : "";
     const fromDateFilterDonations = input.from_date
       ? ` AND p.payment_date >= $${params.push(input.from_date)}`
       : "";

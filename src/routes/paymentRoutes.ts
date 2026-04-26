@@ -24,6 +24,7 @@ import {
 import { getPublicDonationFeePercent } from "../services/platformConfigService";
 import {
   allocateOldestPendingMonthsAtomic,
+  ensurePendingMonthsForPaymentAtomic,
   listMonthlyHistoryForMember,
 } from "../services/subscriptionMonthlyDuesService";
 import { buildOrderTransfers } from "../services/razorpayRoutesService";
@@ -213,10 +214,12 @@ router.get("/my-monthly-history", requireAuth, requireRegisteredUser, async (req
     const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 200);
     const offset = Math.max(Number(req.query.offset) || 0, 0);
     const personName = typeof req.query.person_name === "string" ? req.query.person_name : undefined;
+    const personKey = typeof req.query.person_key === "string" ? req.query.person_key : undefined;
     const fromDate = typeof req.query.from_date === "string" ? req.query.from_date : undefined;
 
     const rows = await listMonthlyHistoryForMember({
       member_id: dashboard.member.id,
+      person_key: personKey,
       person_name: personName,
       from_date: fromDate,
       limit,
@@ -878,6 +881,14 @@ router.post("/subscription/verify", requireAuth, requireRegisteredUser, paymentW
             .sort();
           logger.info({ paymentId: payment.id, count: allocatedMonths.length }, "Skipping allocation; existing allocations found");
         } else {
+          await ensurePendingMonthsForPaymentAtomic({
+            subscription_id: selectedId,
+            member_id: dashboard.member.id,
+            church_id: churchId || "",
+            start_month: subscription.next_payment_date,
+            months_to_ensure: selectedMonths,
+            existingClient: client,
+          });
           allocatedMonths = await allocateOldestPendingMonthsAtomic({
             payment_id: payment.id,
             subscription_id: selectedId,
@@ -931,13 +942,10 @@ router.post("/subscription/verify", requireAuth, requireRegisteredUser, paymentW
           razorpay_payment_id,
           church_id: churchId || null,
           member_id: dashboard.member.id,
+          subscription_ids: normalizedSubscriptionIds,
           expected_amount: expectedTotal,
           status: "pending",
-          metadata: {
-            failed_subscription_ids: normalizedSubscriptionIds,
-            completed_payment_ids: [],
-            failure_reason: txErr instanceof Error ? txErr.message : "Unknown error",
-          },
+          error_message: txErr instanceof Error ? txErr.message : "Unknown error",
         });
       } catch (reconErr) {
         logger.error({ err: reconErr }, "Failed to queue reconciliation for failed atomic subscription payment");

@@ -5325,6 +5325,23 @@ pre {
   padding: 3px;
 }
 
+.history-filter-select {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 220px;
+}
+
+.history-filter-select select {
+  min-height: 2.5rem;
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--primary);
+  padding: 0.45rem 0.75rem;
+  font: inherit;
+}
+
 .history-filter-btn {
   padding: 0.4rem 1rem;
   font-size: 0.82rem;
@@ -5696,6 +5713,11 @@ pre {
   .history-filter-tabs {
     width: 100%;
     justify-content: stretch;
+  }
+
+  .history-filter-select {
+    width: 100%;
+    min-width: 0;
   }
 
   .history-filter-btn {

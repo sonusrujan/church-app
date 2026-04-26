@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, Link } from "react-router-dom";
-import { Download, ChevronLeft, ChevronRight, Receipt, RotateCcw, AlertTriangle } from "lucide-react";
+import { Download, ChevronLeft, ChevronRight, Receipt, RotateCcw, AlertTriangle, UserRound } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import { apiRequest, apiBlobRequest } from "../lib/api";
 import { formatAmount, formatDate, type MonthlyPaymentHistoryRow } from "../types";
@@ -26,14 +26,16 @@ export default function HistoryPage() {
   const [hasMore, setHasMore] = useState(false);
   const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
   const [failedIds, setFailedIds] = useState<Set<string>>(new Set());
-  const [selectedPersonName, setSelectedPersonName] = useState<string>("all");
+  const [selectedPersonKey, setSelectedPersonKey] = useState<string>("all");
+  const [typeFilter, setTypeFilter] = useState<"all" | "subscription" | "donation">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "paid" | "pending">("all");
 
   const personOptions = useMemo(() => {
     const out: Array<{ value: string; label: string }> = [{ value: "all", label: t("historyPage.allFamilyMembers") }];
     const selfName = memberDashboard?.member?.full_name?.trim();
-    if (selfName) out.push({ value: selfName, label: selfName });
+    if (selfName) out.push({ value: "self", label: selfName });
     for (const fm of memberDashboard?.family_members || []) {
-      if (fm.full_name?.trim()) out.push({ value: fm.full_name.trim(), label: fm.full_name.trim() });
+      if (fm.full_name?.trim()) out.push({ value: `family:${fm.id}`, label: fm.full_name.trim() });
     }
     const seen = new Set<string>();
     return out.filter((o) => {
@@ -43,9 +45,34 @@ export default function HistoryPage() {
     });
   }, [memberDashboard?.member?.full_name, memberDashboard?.family_members]);
 
+  const visibleRows = useMemo(() => {
+    return rows.filter((row) => {
+      if (typeFilter !== "all" && row.kind !== typeFilter) return false;
+      const paid = row.due_status === "paid" || row.due_status === "imported_paid";
+      if (statusFilter === "paid" && !paid) return false;
+      if (statusFilter === "pending" && paid) return false;
+      return true;
+    });
+  }, [rows, typeFilter, statusFilter]);
+
+  const ledgerTotals = useMemo(() => {
+    return visibleRows.reduce(
+      (acc, row) => {
+        const paid = row.due_status === "paid" || row.due_status === "imported_paid";
+        if (paid) {
+          acc.paid += Number(row.paid_amount || 0);
+        } else {
+          acc.pending += Number(row.paid_amount || 0);
+        }
+        return acc;
+      },
+      { paid: 0, pending: 0 },
+    );
+  }, [visibleRows]);
+
   useEffect(() => {
     setPage(1);
-  }, [selectedPersonName]);
+  }, [selectedPersonKey, typeFilter, statusFilter]);
 
   useEffect(() => {
     let cancelled = false;
@@ -59,8 +86,8 @@ export default function HistoryPage() {
           offset: String(offset),
           from_date: "2025-01-01",
         });
-        if (selectedPersonName && selectedPersonName !== "all") {
-          query.set("person_name", selectedPersonName);
+        if (selectedPersonKey && selectedPersonKey !== "all") {
+          query.set("person_key", selectedPersonKey);
         }
         const data = await apiRequest<MonthlyPaymentHistoryRow[]>(`/api/payments/my-monthly-history?${query.toString()}`, { token });
         if (cancelled) return;
@@ -78,7 +105,7 @@ export default function HistoryPage() {
     return () => {
       cancelled = true;
     };
-  }, [token, page, selectedPersonName, setNotice]);
+  }, [token, page, selectedPersonKey, setNotice]);
 
   async function downloadReceipt(row: MonthlyPaymentHistoryRow) {
     const pid = row.payment_id;
@@ -134,30 +161,69 @@ export default function HistoryPage() {
         <p className="history-subtitle">{t("historyPage.subtitle")}</p>
       </div>
 
+      <div className="history-stats-grid">
+        <div className="history-stat-card">
+          <div className="history-stat-top">
+            <span className="history-stat-label">Ledger Rows</span>
+            <Receipt className="history-stat-icon history-stat-icon--success" size={18} />
+          </div>
+          <span className="history-stat-value">{visibleRows.length}</span>
+          <span className="history-stat-sub">Filtered entries</span>
+        </div>
+        <div className="history-stat-card">
+          <div className="history-stat-top">
+            <span className="history-stat-label">Paid</span>
+            <Download className="history-stat-icon history-stat-icon--success" size={18} />
+          </div>
+          <span className="history-stat-value">{formatAmount(ledgerTotals.paid)}</span>
+          <span className="history-stat-sub history-stat-sub--success">Receipts available where generated</span>
+        </div>
+        <div className="history-stat-card">
+          <div className="history-stat-top">
+            <span className="history-stat-label">Pending</span>
+            <AlertTriangle className="history-stat-icon history-stat-icon--warning" size={18} />
+          </div>
+          <span className="history-stat-value">{formatAmount(ledgerTotals.pending)}</span>
+          <span className="history-stat-sub">Open dues in this view</span>
+        </div>
+      </div>
+
       <div className="history-table-container">
-        <div className="history-filters" style={{ justifyContent: "space-between", gap: 12 }}>
-          <label style={{ display: "inline-flex", flexDirection: "column", gap: 6 }}>
+        <div className="history-section-header">
+          <h2>Ledger</h2>
+        </div>
+        <div className="history-filters">
+          <label className="history-filter-select">
             <span style={{ fontWeight: 600 }}>{t("historyPage.selectPerson")}</span>
             <select
-              value={selectedPersonName}
-              onChange={(e) => setSelectedPersonName(e.target.value)}
-              style={{ minWidth: 260 }}
+              value={selectedPersonKey}
+              onChange={(e) => setSelectedPersonKey(e.target.value)}
             >
               {personOptions.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
           </label>
-          <span className="muted" style={{ fontSize: "0.85rem", alignSelf: "end" }}>{rows.length > 0 ? t("historyPage.paginationInfo", { start: String((page - 1) * PAGE_SIZE + 1), end: String((page - 1) * PAGE_SIZE + rows.length), total: String(hasMore ? "..." : ((page - 1) * PAGE_SIZE + rows.length)) }) : ""}</span>
+          <div className="history-filter-tabs" aria-label="Entry type">
+            <button className={`history-filter-btn${typeFilter === "all" ? " active" : ""}`} onClick={() => setTypeFilter("all")} type="button">All</button>
+            <button className={`history-filter-btn${typeFilter === "subscription" ? " active" : ""}`} onClick={() => setTypeFilter("subscription")} type="button">Dues</button>
+            <button className={`history-filter-btn${typeFilter === "donation" ? " active" : ""}`} onClick={() => setTypeFilter("donation")} type="button">Donations</button>
+          </div>
+          <div className="history-filter-tabs" aria-label="Payment status">
+            <button className={`history-filter-btn${statusFilter === "all" ? " active" : ""}`} onClick={() => setStatusFilter("all")} type="button">All Status</button>
+            <button className={`history-filter-btn${statusFilter === "paid" ? " active" : ""}`} onClick={() => setStatusFilter("paid")} type="button">Paid</button>
+            <button className={`history-filter-btn${statusFilter === "pending" ? " active" : ""}`} onClick={() => setStatusFilter("pending")} type="button">Unpaid</button>
+          </div>
         </div>
 
         {loading ? (
           <LoadingSkeleton lines={6} />
-        ) : rows.length ? (
+        ) : visibleRows.length ? (
           <div className="history-table-scroll">
             <table className="history-table">
               <thead>
                 <tr>
+                  <th>Entry</th>
                   <th>{t("historyPage.monthAndYear")}</th>
                   <th>{t("historyPage.status")}</th>
                   <th>{t("historyPage.paidAmount")}</th>
@@ -168,7 +234,7 @@ export default function HistoryPage() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => {
+                {visibleRows.map((row) => {
                   const isPaid = row.due_status === "paid";
                   const isImported = row.due_status === "imported_paid";
                   const isPending = !isPaid && !isImported;
@@ -176,21 +242,21 @@ export default function HistoryPage() {
                   return (
                   <tr key={row.id} className={`history-row ${isPending ? "history-row-pending" : ""}`}>
                     <td>
-                      {isDonation ? (
-                        <>
-                          <span style={{ display: "block", fontWeight: 600 }}>
-                            {row.fund_name || t("historyPage.donationLabel")}
-                          </span>
-                          <span className="muted" style={{ fontSize: "0.78rem" }}>
-                            {monthYearLabel(row.month_year)}
-                          </span>
-                        </>
-                      ) : (
-                        monthYearLabel(row.month_year)
-                      )}
+                      <div className="history-cell-desc">
+                        <span className={`history-cell-icon ${isDonation ? "history-cell-icon--donation" : "history-cell-icon--sub"}`}>
+                          {isDonation ? <Receipt size={16} /> : <UserRound size={16} />}
+                        </span>
+                        <div>
+                          <span className="history-cell-title">{isDonation ? row.fund_name || t("historyPage.donationLabel") : row.person_name || t("common.member")}</span>
+                          <span className="history-cell-receipt-no">{row.receipt_number || (isDonation ? "Donation" : "Subscription due")}</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="history-cell-date">
+                      {monthYearLabel(row.month_year)}
                     </td>
                     <td>
-                      <span className={`history-status-badge ${isPaid ? "badge-paid" : isImported ? "badge-imported" : "badge-pending"}`}>
+                      <span className={`history-status-badge ${isPaid ? "history-status--paid" : isImported ? "history-status--paid" : "history-status--pending"}`}>
                         {isDonation ? t("historyPage.statusDonation") : isPaid ? t("historyPage.statusPaid") : isImported ? t("historyPage.statusImported") : t("historyPage.statusUnpaid")}
                       </span>
                     </td>

@@ -826,7 +826,7 @@ export async function getAdminPendingCounts(churchId: string): Promise<{
        (SELECT COUNT(*)::int FROM account_deletion_requests WHERE church_id = $1 AND status = 'pending') AS account_deletion_requests,
        (SELECT COUNT(*)::int FROM refund_requests WHERE church_id = $1 AND status = 'pending') AS refund_requests,
        (SELECT COUNT(*)::int FROM prayer_requests WHERE church_id = $1 AND status = 'sent' AND created_at >= NOW() - INTERVAL '7 days') AS prayer_requests,
-       (SELECT COUNT(*)::int FROM church_events WHERE church_id = $1 AND starts_at >= NOW()) AS events,
+       (SELECT COUNT(*)::int FROM church_events WHERE church_id = $1 AND event_date >= NOW()) AS events,
        (SELECT COUNT(*)::int FROM church_notifications WHERE church_id = $1 AND created_at >= NOW() - INTERVAL '7 days') AS notifications`,
     [churchId],
   );
