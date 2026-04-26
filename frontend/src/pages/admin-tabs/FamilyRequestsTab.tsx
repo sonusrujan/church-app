@@ -230,7 +230,7 @@ export default function FamilyRequestsTab() {
               onClear={() => { setAddMemberId(""); setAddMemberName(""); }}
             />
           </label>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.4rem" }}>
+          <div className="admin-responsive-grid admin-responsive-grid-compact">
             <label>{t("adminTabs.familyRequests.familyMemberNameLabel")}
               <input value={addFamName} onChange={(e) => setAddFamName(e.target.value)} placeholder={t("adminTabs.familyRequests.familyMemberNamePlaceholder")} />
             </label>
@@ -240,7 +240,7 @@ export default function FamilyRequestsTab() {
               </select>
             </label>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.4rem" }}>
+          <div className="admin-responsive-grid admin-responsive-grid-compact">
             <label>{t("adminTabs.familyRequests.phoneLabel")}
               <input value={addFamPhone} onChange={(e) => setAddFamPhone(e.target.value)} placeholder="+91 …" />
             </label>

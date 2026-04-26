@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { TrendingUp, Download } from "lucide-react";
 import {
   BarChart,
@@ -7,13 +7,12 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  ResponsiveContainer,
 } from "recharts";
 import { apiRequest, apiBlobRequest } from "../../lib/api";
 import { useApp } from "../../context/AppContext";
 import LoadingSkeleton from "../../components/LoadingSkeleton";
 import EmptyState from "../../components/EmptyState";
-import type { IncomeDetail } from "../../types";
+import type { IncomeDetail, MonthlyTrendEntry, WeeklyIncomeEntry } from "../../types";
 import { formatAmount, emptyWeeklyIncome, emptyMonthlyTrend } from "../../types";
 import { useI18n } from "../../i18n";
 
@@ -24,6 +23,57 @@ const yearOptions = Array.from({ length: 5 }, (_, i) => currentYear - i);
 const monthNames = Array.from({ length: 12 }, (_, i) =>
   new Intl.DateTimeFormat(navigator.language, { month: "long" }).format(new Date(2000, i, 1))
 );
+
+type IncomeChartDatum = WeeklyIncomeEntry | MonthlyTrendEntry;
+
+function IncomeBarChart({
+  data,
+  xKey,
+  fill,
+  name,
+}: {
+  data: IncomeChartDatum[];
+  xKey: "day" | "month";
+  fill: string;
+  name: string;
+}) {
+  const frameRef = useRef<HTMLDivElement | null>(null);
+  const [width, setWidth] = useState(0);
+
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (!frame) return;
+
+    const measure = () => {
+      const nextWidth = Math.floor(frame.getBoundingClientRect().width);
+      setWidth(nextWidth > 0 ? nextWidth : 0);
+    };
+
+    measure();
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    observer?.observe(frame);
+    window.addEventListener("resize", measure);
+
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, []);
+
+  return (
+    <div className="income-chart-shell" ref={frameRef}>
+      {width > 0 ? (
+        <BarChart data={data} width={width} height={200} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--outline-variant, #e2e8f0)" opacity={0.5} />
+          <XAxis dataKey={xKey} tick={{ fontSize: 11 }} stroke="var(--on-surface-variant, #94a3b8)" tickLine={false} axisLine={false} />
+          <YAxis tick={{ fontSize: 11 }} stroke="var(--on-surface-variant, #94a3b8)" tickLine={false} axisLine={false} />
+          <Tooltip contentStyle={{ borderRadius: 8, border: "none", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)" }} />
+          <Bar dataKey="income" fill={fill} radius={[4, 4, 0, 0]} name={name} />
+        </BarChart>
+      ) : null}
+    </div>
+  );
+}
 
 export default function IncomeDashboardTab() {
   const { t } = useI18n();
@@ -127,8 +177,8 @@ export default function IncomeDashboardTab() {
           </div>
 
           {/* ── Subscription Income ── */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "2rem", marginBottom: "2rem" }}>
-            <div>
+          <div className="income-dashboard-sections">
+            <div className="income-dashboard-section">
               <h4 style={{ marginBottom: "0.5rem" }}>{t("adminTabs.incomeDashboard.subscriptionIncomeTitle")}</h4>
               <div className="stats-grid">
                 <div className="stat"><span>{t("adminTabs.incomeDashboard.dailyLabel")}</span><strong>{formatAmount(incomeDetail.subscription_income.daily)}</strong></div>
@@ -137,64 +187,44 @@ export default function IncomeDashboardTab() {
                 <div className="stat"><span>{t("adminTabs.incomeDashboard.paymentsLabel")}</span><strong>{incomeDetail.subscription_income.count}</strong></div>
               </div>
               <p className="muted" style={{ fontSize: "0.85rem", margin: "0.75rem 0 0.25rem" }}>{t("adminTabs.incomeDashboard.thisWeekSubscriptions")}</p>
-              <div style={{ width: "100%", height: 200 }}>
-                <ResponsiveContainer>
-                  <BarChart data={incomeDetail.subscription_income.weekly.length ? incomeDetail.subscription_income.weekly : emptyWeeklyIncome} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--outline-variant, #e2e8f0)" opacity={0.5} />
-                    <XAxis dataKey="day" tick={{ fontSize: 11 }} stroke="var(--on-surface-variant, #94a3b8)" tickLine={false} axisLine={false} />
-                    <YAxis tick={{ fontSize: 11 }} stroke="var(--on-surface-variant, #94a3b8)" tickLine={false} axisLine={false} />
-                    <Tooltip contentStyle={{ borderRadius: 8, border: "none", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)" }} />
-                    <Bar dataKey="income" fill="var(--accent, #0071e3)" radius={[4, 4, 0, 0]} name={t("adminTabs.incomeDashboard.chartSubscriptions")} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+              <IncomeBarChart
+                data={incomeDetail.subscription_income.weekly.length ? incomeDetail.subscription_income.weekly : emptyWeeklyIncome}
+                xKey="day"
+                fill="var(--accent, #0071e3)"
+                name={t("adminTabs.incomeDashboard.chartSubscriptions")}
+              />
               <p className="muted" style={{ fontSize: "0.85rem", margin: "1rem 0 0.25rem" }}>{t("adminTabs.incomeDashboard.monthlyTrendSubscriptions")}</p>
-              <div style={{ width: "100%", height: 200 }}>
-                <ResponsiveContainer>
-                  <BarChart data={incomeDetail.subscription_income.monthly_trend.length ? incomeDetail.subscription_income.monthly_trend : emptyMonthlyTrend} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--outline-variant, #e2e8f0)" opacity={0.5} />
-                    <XAxis dataKey="month" tick={{ fontSize: 11 }} stroke="var(--on-surface-variant, #94a3b8)" tickLine={false} axisLine={false} />
-                    <YAxis tick={{ fontSize: 11 }} stroke="var(--on-surface-variant, #94a3b8)" tickLine={false} axisLine={false} />
-                    <Tooltip contentStyle={{ borderRadius: 8, border: "none", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)" }} />
-                    <Bar dataKey="income" fill="var(--accent, #0071e3)" radius={[4, 4, 0, 0]} name={t("adminTabs.incomeDashboard.chartSubscriptions")} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+              <IncomeBarChart
+                data={incomeDetail.subscription_income.monthly_trend.length ? incomeDetail.subscription_income.monthly_trend : emptyMonthlyTrend}
+                xKey="month"
+                fill="var(--accent, #0071e3)"
+                name={t("adminTabs.incomeDashboard.chartSubscriptions")}
+              />
             </div>
 
             {/* ── Donation Income ── */}
-            <div>
+            <div className="income-dashboard-section">
               <h4 style={{ marginBottom: "0.5rem" }}>{t("adminTabs.incomeDashboard.donationIncomeTitle")}</h4>
               <div className="stats-grid">
                 <div className="stat"><span>{t("adminTabs.incomeDashboard.dailyLabel")}</span><strong>{formatAmount(incomeDetail.donation_income.daily)}</strong></div>
                 <div className="stat"><span>{t("adminTabs.incomeDashboard.monthlyLabel")}</span><strong>{formatAmount(incomeDetail.donation_income.monthly)}</strong></div>
                 <div className="stat"><span>{t("adminTabs.incomeDashboard.yearlyLabel")}</span><strong>{formatAmount(incomeDetail.donation_income.yearly)}</strong></div>
-                <div className="stat"><span>{t("adminTabs.incomeDashboard.donationsLabel")}</span><strong>{formatAmount(incomeDetail.donation_income.count)}</strong></div>
+                <div className="stat"><span>{t("adminTabs.incomeDashboard.donationsLabel")}</span><strong>{incomeDetail.donation_income.count}</strong></div>
               </div>
               <p className="muted" style={{ fontSize: "0.85rem", margin: "0.75rem 0 0.25rem" }}>{t("adminTabs.incomeDashboard.thisWeekDonations")}</p>
-              <div style={{ width: "100%", height: 200 }}>
-                <ResponsiveContainer>
-                  <BarChart data={incomeDetail.donation_income.weekly.length ? incomeDetail.donation_income.weekly : emptyWeeklyIncome} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--outline-variant, #e2e8f0)" opacity={0.5} />
-                    <XAxis dataKey="day" tick={{ fontSize: 11 }} stroke="var(--on-surface-variant, #94a3b8)" tickLine={false} axisLine={false} />
-                    <YAxis tick={{ fontSize: 11 }} stroke="var(--on-surface-variant, #94a3b8)" tickLine={false} axisLine={false} />
-                    <Tooltip contentStyle={{ borderRadius: 8, border: "none", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)" }} />
-                    <Bar dataKey="income" fill="var(--color-secondary, #8b5cf6)" radius={[4, 4, 0, 0]} name={t("adminTabs.incomeDashboard.chartDonations")} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+              <IncomeBarChart
+                data={incomeDetail.donation_income.weekly.length ? incomeDetail.donation_income.weekly : emptyWeeklyIncome}
+                xKey="day"
+                fill="var(--color-secondary, #8b5cf6)"
+                name={t("adminTabs.incomeDashboard.chartDonations")}
+              />
               <p className="muted" style={{ fontSize: "0.85rem", margin: "1rem 0 0.25rem" }}>{t("adminTabs.incomeDashboard.monthlyTrendDonations")}</p>
-              <div style={{ width: "100%", height: 200 }}>
-                <ResponsiveContainer>
-                  <BarChart data={incomeDetail.donation_income.monthly_trend.length ? incomeDetail.donation_income.monthly_trend : emptyMonthlyTrend} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--outline-variant, #e2e8f0)" opacity={0.5} />
-                    <XAxis dataKey="month" tick={{ fontSize: 11 }} stroke="var(--on-surface-variant, #94a3b8)" tickLine={false} axisLine={false} />
-                    <YAxis tick={{ fontSize: 11 }} stroke="var(--on-surface-variant, #94a3b8)" tickLine={false} axisLine={false} />
-                    <Tooltip contentStyle={{ borderRadius: 8, border: "none", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)" }} />
-                    <Bar dataKey="income" fill="var(--color-secondary, #8b5cf6)" radius={[4, 4, 0, 0]} name={t("adminTabs.incomeDashboard.chartDonations")} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+              <IncomeBarChart
+                data={incomeDetail.donation_income.monthly_trend.length ? incomeDetail.donation_income.monthly_trend : emptyMonthlyTrend}
+                xKey="month"
+                fill="var(--color-secondary, #8b5cf6)"
+                name={t("adminTabs.incomeDashboard.chartDonations")}
+              />
             </div>
           </div>
 
@@ -213,7 +243,7 @@ export default function IncomeDashboardTab() {
               {t("adminTabs.incomeDashboard.reportDescription")}
             </p>
 
-            <div className="field-stack" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "1rem", marginBottom: "1rem" }}>
+            <div className="field-stack admin-responsive-grid" style={{ marginBottom: "1rem" }}>
               <label>
                 {t("adminTabs.incomeDashboard.reportPeriodLabel")}
                 <select value={reportPeriod} onChange={(e) => setReportPeriod(e.target.value as ReportPeriod)}>
