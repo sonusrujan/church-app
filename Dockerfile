@@ -23,7 +23,7 @@ WORKDIR /app
 
 # Install only production deps
 COPY package*.json ./
-RUN npm ci --omit=dev --ignore-scripts
+RUN npm ci --omit=dev --ignore-scripts && rm -f package-lock.json
 
 # Copy compiled backend
 COPY --from=backend-build /app/dist ./dist
