@@ -27,6 +27,9 @@ RUN npm ci --omit=dev --ignore-scripts
 FROM node:20-alpine
 WORKDIR /app
 
+# Keep the runtime image's bundled npm dependencies current for image scanners.
+RUN npm install -g npm@11.13.0 && npm cache clean --force
+
 # Copy only installed production deps so dev lockfile metadata is not present
 # in the final image layers scanned by Trivy.
 COPY --from=prod-deps /app/node_modules ./node_modules
