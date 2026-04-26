@@ -1795,7 +1795,30 @@
     "churchExtraControl": "Maintain complete control over member accounts."
   },
   "historyPage": {
-    "errorDownloadReceiptFailed": "Failed to download receipt."
+    "title": "Payment Ledger",
+    "subtitle": "Track dues, donations, receipts, and family member payments in one place.",
+    "allFamilyMembers": "All family members",
+    "selectPerson": "Select person",
+    "errorLoadFailed": "Failed to load payment history.",
+    "errorDownloadReceiptFailed": "Failed to download receipt.",
+    "reportSubmitted": "Issue report submitted.",
+    "reportPlaceholder": "Describe the issue",
+    "monthAndYear": "Month / Year",
+    "status": "Status",
+    "paidAmount": "Amount",
+    "paidBy": "Paid by",
+    "paidDate": "Paid date",
+    "receipt": "Receipt",
+    "donationLabel": "Donation",
+    "statusDonation": "Donation",
+    "statusPaid": "Paid",
+    "statusImported": "Imported",
+    "statusUnpaid": "Unpaid",
+    "downloadBtn": "Download",
+    "reportIssue": "Report issue",
+    "noEntries": "No ledger entries match these filters.",
+    "goToDashboard": "Go to dashboard",
+    "paginationInfo": "{{start}}-{{end}} of {{total}}"
   },
   "checkout": {
     "title": "Payment Summary",
