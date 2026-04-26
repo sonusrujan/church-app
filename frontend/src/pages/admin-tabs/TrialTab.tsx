@@ -7,7 +7,7 @@ import { useI18n } from "../../i18n";
 
 export default function TrialTab() {
   const { t } = useI18n();
-  const { token, busyKey, setNotice: _setNotice, withAuthRequest, churches } = useApp();
+  const { token, busyKey, withAuthRequest, churches } = useApp();
 
   const [churchId, setChurchId] = useState(churches[0]?.id || "");
   const [months, setMonths] = useState("3");

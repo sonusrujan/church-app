@@ -353,13 +353,14 @@ export async function allocateOldestPendingMonthsAtomic(input: {
     for (const row of selected) {
       await client.query(
         `INSERT INTO payment_month_allocations
-         (payment_id, subscription_id, member_id, church_id, covered_month, monthly_amount, person_name)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+         (payment_id, subscription_id, member_id, church_id, due_id, covered_month, monthly_amount, person_name)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
         [
           input.payment_id,
           input.subscription_id,
           input.member_id,
           input.church_id,
+          row.id,
           row.due_month,
           input.monthly_amount,
           input.person_name,

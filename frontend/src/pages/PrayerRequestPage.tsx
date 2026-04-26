@@ -50,7 +50,7 @@ export default function PrayerRequestPage() {
   }, [token, churchId]);
 
   useEffect(() => {
-    void loadLeaders();
+    void Promise.resolve().then(loadLeaders);
   }, [loadLeaders]);
 
   const loadMyRequests = useCallback(async () => {
@@ -67,7 +67,7 @@ export default function PrayerRequestPage() {
   }, [token, churchId]);
 
   useEffect(() => {
-    void loadMyRequests();
+    void Promise.resolve().then(loadMyRequests);
   }, [loadMyRequests]);
 
   async function handleEditPrayer(id: string) {
@@ -365,7 +365,7 @@ export default function PrayerRequestPage() {
                     {new Date(pr.created_at).toLocaleDateString()}
                   </span>
                 </div>
-                <p style={{ margin: 0, fontSize: "0.9rem", lineHeight: 1.5, color: "var(--on-surface, #333)" }}>
+                <div style={{ margin: 0, fontSize: "0.9rem", lineHeight: 1.5, color: "var(--on-surface, #333)" }}>
                   {editingId === pr.id ? (
                     <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
                       <textarea
@@ -386,7 +386,7 @@ export default function PrayerRequestPage() {
                   ) : (
                     pr.details
                   )}
-                </p>
+                </div>
                 {editingId !== pr.id && (
                   <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
                     <button

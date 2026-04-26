@@ -2443,7 +2443,7 @@ pre {
     filter: drop-shadow(0 0 6px rgba(103, 80, 164, 0.3));
   }
 
-  .bottom-nav-item .notification-badge {
+  .bottom-nav-item .notif-badge {
     position: absolute;
     top: 4px;
     right: calc(50% - 18px);

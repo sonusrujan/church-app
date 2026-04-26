@@ -58,7 +58,6 @@ test.describe("Language switching", () => {
 test.describe("Accessibility basics", () => {
   test("skip-to-content link exists", async ({ page }) => {
     await page.goto("/signin");
-    const skip = page.locator(".skip-to-content");
     // May not be in DOM on auth screens; just don't fail — check for a well-known landmark instead
     const mainOrAuth = page.locator("main, .auth-shell, .auth-card").first();
     await expect(mainOrAuth).toBeVisible();

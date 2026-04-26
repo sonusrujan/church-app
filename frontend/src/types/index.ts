@@ -65,6 +65,7 @@ export type SubscriptionRow = {
   family_member_id: string | null;
   plan_name: string;
   amount: number | string;
+  monthly_amount?: number | string | null;
   billing_cycle: string;
   start_date: string;
   next_payment_date: string;
@@ -713,8 +714,14 @@ export function isManualPayment(method: string | null | undefined): boolean {
   return !!method && method.startsWith("manual_");
 }
 
+declare global {
+  interface Window {
+    Razorpay?: unknown;
+  }
+}
+
 export function loadRazorpayCheckoutScript() {
-  if ((window as any).Razorpay) return Promise.resolve(true);
+  if (window.Razorpay) return Promise.resolve(true);
   const existing = document.querySelector('script[src*="checkout.razorpay.com"]');
   if (existing) existing.remove();
   return new Promise<boolean>((resolve) => {

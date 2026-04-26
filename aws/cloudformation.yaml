@@ -368,6 +368,8 @@ Resources:
               Value: !Ref AWS::Region
             - Name: FRONTEND_URL
               Value: https://shalomapp.in
+            - Name: TRUST_PROXY_HOPS
+              Value: '2'
             - Name: PAYMENTS_ENABLED
               Value: 'true'
             - Name: MIN_PAYMENT_DATE

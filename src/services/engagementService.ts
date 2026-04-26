@@ -13,6 +13,12 @@ type MemberLookupRow = {
   church_id: string | null;
 };
 
+type PrayerMemberIdentifier = {
+  email: string;
+  phone: string;
+  user_id: string;
+};
+
 export async function createChurchEvent(input: {
   church_id: string;
   title: string;
@@ -566,35 +572,47 @@ export async function createPrayerRequest(input: {
   };
 }
 
-export async function listPrayerRequests(churchId: string, memberIdentifier?: { email: string; phone: string; user_id: string }) {
+async function resolvePrayerMemberId(churchId: string, memberIdentifier: PrayerMemberIdentifier) {
+  if (memberIdentifier.user_id) {
+    const { data: byUserId } = await db
+      .from("members")
+      .select("id")
+      .eq("user_id", memberIdentifier.user_id)
+      .eq("church_id", churchId)
+      .limit(1)
+      .maybeSingle();
+    if (byUserId) return byUserId.id as string;
+  }
+
+  if (memberIdentifier.phone) {
+    const { data: byPhone } = await db
+      .from("members")
+      .select("id")
+      .eq("phone_number", memberIdentifier.phone)
+      .eq("church_id", churchId)
+      .limit(1)
+      .maybeSingle();
+    if (byPhone) return byPhone.id as string;
+  }
+
+  if (memberIdentifier.email) {
+    const { data: byEmail } = await db
+      .from("members")
+      .select("id")
+      .eq("email", memberIdentifier.email)
+      .eq("church_id", churchId)
+      .limit(1)
+      .maybeSingle();
+    if (byEmail) return byEmail.id as string;
+  }
+
+  return null;
+}
+
+export async function listPrayerRequests(churchId: string, memberIdentifier?: PrayerMemberIdentifier) {
   // If filtering by member, first resolve the member_id to query prayer_requests accurately
   if (memberIdentifier) {
-    let memberId: string | null = null;
-
-    // Try user_id lookup first
-    if (memberIdentifier.user_id) {
-      const { data: byUserId } = await db
-        .from("members")
-        .select("id")
-        .eq("user_id", memberIdentifier.user_id)
-        .eq("church_id", churchId)
-        .limit(1)
-        .maybeSingle();
-      if (byUserId) memberId = byUserId.id;
-    }
-
-    // Fallback to phone
-    if (!memberId && memberIdentifier.phone) {
-      const { data: byPhone } = await db
-        .from("members")
-        .select("id")
-        .eq("phone_number", memberIdentifier.phone)
-        .eq("church_id", churchId)
-        .limit(1)
-        .maybeSingle();
-      if (byPhone) memberId = byPhone.id;
-    }
-
+    const memberId = await resolvePrayerMemberId(churchId, memberIdentifier);
     if (!memberId) return [];
 
     const { data, error } = await db
@@ -626,6 +644,87 @@ export async function listPrayerRequests(churchId: string, memberIdentifier?: { 
   }
 
   return data || [];
+}
+
+export async function updatePrayerRequest(
+  requestId: string,
+  churchId: string,
+  memberIdentifier: PrayerMemberIdentifier,
+  detailsInput: unknown,
+) {
+  const memberId = await resolvePrayerMemberId(churchId, memberIdentifier);
+  if (!memberId) {
+    throw new Error("Member profile not found for prayer request");
+  }
+
+  const details = String(detailsInput || "").trim().replace(/<[^>]*>/g, "");
+  if (!details) {
+    throw new Error("Prayer request details are required");
+  }
+
+  const { data, error } = await db
+    .from("prayer_requests")
+    .update({ details })
+    .eq("id", requestId)
+    .eq("church_id", churchId)
+    .eq("member_id", memberId)
+    .select("id, church_id, member_id, member_name, member_email, details, status, created_at")
+    .maybeSingle();
+
+  if (error) {
+    logger.error({ err: error, requestId, churchId, memberId }, "updatePrayerRequest failed");
+    throw error;
+  }
+  if (!data) {
+    throw new Error("Prayer request not found");
+  }
+
+  return data;
+}
+
+export async function deleteOwnPrayerRequest(
+  requestId: string,
+  churchId: string,
+  memberIdentifier: PrayerMemberIdentifier,
+) {
+  const memberId = await resolvePrayerMemberId(churchId, memberIdentifier);
+  if (!memberId) {
+    throw new Error("Member profile not found for prayer request");
+  }
+
+  const { data: existing, error: lookupError } = await db
+    .from("prayer_requests")
+    .select("id")
+    .eq("id", requestId)
+    .eq("church_id", churchId)
+    .eq("member_id", memberId)
+    .maybeSingle();
+
+  if (lookupError) {
+    logger.error({ err: lookupError, requestId, churchId, memberId }, "deleteOwnPrayerRequest lookup failed");
+    throw lookupError;
+  }
+  if (!existing) {
+    throw new Error("Prayer request not found");
+  }
+
+  await db
+    .from("prayer_request_recipients")
+    .delete()
+    .eq("prayer_request_id", requestId);
+
+  const { error } = await db
+    .from("prayer_requests")
+    .delete()
+    .eq("id", requestId)
+    .eq("church_id", churchId)
+    .eq("member_id", memberId);
+  if (error) {
+    logger.error({ err: error, requestId, churchId, memberId }, "deleteOwnPrayerRequest failed");
+    throw error;
+  }
+
+  return { deleted: true, id: requestId };
 }
 
 // ── Delete functions ──

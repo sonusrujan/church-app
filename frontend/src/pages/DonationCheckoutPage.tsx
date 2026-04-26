@@ -1,10 +1,10 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useContext } from "react";
 import { useLocation, useNavigate, Navigate } from "react-router-dom";
 import { Heart, ShieldCheck, ArrowLeft, CheckCircle, Download, AlertTriangle } from "lucide-react";
 import shalomLogo from "../assets/shalom-logo.png";
 import { openRazorpayCheckout } from "../lib/razorpayCheckout";
 import { apiRequest } from "../lib/api";
-import { useApp } from "../context/AppContext";
+import AppContext from "../context/AppContext";
 import { useI18n } from "../i18n";
 import CheckoutSummary from "../components/CheckoutSummary";
 
@@ -21,11 +21,20 @@ type DonationState = {
   platformFeePercent?: number;
 };
 
+function isPaymentCancelled(error: unknown, message: string) {
+  return (
+    (typeof error === "object" && error !== null && "cancelled" in error && Boolean(error.cancelled)) ||
+    message.includes("cancelled")
+  );
+}
+
 export default function DonationCheckoutPage({ isLoggedIn = false }: { isLoggedIn?: boolean }) {
   const location = useLocation();
   const navigate = useNavigate();
   const state = location.state as DonationState | null;
-  const { token, refreshMemberDashboard } = useApp();
+  const appContext = useContext(AppContext);
+  const token = appContext?.token || "";
+  const refreshMemberDashboard = appContext?.refreshMemberDashboard;
 
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
@@ -36,6 +45,9 @@ export default function DonationCheckoutPage({ isLoggedIn = false }: { isLoggedI
 
   const downloadReceipt = useCallback(() => {
     if (!state || !successTxnId) return;
+    const receiptFeePct = Number(state.platformFeePercent || 0);
+    const receiptFeeAmount = state.platformFeeEnabled ? Math.round(state.amount * receiptFeePct) / 100 : 0;
+    const receiptTotalAmount = state.amount + receiptFeeAmount;
     const lines = [
       "═══════════════════════════════════════",
       "        DONATION RECEIPT",
@@ -44,7 +56,7 @@ export default function DonationCheckoutPage({ isLoggedIn = false }: { isLoggedI
       `Date:           ${new Date().toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}`,
       `Church:         ${state.churchName}`,
       `Fund:           ${state.fund}`,
-      `Amount:         ₹${state.amount.toLocaleString("en-IN")}`,
+      `Amount Paid:    ₹${receiptTotalAmount.toLocaleString("en-IN")}`,
       `Transaction ID: ${successTxnId}`,
       "",
       `Donor Name:     ${state.donorName || "Anonymous"}`,
@@ -146,7 +158,7 @@ export default function DonationCheckoutPage({ isLoggedIn = false }: { isLoggedI
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : t("donation.errorPaymentFailed");
-      if ((err as any)?.cancelled || msg.includes("cancelled")) {
+      if (isPaymentCancelled(err, msg)) {
         setError("");
       } else {
         setError(msg);
@@ -185,7 +197,7 @@ export default function DonationCheckoutPage({ isLoggedIn = false }: { isLoggedI
               </div>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span style={{ color: "var(--text-muted)" }}>{t("dashboard.amountPaid")}</span>
-                <strong>₹{amount.toLocaleString("en-IN")}</strong>
+                <strong>₹{totalAmount.toLocaleString("en-IN")}</strong>
               </div>
             </div>
           )}

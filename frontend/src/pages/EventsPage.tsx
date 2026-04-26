@@ -48,7 +48,9 @@ export default function EventsPage() {
         method: "POST", token, body: { event_ids: ids },
       });
       if (data) setRsvpData(data);
-    } catch {} finally { setRsvpBusy(null); }
+    } catch {
+      // RSVP refresh is best-effort; the optimistic UI is corrected on next load.
+    } finally { setRsvpBusy(null); }
   }, [token, rsvpBusy, events]);
 
   // Read/unread tracking — server-backed with localStorage cache

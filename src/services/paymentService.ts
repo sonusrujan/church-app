@@ -1,4 +1,6 @@
 import Razorpay from "razorpay";
+import nodeCrypto from "crypto";
+import type { PoolClient } from "pg";
 import { db } from "./dbClient";
 import { logger } from "../utils/logger";
 import { recordSubscriptionEvent } from "./subscriptionTrackingService";
@@ -18,16 +20,26 @@ type RazorpayCredentials = {
 const MAX_RAZORPAY_CLIENTS = 100;
 const razorpayClients = new Map<string, Razorpay>();
 
+function getRazorpayCacheKey(credentials: RazorpayCredentials): string {
+  const secretHash = nodeCrypto
+    .createHash("sha256")
+    .update(credentials.key_secret)
+    .digest("hex")
+    .slice(0, 16);
+  return `${credentials.key_id}:${secretHash}`;
+}
+
 function getRazorpayClient(credentials: RazorpayCredentials) {
   if (!credentials.key_id || !credentials.key_secret) {
     throw new Error("Razorpay credentials are missing for this church");
   }
 
-  const cached = razorpayClients.get(credentials.key_id);
+  const cacheKey = getRazorpayCacheKey(credentials);
+  const cached = razorpayClients.get(cacheKey);
   if (cached) {
     // Move to end (most recently used)
-    razorpayClients.delete(credentials.key_id);
-    razorpayClients.set(credentials.key_id, cached);
+    razorpayClients.delete(cacheKey);
+    razorpayClients.set(cacheKey, cached);
     return cached;
   }
 
@@ -41,7 +53,7 @@ function getRazorpayClient(credentials: RazorpayCredentials) {
       const oldest = razorpayClients.keys().next().value;
       if (oldest) razorpayClients.delete(oldest);
     }
-    razorpayClients.set(credentials.key_id, client);
+    razorpayClients.set(cacheKey, client);
     return client;
   } catch (err) {
     logger.error({ err }, "Failed to initialize Razorpay SDK");
@@ -127,7 +139,107 @@ export interface CreatePaymentInput {
   fund_name?: string | null;
 }
 
-export async function storePayment(input: CreatePaymentInput) {
+async function storePaymentWithClient(input: CreatePaymentInput, client: PoolClient) {
+  if (input.transaction_id) {
+    const existingParams: unknown[] = [input.transaction_id];
+    const subscriptionFilter = input.subscription_id
+      ? `subscription_id = $${existingParams.push(input.subscription_id)}`
+      : "subscription_id IS NULL";
+    const existingRes = await client.query<StoredPaymentRow & { payment_status?: string }>(
+      `SELECT id, receipt_number, payment_status
+       FROM payments
+       WHERE transaction_id = $1 AND ${subscriptionFilter}
+       LIMIT 1
+       FOR UPDATE`,
+      existingParams,
+    );
+
+    const existing = existingRes.rows[0];
+    if (existing) {
+      if (input.payment_status === "success" && existing.payment_status && existing.payment_status !== "success") {
+        await client.query(
+          `UPDATE payments SET payment_status = 'success', payment_date = $1 WHERE id = $2`,
+          [input.payment_date || new Date().toISOString(), existing.id],
+        );
+      }
+      return { id: existing.id, receipt_number: existing.receipt_number };
+    }
+  }
+
+  const paymentDate = input.payment_date || new Date().toISOString();
+  const receiptNumber =
+    input.receipt_number ||
+    createReceiptNumber({
+      member_id: input.member_id,
+      payment_date: paymentDate,
+      transaction_id: input.transaction_id,
+    });
+  const receiptGeneratedAt = input.receipt_generated_at || new Date().toISOString();
+
+  const insertRes = await client.query<StoredPaymentRow>(
+    `INSERT INTO payments
+       (member_id, subscription_id, church_id, amount, payment_method, transaction_id,
+        payment_status, payment_date, receipt_number, receipt_generated_at, fund_name)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+     RETURNING id, receipt_number`,
+    [
+      input.member_id,
+      input.subscription_id || null,
+      input.church_id || null,
+      input.amount,
+      input.payment_method || null,
+      input.transaction_id || null,
+      input.payment_status,
+      paymentDate,
+      receiptNumber,
+      receiptGeneratedAt,
+      input.fund_name || null,
+    ],
+  );
+
+  const data = insertRes.rows[0];
+  if (!data) {
+    throw new Error("Payment stored but no row returned");
+  }
+
+  let churchId = input.church_id || null;
+  if (!churchId) {
+    const memberRes = await client.query<{ church_id: string | null }>(
+      `SELECT church_id FROM members WHERE id = $1`,
+      [input.member_id],
+    );
+    churchId = memberRes.rows[0]?.church_id || null;
+  }
+
+  await client.query(
+    `INSERT INTO subscription_events
+       (member_id, subscription_id, church_id, event_type, status_before, status_after,
+        amount, source, metadata, event_at)
+     VALUES ($1, $2, $3, 'payment_recorded', NULL, $4, $5, 'payment_gateway', $6::jsonb, $7)`,
+    [
+      input.member_id,
+      input.subscription_id || null,
+      churchId,
+      input.payment_status,
+      Number(input.amount),
+      JSON.stringify({
+        payment_method: input.payment_method || null,
+        transaction_id: input.transaction_id || null,
+        payment_date: paymentDate,
+        receipt_number: data.receipt_number || receiptNumber,
+      }),
+      new Date().toISOString(),
+    ],
+  );
+
+  return data;
+}
+
+export async function storePayment(input: CreatePaymentInput, existingClient?: PoolClient) {
+  if (existingClient) {
+    return storePaymentWithClient(input, existingClient);
+  }
+
   // Idempotency: if a payment with the same transaction_id + subscription_id already exists, return it.
   // For multi-subscription payments the same razorpay_payment_id is used across subscriptions,
   // so subscription_id is part of the key to avoid blocking the 2nd+ payment.

@@ -42,12 +42,12 @@ export default function ValidatedInput({ type, value, onChange, placeholder, lab
     }
     onChange(v);
     if (touched) setWarning(validate(type, v, t));
-  }, [onChange, type, touched]);
+  }, [onChange, type, touched, t]);
 
   const handleBlur = useCallback(() => {
     setTouched(true);
     setWarning(validate(type, type === "phone" ? stripIndianPrefix(value) : value, t));
-  }, [type, value]);
+  }, [type, value, t]);
 
   const inputType = type === "phone" ? "tel" : "email";
 

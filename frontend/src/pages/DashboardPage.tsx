@@ -31,6 +31,13 @@ import {
   type DueSubscriptionRow,
 } from "../types";
 
+function isPaymentCancelled(error: unknown, message: string) {
+  return (
+    (typeof error === "object" && error !== null && "cancelled" in error && Boolean(error.cancelled)) ||
+    message.includes("cancelled")
+  );
+}
+
 export default function DashboardPage() {
   const {
     token,
@@ -132,7 +139,7 @@ export default function DashboardPage() {
     setGrowthLoading(true);
     setGrowthError(false);
     try {
-      const data = await apiRequest<GrowthMetrics>("/api/admin/growth", { token });
+      const data = await apiRequest<GrowthMetrics>("/api/admins/growth", { token });
       setGrowthMetrics(data);
     } catch {
       setGrowthError(true);
@@ -234,6 +241,11 @@ export default function DashboardPage() {
         await refreshMemberDashboard();
         setSaasPaymentsLoaded(false);
         setNotice({ tone: "success", text: t("dashboard.successPlatformFeePaid") });
+        setPaymentSuccessInfo({
+          amount: Number(orderPayload.amount || orderPayload.order.amount / 100),
+          transactionId: response.razorpay_payment_id,
+          date: new Date().toLocaleString(),
+        });
       } catch (verifyError: unknown) {
         const status =
           verifyError && typeof verifyError === "object" && "status" in verifyError
@@ -248,7 +260,7 @@ export default function DashboardPage() {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : t("dashboard.errorPlatformFeeFailed");
-      if ((error as any)?.cancelled || message.includes("cancelled")) {
+      if (isPaymentCancelled(error, message)) {
         setNotice({ tone: "info", text: t("dashboard.paymentCancelled") });
       } else {
         setNotice({ tone: "error", text: message });
@@ -366,7 +378,7 @@ export default function DashboardPage() {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : t("dashboard.errorSubscriptionPaymentFailed");
-      if ((error as any)?.cancelled || message.includes("cancelled")) {
+      if (isPaymentCancelled(error, message)) {
         setNotice({ tone: "info", text: t("dashboard.paymentCancelled") });
       } else {
         setNotice({ tone: "error", text: message });
@@ -566,7 +578,7 @@ export default function DashboardPage() {
                 const activeSubs = allSubs.filter(
                   (s) => s.status === "active" || s.status === "overdue" || s.status === "pending_first_payment",
                 );
-                const totalMonthly = activeSubs.reduce((sum, s) => sum + Number((s as any).monthly_amount || s.amount || 0), 0);
+                const totalMonthly = activeSubs.reduce((sum, s) => sum + Number(s.monthly_amount || s.amount || 0), 0);
                 return (
                   <div style={{ marginTop: "1rem", borderTop: "1px solid rgba(220,208,255,0.30)", paddingTop: "0.75rem" }}>
                     <div className="dash-sub-stats" style={{ marginBottom: "0.5rem" }}>
@@ -589,7 +601,7 @@ export default function DashboardPage() {
                           <div>
                             <strong>{sub.person_name || sub.plan_name}</strong>
                             <span className="dash-sub-detail">
-                              {formatAmount(Number((sub as any).monthly_amount || sub.amount || 0))} / {sub.billing_cycle} —<span className={`event-badge ${sub.status === "active" ? "badge-created" : sub.status === "overdue" ? "badge-overdue" : "badge-system"}`}>{sub.status === "active" ? t("dashboard.statusActive") : sub.status === "overdue" ? t("dashboard.statusOverdue") : sub.status === "pending_first_payment" ? t("dashboard.statusPending") : sub.status}</span>
+                              {formatAmount(Number(sub.monthly_amount || sub.amount || 0))} / {sub.billing_cycle} —<span className={`event-badge ${sub.status === "active" ? "badge-created" : sub.status === "overdue" ? "badge-overdue" : "badge-system"}`}>{sub.status === "active" ? t("dashboard.statusActive") : sub.status === "overdue" ? t("dashboard.statusOverdue") : sub.status === "pending_first_payment" ? t("dashboard.statusPending") : sub.status}</span>
                             </span>
                           </div>
                           <button

@@ -7,7 +7,7 @@ import { useI18n } from "../../i18n";
 
 export default function CreateChurchTab() {
   const { t } = useI18n();
-  const { token, busyKey, setNotice, withAuthRequest, churches: _churches, loadChurches, loadAdmins } = useApp();
+  const { token, busyKey, setNotice, withAuthRequest, loadChurches, loadAdmins } = useApp();
 
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");

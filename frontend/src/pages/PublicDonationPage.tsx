@@ -12,6 +12,10 @@ type FundOption = { name: string; description: string };
 
 type Diocese = { id: string; name: string };
 type ChurchItem = { id: string; name: string; location?: string | null };
+type PublicPaymentConfig = {
+  payments_enabled: boolean;
+  public_donation_fee_percent: number;
+};
 
 type Props = {
   isLoggedIn?: boolean;
@@ -60,6 +64,10 @@ export default function PublicDonationPage({ isLoggedIn = false, userChurch }: P
   const [donorPhone, setDonorPhone] = useState("");
   const [emailWarning, setEmailWarning] = useState("");
   const [message, setMessage] = useState("");
+  const [paymentConfig, setPaymentConfig] = useState<PublicPaymentConfig>({
+    payments_enabled: true,
+    public_donation_fee_percent: 0,
+  });
 
   // Whether user pre-selected a church via URL or login
   const isChurchPreSelected = !!(urlChurchId || userChurch?.id);
@@ -69,6 +77,13 @@ export default function PublicDonationPage({ isLoggedIn = false, userChurch }: P
   useEffect(() => {
     if (!fundOptions.length) setFundOptions(DEFAULT_FUND_OPTIONS);
   }, [DEFAULT_FUND_OPTIONS]);
+
+  useEffect(() => {
+    if (!urlChurchId && userChurch?.id && !selectedChurchId) {
+      setSelectedChurchId(userChurch.id);
+      setSelectedChurchName(userChurch.name);
+    }
+  }, [selectedChurchId, urlChurchId, userChurch?.id, userChurch?.name]);
 
   // Fetch dioceses on mount (only if no pre-selected church)
   useEffect(() => {
@@ -124,7 +139,30 @@ export default function PublicDonationPage({ isLoggedIn = false, userChurch }: P
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedChurchId]);
 
+  useEffect(() => {
+    if (!selectedChurchId) {
+      setPaymentConfig({ payments_enabled: true, public_donation_fee_percent: 0 });
+      return;
+    }
+    apiRequest<PublicPaymentConfig>(`/api/payments/public/config?church_id=${encodeURIComponent(selectedChurchId)}`)
+      .then((data) => {
+        setPaymentConfig({
+          payments_enabled: Boolean(data.payments_enabled),
+          public_donation_fee_percent: Number(data.public_donation_fee_percent || 0),
+        });
+      })
+      .catch(() => {
+        setPaymentConfig({ payments_enabled: false, public_donation_fee_percent: 0 });
+      });
+  }, [selectedChurchId]);
+
   const selectedAmount = customAmount ? Number(customAmount) : Number(amount);
+  const publicDonationFeePercent = Number(paymentConfig.public_donation_fee_percent || 0);
+  const publicDonationFeeAmount =
+    paymentConfig.payments_enabled && publicDonationFeePercent > 0 && Number.isFinite(selectedAmount)
+      ? Math.round(selectedAmount * publicDonationFeePercent) / 100
+      : 0;
+  const paymentTotalAmount = selectedAmount + publicDonationFeeAmount;
   const isValidAmount = Number.isFinite(selectedAmount) && selectedAmount > 0;
   const isFormValid = useMemo(() => {
     return (
@@ -180,6 +218,8 @@ export default function PublicDonationPage({ isLoggedIn = false, userChurch }: P
         donorEmail: trimmedEmail,
         donorPhone: donorPhone.trim(),
         message: message.trim(),
+        platformFeeEnabled: paymentConfig.payments_enabled && paymentConfig.public_donation_fee_percent > 0,
+        platformFeePercent: paymentConfig.public_donation_fee_percent,
       },
     });
   }
@@ -409,11 +449,16 @@ export default function PublicDonationPage({ isLoggedIn = false, userChurch }: P
           <button
             className="btn btn-primary public-donation-continue-btn"
             onClick={handleContinue}
-            disabled={!isFormValid}
+            disabled={!isFormValid || !paymentConfig.payments_enabled}
           >
-            {t("donation.continueToPayment")} — ₹{isValidAmount ? selectedAmount.toLocaleString("en-IN") : "0"}
+            {t("donation.continueToPayment")} — ₹{isValidAmount ? paymentTotalAmount.toLocaleString("en-IN") : "0"}
           </button>
         )}
+        {selectedChurchId && !paymentConfig.payments_enabled ? (
+          <div className="notice notice-warning" style={{ marginTop: "0.75rem" }}>
+            {t("dashboard.errorPaymentsDisabled")}
+          </div>
+        ) : null}
       </section>
 
       {/* Trust Badges — only for public users */}

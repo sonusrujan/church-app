@@ -36,6 +36,7 @@ const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const UserHomePage = lazy(() => import("./pages/UserHomePage"));
 const PrivacyPolicyPage = lazy(() => import("./pages/PrivacyPolicyPage"));
 const TermsAndConditionsPage = lazy(() => import("./pages/TermsAndConditionsPage"));
+const SubscriptionManagePage = lazy(() => import("./pages/SubscriptionManagePage"));
 import ErrorBoundary from "./components/ErrorBoundary";
 import OfflineIndicator from "./components/OfflineIndicator";
 import CookieConsentBanner from "./components/CookieConsentBanner";
@@ -252,16 +253,19 @@ function App() {
 
   // Public pages accessible regardless of auth state
   const isPublicDonationRoute = location.pathname.startsWith("/donate");
-  const isPublicStaticRoute = location.pathname === "/privacy";
+  const isPublicStaticRoute = location.pathname === "/privacy" || location.pathname === "/terms";
+  const isSubscriptionManageRoute = location.pathname === "/subscribe/manage";
 
-  if (isPublicDonationRoute || isPublicStaticRoute) {
+  if (isPublicStaticRoute || isSubscriptionManageRoute || (isPublicDonationRoute && !loadingSession && !isLoggedIn)) {
     return (
       <Suspense fallback={<div className="auth-shell"><p>{t("common.loading")}</p></div>}>
       <Routes>
         <Route path="/donate" element={<PublicDonationPage isLoggedIn={isLoggedIn} />} />
+        <Route path="/donate/public" element={<PublicDonationPage isLoggedIn={false} />} />
         <Route path="/donate/checkout" element={<DonationCheckoutPage isLoggedIn={isLoggedIn} />} />
         <Route path="/privacy" element={<PrivacyPolicyPage />} />
         <Route path="/terms" element={<TermsAndConditionsPage />} />
+        <Route path="/subscribe/manage" element={<SubscriptionManagePage />} />
         <Route path="*" element={<Navigate to="/donate" replace />} />
       </Routes>
       </Suspense>
@@ -626,7 +630,8 @@ function App() {
             <Route path="/profile" element={<ProfilePage />} />
             <Route path="/history" element={isSuperAdmin ? <Navigate to="/dashboard" replace /> : <HistoryPage />} />
             <Route path="/events" element={<EventsPage />} />
-            <Route path="/donate" element={<PublicDonationPage isLoggedIn={true} />} />
+            <Route path="/donate" element={<PublicDonationPage isLoggedIn={true} userChurch={memberDashboard?.church ? { id: memberDashboard.church.id, name: memberDashboard.church.name } : undefined} />} />
+            <Route path="/donate/public" element={<PublicDonationPage isLoggedIn={false} />} />
             <Route path="/donate/checkout" element={<DonationCheckoutPage isLoggedIn={true} />} />
             <Route path="/prayer-request" element={<PrayerRequestPage />} />
             <Route path="/privacy" element={<PrivacyPolicyPage />} />

@@ -28,6 +28,12 @@ type TransferSummaryRow = {
 };
 
 type ChurchOption = { id: string; name: string };
+type ChurchOptionsResponse = ChurchOption[] | { churches: ChurchOption[] };
+
+function normalizeChurchOptions(data: ChurchOptionsResponse): ChurchOption[] {
+  if (Array.isArray(data)) return data;
+  return Array.isArray(data.churches) ? data.churches : [];
+}
 
 export default function RazorpayRoutesTab() {
   const { t } = useI18n();
@@ -69,15 +75,11 @@ export default function RazorpayRoutesTab() {
   }, [token, withAuthRequest]);
 
   useEffect(() => {
-    void loadAll();
+    void Promise.resolve().then(loadAll);
     // load churches for the dropdown
     void (async () => {
-      const data = await apiRequest<ChurchOption[] | { churches: ChurchOption[] }>("/api/churches", { token });
-      if (Array.isArray(data)) {
-        setChurches(data);
-      } else if (data && Array.isArray((data as any).churches)) {
-        setChurches((data as any).churches);
-      }
+      const data = await apiRequest<ChurchOptionsResponse>("/api/churches/summary", { token });
+      setChurches(normalizeChurchOptions(data));
     })();
   }, [loadAll, token]);
 

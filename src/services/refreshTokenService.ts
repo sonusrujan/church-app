@@ -38,68 +38,27 @@ export async function rotateRefreshToken(token: string): Promise<{ userId: strin
   if (!row) return null;
 
   if (new Date(row.expires_at).getTime() < Date.now()) {
-    // Expired — revoke it
+    // Expired: revoke it.
     await db.from("refresh_tokens").update({ revoked: true }).eq("id", row.id);
     return null;
   }
 
-  // RT-001: 30s grace window for concurrent tab refreshes.
-  // If the token was revoked within the last 30s (another tab just rotated it),
-  // find and return the newest active token for this user instead of failing.
+  // A revoked refresh token being presented again is treated as theft unless
+  // the caller has an active, unrevoked token. Without IP/UA binding, minting a
+  // fresh token from a revoked token is too permissive for production.
   if (row.revoked) {
-    const revokedAt = row.updated_at ? new Date(row.updated_at).getTime() : 0;
-    if (Date.now() - revokedAt < 30_000) {
-      const { data: latest } = await db
-        .from("refresh_tokens")
-        .select("id, user_id, token_hash, expires_at")
-        .eq("user_id", row.user_id)
-        .eq("revoked", false)
-        .order("expires_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (latest && new Date(latest.expires_at).getTime() > Date.now()) {
-        // Return the current active token's info (token text is unknown, issue a fresh one)
-        await db.from("refresh_tokens").update({ revoked: true }).eq("id", latest.id);
-        const newToken = crypto.randomBytes(48).toString("base64url");
-        const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
-        const insertRow: Record<string, any> = {
-          user_id: row.user_id,
-          token_hash: hashToken(newToken),
-          expires_at: expiresAt.toISOString(),
-        };
-        if (row.church_id) insertRow.church_id = row.church_id;
-        await db.from("refresh_tokens").insert(insertRow);
-        return { userId: row.user_id, churchId: row.church_id || null, newToken, expiresAt };
-      }
-    }
-    // RT-001 softened: a single revoked-token reuse is not conclusive theft
-    // (stale tabs, offline clients). Mark it as suspicious. Only revoke the
-    // entire family when we see 2+ suspicious reuses within a 5-minute window
-    // for this user.
     const nowIso = new Date().toISOString();
     await db
       .from("refresh_tokens")
       .update({ suspicious_at: nowIso })
       .eq("id", row.id);
 
-    const fiveMinsAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-    const { data: recentSuspicious } = await db
+    logger.warn({ userId: row.user_id, tokenId: row.id }, "Revoked refresh token reused; revoking token family");
+    await db
       .from("refresh_tokens")
-      .select("id")
+      .update({ revoked: true })
       .eq("user_id", row.user_id)
-      .gte("suspicious_at", fiveMinsAgo);
-
-    const suspiciousCount = (recentSuspicious || []).length;
-    if (suspiciousCount >= 2) {
-      logger.warn({ userId: row.user_id, suspiciousCount }, "Multiple revoked refresh tokens reused within window — revoking family (theft suspected)");
-      await db
-        .from("refresh_tokens")
-        .update({ revoked: true })
-        .eq("user_id", row.user_id)
-        .eq("revoked", false);
-    } else {
-      logger.info({ userId: row.user_id, tokenId: row.id }, "Single revoked refresh token reuse — flagged, family preserved");
-    }
+      .eq("revoked", false);
     return null;
   }
 

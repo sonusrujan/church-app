@@ -38,9 +38,10 @@ import { autoAudit } from "./middleware/autoAudit";
 
 const app = express();
 
-// 7.3: Trust ALB/CloudFront proxy — makes req.ip use X-Forwarded-For
-// NOTE: Set to 1 for single-hop ALB. If adding CloudFront in front of ALB, change to 2.
-app.set("trust proxy", 1);
+// 7.3: Trust ALB/CloudFront proxy - makes req.ip use X-Forwarded-For.
+// Configure hops per environment: 1 for ALB, 2 for CloudFront -> ALB.
+const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS || 1);
+app.set("trust proxy", Number.isFinite(trustProxyHops) && trustProxyHops >= 0 ? trustProxyHops : 1);
 
 // 1.1: RLS context — wrap each request in an AsyncLocalStorage scope.
 // The church_id is set to "" initially (superadmin / unauthenticated).
@@ -58,8 +59,8 @@ if (isDev) {
   const base = FRONTEND_URL.replace(/:\d+$/, "");
   for (let p = 5173; p <= 5180; p++) allowedOrigins.push(`${base}:${p}`);
 }
-// Capacitor native WebView origins (iOS uses capacitor://, Android uses https://localhost).
-const nativeOrigins = ["capacitor://localhost", "https://localhost", "http://localhost"];
+// Capacitor native WebView origins: iOS uses capacitor://, Android uses https://localhost.
+const nativeOrigins = ["capacitor://localhost", "https://localhost"];
 for (const o of nativeOrigins) allowedOrigins.push(o);
 
 app.use(

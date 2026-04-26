@@ -2,6 +2,7 @@ import { UUID_REGEX } from "../utils/validation";
 import { Router } from "express";
 import jwt from "jsonwebtoken";
 import rateLimit from "express-rate-limit";
+import type { PoolClient } from "pg";
 import { JWT_SECRET } from "../config";
 import { requireAuth, AuthRequest } from "../middleware/requireAuth";
 import { requireRegisteredUser } from "../middleware/requireRegisteredUser";
@@ -25,7 +26,7 @@ import {
   allocateOldestPendingMonthsAtomic,
   listMonthlyHistoryForMember,
 } from "../services/subscriptionMonthlyDuesService";
-import { buildOrderTransfers, recordPaymentTransfer } from "../services/razorpayRoutesService";
+import { buildOrderTransfers } from "../services/razorpayRoutesService";
 import { persistAuditLog } from "../utils/auditLog";
 
 const router = Router();
@@ -111,6 +112,86 @@ async function getCurrentMemberDashboard(req: AuthRequest): Promise<CurrentMembe
 async function resolvePaymentConfig(req: AuthRequest) {
   const churchId = req.user?.church_id || req.registeredProfile?.church_id || "";
   return getEffectivePaymentConfig(churchId || null);
+}
+
+async function withPaymentTransaction<T>(
+  churchId: string | null | undefined,
+  fn: (client: PoolClient) => Promise<T>,
+): Promise<T> {
+  const client = await getClient();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT set_config('app.current_church_id', $1, true)", [churchId || ""]);
+    const result = await fn(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function insertPlatformFeeCollectionTx(
+  client: PoolClient,
+  input: {
+    church_id: string;
+    payment_id: string;
+    member_id: string;
+    base_amount: number;
+    fee_percentage: number;
+    fee_amount: number;
+  },
+) {
+  if (!Number.isFinite(input.fee_amount) || input.fee_amount <= 0) return;
+  await client.query(
+    `INSERT INTO platform_fee_collections
+       (church_id, payment_id, member_id, base_amount, fee_percentage, fee_amount, collected_at)
+     VALUES ($1, $2, $3, $4, $5, $6, now())`,
+    [
+      input.church_id,
+      input.payment_id,
+      input.member_id,
+      input.base_amount,
+      input.fee_percentage,
+      input.fee_amount,
+    ],
+  );
+}
+
+async function recordPaymentTransferTx(
+  client: PoolClient,
+  input: {
+    payment_id: string;
+    church_id: string;
+    transfer_amount: number;
+    platform_fee_amount: number;
+    razorpay_order_id: string;
+  },
+) {
+  const churchRes = await client.query<{ routes_enabled: boolean; razorpay_linked_account_id: string | null }>(
+    `SELECT routes_enabled, razorpay_linked_account_id FROM churches WHERE id = $1`,
+    [input.church_id],
+  );
+  const church = churchRes.rows[0];
+  if (!church?.routes_enabled || !church.razorpay_linked_account_id) return;
+
+  await client.query(
+    `INSERT INTO payment_transfers
+       (payment_id, church_id, linked_account_id, transfer_amount, platform_fee_amount,
+        razorpay_order_id, transfer_status)
+     VALUES ($1, $2, $3, $4, $5, $6, 'created')`,
+    [
+      input.payment_id,
+      input.church_id,
+      church.razorpay_linked_account_id,
+      input.transfer_amount,
+      input.platform_fee_amount,
+      input.razorpay_order_id,
+    ],
+  );
+  await client.query(`UPDATE payments SET transfer_status = 'created' WHERE id = $1`, [input.payment_id]);
 }
 
 function normalizeSubscriptionMonthCounts(input: unknown): Record<string, number> {
@@ -315,61 +396,46 @@ router.post("/verify", requireAuth, requireRegisteredUser, paymentWriteLimiter, 
       return res.status(400).json({ error: "Could not verify payment amount with Razorpay" });
     }
 
-    const payment = await storePayment({
-      member_id: dashboard.member.id,
-      subscription_id: subscription_id || null,
-      church_id: req.user?.church_id || req.registeredProfile?.church_id || null,
-      amount: verifiedAmount,
-      payment_method,
-      transaction_id: razorpay_payment_id,
-      payment_status: "success",
-      payment_date: new Date().toISOString(),
-    });
-
-    // 3.1: Record platform fee collection if applicable — use fee stored at order time
     const churchId = req.user?.church_id || req.registeredProfile?.church_id;
-    if (churchId) {
-      const storedFee = Number(razorpayOrder.notes?.platform_fee || 0);
-      const storedPct = Number(razorpayOrder.notes?.platform_fee_pct || 0);
-      if (storedFee > 0) {
+    const storedFee = Number(razorpayOrder.notes?.platform_fee || 0);
+    const storedPct = Number(razorpayOrder.notes?.platform_fee_pct || 0);
+
+    const payment = await withPaymentTransaction(churchId || null, async (client) => {
+      const storedPayment = await storePayment({
+        member_id: dashboard.member.id,
+        subscription_id: subscription_id || null,
+        church_id: churchId || null,
+        amount: verifiedAmount,
+        payment_method,
+        transaction_id: razorpay_payment_id,
+        payment_status: "success",
+        payment_date: new Date().toISOString(),
+      }, client);
+
+      if (churchId && storedFee > 0) {
         const baseAmount = verifiedAmount - storedFee;
-        const { error: feeErr } = await db.from("platform_fee_collections").insert({
+        await insertPlatformFeeCollectionTx(client, {
           church_id: churchId,
-          payment_id: payment.id,
+          payment_id: storedPayment.id,
           member_id: dashboard.member.id,
           base_amount: baseAmount,
           fee_percentage: storedPct,
           fee_amount: storedFee,
-          collected_at: new Date().toISOString(),
         });
-        if (feeErr) {
-          logger.error({ err: feeErr, paymentId: payment.id }, "platform_fee_collections insert FAILED — refund cap may be incorrect");
-        }
       }
 
-      // Razorpay Routes: record transfer if this order had route transfers
-      try {
-        const { data: church } = await db
-          .from("churches")
-          .select("routes_enabled, razorpay_linked_account_id")
-          .eq("id", churchId)
-          .maybeSingle<{ routes_enabled: boolean; razorpay_linked_account_id: string | null }>();
-
-        if (church?.routes_enabled && church.razorpay_linked_account_id) {
-          await recordPaymentTransfer({
-            payment_id: payment.id,
-            church_id: churchId,
-            linked_account_id: church.razorpay_linked_account_id,
-            transfer_amount: verifiedAmount - storedFee,
-            platform_fee_amount: storedFee,
-            razorpay_order_id: razorpay_order_id,
-            transfer_status: "created",
-          });
-        }
-      } catch (transferErr) {
-        logger.warn({ err: transferErr, paymentId: payment.id }, "Transfer recording failed (non-blocking)");
+      if (churchId) {
+        await recordPaymentTransferTx(client, {
+          payment_id: storedPayment.id,
+          church_id: churchId,
+          transfer_amount: verifiedAmount - storedFee,
+          platform_fee_amount: storedFee,
+          razorpay_order_id,
+        });
       }
-    }
+
+      return storedPayment;
+    });
 
     persistAuditLog(req, "payment.verified", "payment", payment.id, {
       transaction_id: razorpay_payment_id,
@@ -492,62 +558,47 @@ router.post("/donation/verify", requireAuth, requireRegisteredUser, paymentWrite
 
     const fund = typeof req.body?.fund === "string" ? req.body.fund.trim().slice(0, 200) : "";
 
-    const payment = await storePayment({
-      member_id: dashboard.member.id,
-      subscription_id: null,
-      church_id: req.user?.church_id || req.registeredProfile?.church_id || null,
-      amount: verifiedAmount,
-      payment_method: "donation",
-      transaction_id: razorpay_payment_id,
-      payment_status: "success",
-      payment_date: new Date().toISOString(),
-      fund_name: fund || null,
-    });
-
-    // 3.1: Record platform fee for donation — use fee stored at order time
     const churchId = req.user?.church_id || req.registeredProfile?.church_id;
-    if (churchId) {
-      const storedFee = Number(razorpayOrder.notes?.platform_fee || 0);
-      const storedPct = Number(razorpayOrder.notes?.platform_fee_pct || 0);
-      if (storedFee > 0) {
+    const storedFee = Number(razorpayOrder.notes?.platform_fee || 0);
+    const storedPct = Number(razorpayOrder.notes?.platform_fee_pct || 0);
+
+    const payment = await withPaymentTransaction(churchId || null, async (client) => {
+      const storedPayment = await storePayment({
+        member_id: dashboard.member.id,
+        subscription_id: null,
+        church_id: churchId || null,
+        amount: verifiedAmount,
+        payment_method: "donation",
+        transaction_id: razorpay_payment_id,
+        payment_status: "success",
+        payment_date: new Date().toISOString(),
+        fund_name: fund || null,
+      }, client);
+
+      if (churchId && storedFee > 0) {
         const baseAmount = verifiedAmount - storedFee;
-        const { error: feeErr } = await db.from("platform_fee_collections").insert({
+        await insertPlatformFeeCollectionTx(client, {
           church_id: churchId,
-          payment_id: payment.id,
+          payment_id: storedPayment.id,
           member_id: dashboard.member.id,
           base_amount: baseAmount,
           fee_percentage: storedPct,
           fee_amount: storedFee,
-          collected_at: new Date().toISOString(),
         });
-        if (feeErr) {
-          logger.error({ err: feeErr, paymentId: payment.id }, "platform_fee_collections insert FAILED for donation");
-        }
       }
 
-      // Razorpay Routes: record transfer if this order had route transfers
-      try {
-        const { data: church } = await db
-          .from("churches")
-          .select("routes_enabled, razorpay_linked_account_id")
-          .eq("id", churchId)
-          .maybeSingle<{ routes_enabled: boolean; razorpay_linked_account_id: string | null }>();
-
-        if (church?.routes_enabled && church.razorpay_linked_account_id) {
-          await recordPaymentTransfer({
-            payment_id: payment.id,
-            church_id: churchId,
-            linked_account_id: church.razorpay_linked_account_id,
-            transfer_amount: verifiedAmount - storedFee,
-            platform_fee_amount: storedFee,
-            razorpay_order_id: razorpay_order_id,
-            transfer_status: "created",
-          });
-        }
-      } catch (transferErr) {
-        logger.warn({ err: transferErr, paymentId: payment.id }, "Donation transfer recording failed (non-blocking)");
+      if (churchId) {
+        await recordPaymentTransferTx(client, {
+          payment_id: storedPayment.id,
+          church_id: churchId,
+          transfer_amount: verifiedAmount - storedFee,
+          platform_fee_amount: storedFee,
+          razorpay_order_id,
+        });
       }
-    }
+
+      return storedPayment;
+    });
 
     persistAuditLog(req, "donation.verified", "payment", payment.id, {
       transaction_id: razorpay_payment_id,
@@ -783,43 +834,47 @@ router.post("/subscription/verify", requireAuth, requireRegisteredUser, paymentW
     }
 
     const paymentDate = new Date().toISOString();
-    const payments: Array<{ id: string; receipt_number: string | null }> = [];
-    const updatedSubscriptions: Array<{ subscription_id: string; next_payment_date: string | null }> = [];
+    let payments: Array<{ id: string; receipt_number: string | null }> = [];
+    let updatedSubscriptions: Array<{ subscription_id: string; next_payment_date: string | null }> = [];
 
-    for (const { id: selectedId, amount: numericAmount, subscription, selectedMonths } of subscriptionAmounts) {
-      let currentPaymentId: string | null = null;
-      try {
+    try {
+      const txResult = await withPaymentTransaction(churchId || null, async (client) => {
+        const txPayments: Array<{ id: string; receipt_number: string | null }> = [];
+        const txUpdatedSubscriptions: Array<{ subscription_id: string; next_payment_date: string | null }> = [];
+
+        for (const { id: selectedId, amount: numericAmount, subscription, selectedMonths } of subscriptionAmounts) {
         const payment = await storePayment({
           member_id: dashboard.member.id,
           subscription_id: selectedId,
-          church_id: req.user?.church_id || req.registeredProfile?.church_id || null,
+          church_id: churchId || null,
           amount: numericAmount * selectedMonths,
           payment_method: "subscription_paynow",
           transaction_id: razorpay_payment_id,
           payment_status: "success",
           payment_date: paymentDate,
-        });
-        currentPaymentId = payment.id;
+        }, client);
 
         const receiptNumber = createReceiptNumber({
           member_id: dashboard.member.id,
           payment_date: paymentDate,
           transaction_id: `${razorpay_payment_id}_${selectedId}`,
         });
-        await db
-          .from("payments")
-          .update({ receipt_number: receiptNumber, receipt_generated_at: new Date().toISOString() })
-          .eq("id", payment.id);
+        await client.query(
+          `UPDATE payments
+           SET receipt_number = $1, receipt_generated_at = $2
+           WHERE id = $3`,
+          [receiptNumber, new Date().toISOString(), payment.id],
+        );
 
         // Skip allocation if this payment already has month allocations (idempotent retry)
-        const { data: existingAllocs } = await db
-          .from("payment_month_allocations")
-          .select("covered_month")
-          .eq("payment_id", payment.id);
+        const existingAllocs = await client.query<{ covered_month: string }>(
+          `SELECT covered_month FROM payment_month_allocations WHERE payment_id = $1`,
+          [payment.id],
+        );
         let allocatedMonths: string[];
-        if (existingAllocs && existingAllocs.length > 0) {
-          allocatedMonths = existingAllocs
-            .map((row: any) => row.covered_month as string)
+        if (existingAllocs.rows.length > 0) {
+          allocatedMonths = existingAllocs.rows
+            .map((row) => row.covered_month)
             .sort();
           logger.info({ paymentId: payment.id, count: allocatedMonths.length }, "Skipping allocation; existing allocations found");
         } else {
@@ -827,99 +882,75 @@ router.post("/subscription/verify", requireAuth, requireRegisteredUser, paymentW
             payment_id: payment.id,
             subscription_id: selectedId,
             member_id: dashboard.member.id,
-            church_id: req.user?.church_id || req.registeredProfile?.church_id || "",
+            church_id: churchId || "",
             monthly_amount: numericAmount,
             months_to_allocate: selectedMonths,
             person_name: subscription.person_name || "Member",
+            existingClient: client,
           });
         }
 
-        payments.push({ id: payment.id, receipt_number: receiptNumber });
-        updatedSubscriptions.push({
+          txPayments.push({ id: payment.id, receipt_number: receiptNumber });
+          txUpdatedSubscriptions.push({
           subscription_id: selectedId,
           next_payment_date: allocatedMonths.length ? computeNextDueDate(allocatedMonths[allocatedMonths.length - 1], subscription.billing_cycle) : null,
         });
-      } catch (iterErr: any) {
-        // Compensate: mark the current payment as failed if it was stored but allocation failed
-        if (currentPaymentId) {
-          try { await db.from("payments").update({ payment_status: "failed" }).eq("id", currentPaymentId); } catch (_) { /* best-effort */ }
-        }
-        logger.error({ err: iterErr, subscriptionId: selectedId, completedPayments: payments.length }, "Multi-subscription verify failed mid-loop");
-
-        // PAY-004: Queue remaining failed subscriptions for reconciliation
-        const failedIds = subscriptionAmounts
-          .slice(subscriptionAmounts.findIndex(s => s.id === selectedId))
-          .map(s => s.id);
-        const failedAmount = subscriptionAmounts
-          .slice(subscriptionAmounts.findIndex(s => s.id === selectedId))
-          .reduce((sum, s) => sum + s.amount * s.selectedMonths, 0);
-
-        try {
-          await db.from("payment_reconciliation_queue").insert({
-            razorpay_order_id,
-            razorpay_payment_id,
-            church_id: churchId || null,
-            member_id: dashboard.member.id,
-            expected_amount: failedAmount,
-            status: "pending",
-            metadata: { failed_subscription_ids: failedIds, completed_payment_ids: payments.map(p => p.id) },
-          });
-        } catch (reconErr) {
-          logger.error({ err: reconErr }, "Failed to queue reconciliation for partial payment");
         }
 
-        return res.status(207).json({
-          partial: true,
-          payment_count: payments.length,
-          payments,
-          updated_subscriptions: updatedSubscriptions,
-          failed_subscription_id: selectedId,
-          reconciliation_queued: true,
-          error: `Failed on subscription ${selectedId}: ${iterErr instanceof Error ? iterErr.message : "Unknown error"}. Remaining amount queued for reconciliation.`,
-        });
-      }
-    }
-
-    // 3.1: Record platform fee for subscription payments — use fee stored at order time
-    if (churchId && storedFee > 0 && payments.length > 0) {
-      const baseAmount = expectedTotal;
-      const { error: feeErr } = await db.from("platform_fee_collections").insert({
-        church_id: churchId,
-        payment_id: payments[0].id,
-        member_id: dashboard.member.id,
-        base_amount: baseAmount,
-        fee_percentage: storedPct,
-        fee_amount: storedFee,
-        collected_at: new Date().toISOString(),
-      });
-      if (feeErr) {
-        logger.error({ err: feeErr, paymentId: payments[0].id }, "platform_fee_collections insert FAILED for subscription");
-      }
-    }
-
-    // Razorpay Routes: record transfer for subscription payments
-    if (churchId && payments.length > 0) {
-      try {
-        const { data: church } = await db
-          .from("churches")
-          .select("routes_enabled, razorpay_linked_account_id")
-          .eq("id", churchId)
-          .maybeSingle<{ routes_enabled: boolean; razorpay_linked_account_id: string | null }>();
-
-        if (church?.routes_enabled && church.razorpay_linked_account_id) {
-          await recordPaymentTransfer({
-            payment_id: payments[0].id,
+        if (churchId && storedFee > 0 && txPayments.length > 0) {
+          await insertPlatformFeeCollectionTx(client, {
             church_id: churchId,
-            linked_account_id: church.razorpay_linked_account_id,
+            payment_id: txPayments[0].id,
+            member_id: dashboard.member.id,
+            base_amount: expectedTotal,
+            fee_percentage: storedPct,
+            fee_amount: storedFee,
+          });
+        }
+
+        if (churchId && txPayments.length > 0) {
+          await recordPaymentTransferTx(client, {
+            payment_id: txPayments[0].id,
+            church_id: churchId,
             transfer_amount: expectedTotal,
             platform_fee_amount: storedFee,
-            razorpay_order_id: razorpay_order_id,
-            transfer_status: "created",
+            razorpay_order_id,
           });
         }
-      } catch (transferErr) {
-        logger.warn({ err: transferErr, paymentId: payments[0].id }, "Subscription transfer recording failed (non-blocking)");
+
+        return { payments: txPayments, updatedSubscriptions: txUpdatedSubscriptions };
+      });
+      payments = txResult.payments;
+      updatedSubscriptions = txResult.updatedSubscriptions;
+    } catch (txErr: any) {
+      logger.error({ err: txErr, subscriptionIds: normalizedSubscriptionIds }, "Atomic subscription verify transaction failed");
+
+      try {
+        await db.from("payment_reconciliation_queue").insert({
+          razorpay_order_id,
+          razorpay_payment_id,
+          church_id: churchId || null,
+          member_id: dashboard.member.id,
+          expected_amount: expectedTotal,
+          status: "pending",
+          metadata: {
+            failed_subscription_ids: normalizedSubscriptionIds,
+            completed_payment_ids: [],
+            failure_reason: txErr instanceof Error ? txErr.message : "Unknown error",
+          },
+        });
+      } catch (reconErr) {
+        logger.error({ err: reconErr }, "Failed to queue reconciliation for failed atomic subscription payment");
       }
+
+      return res.status(202).json({
+        success: false,
+        reconciliation_queued: true,
+        payment_count: 0,
+        payments: [],
+        updated_subscriptions: [],
+        error: "Payment was captured, but local allocation failed before any local payment rows were committed. Reconciliation has been queued.",
+      });
     }
 
     persistAuditLog(req, "subscription_payment.verified", "payment", payments[0]?.id, {
@@ -1235,11 +1266,16 @@ router.post("/public/donation/verify", publicDonationLimiter, validate(publicDon
 
     const { data: existingPublic } = await db
       .from("payments")
-      .select("id")
+      .select("id, receipt_number")
       .eq("transaction_id", razorpay_payment_id)
-      .maybeSingle();
+      .maybeSingle<{ id: string; receipt_number: string | null }>();
     if (existingPublic) {
-      return res.status(200).json({ status: "already_processed", payment_id: existingPublic.id });
+      return res.status(200).json({
+        success: true,
+        status: "already_processed",
+        payment_id: existingPublic.id,
+        receipt_number: existingPublic.receipt_number,
+      });
     }
 
     const isValid = await verifyPayment(
@@ -1318,7 +1354,25 @@ router.post("/public/donation/verify", publicDonationLimiter, validate(publicDon
       .select("id")
       .single<{ id: string }>();
 
-    if (error) throw error;
+    if (error) {
+      if (error.code === "23505") {
+        const { data: existingAfterConflict } = await db
+          .from("payments")
+          .select("id, receipt_number")
+          .eq("transaction_id", razorpay_payment_id)
+          .maybeSingle<{ id: string; receipt_number: string | null }>();
+
+        if (existingAfterConflict) {
+          return res.status(200).json({
+            success: true,
+            status: "already_processed",
+            payment_id: existingAfterConflict.id,
+            receipt_number: existingAfterConflict.receipt_number,
+          });
+        }
+      }
+      throw error;
+    }
 
     // Store donor details in subscription_events for admin visibility
     try {

@@ -89,7 +89,7 @@ describe("Webhook Routes", () => {
     });
 
     it("skips webhook event with no entity ID", async () => {
-      // Only works if RAZORPAY_KEY_SECRET is configured — otherwise returns 500
+      // Only works if RAZORPAY_WEBHOOK_SECRET is configured.
       if (!WEBHOOK_SECRET) return;
 
       const payload = JSON.stringify({ event: "payment.captured", payload: {} });

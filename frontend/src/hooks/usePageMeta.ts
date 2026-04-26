@@ -15,13 +15,13 @@ export function usePageMeta({ title, description, canonical }: PageMeta) {
     const prev = document.title;
     document.title = title.includes("Shalom") ? title : `${title} | Shalom`;
 
-    let metaDesc = document.querySelector('meta[name="description"]') as HTMLMetaElement | null;
+    const metaDesc = document.querySelector('meta[name="description"]') as HTMLMetaElement | null;
     const prevDesc = metaDesc?.content ?? "";
     if (description && metaDesc) {
       metaDesc.content = description;
     }
 
-    let link = document.querySelector('link[rel="canonical"]') as HTMLLinkElement | null;
+    const link = document.querySelector('link[rel="canonical"]') as HTMLLinkElement | null;
     const prevCanonical = link?.href ?? "";
     if (canonical && link) {
       link.href = canonical;

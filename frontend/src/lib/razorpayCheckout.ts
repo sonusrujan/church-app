@@ -27,6 +27,28 @@ export interface RazorpayResponse {
   razorpay_signature: string;
 }
 
+type RazorpayInstance = {
+  open: () => void;
+};
+
+type RazorpayConstructor = new (options: {
+  key: string;
+  amount: number;
+  currency: string;
+  order_id: string;
+  name: string;
+  description: string;
+  prefill: RazorpayCheckoutOptions["prefill"];
+  notes: Record<string, string>;
+  theme: { color: string };
+  handler: (response: RazorpayResponse) => void;
+  modal: { ondismiss: () => void };
+}) => RazorpayInstance;
+
+function getRazorpayConstructor(): RazorpayConstructor | null {
+  return typeof window.Razorpay === "function" ? (window.Razorpay as RazorpayConstructor) : null;
+}
+
 /**
  * Open the Razorpay checkout popup and wait for the payment response.
  * Loads the Razorpay script if not already loaded.
@@ -36,12 +58,13 @@ export async function openRazorpayCheckout(
   opts: RazorpayCheckoutOptions,
 ): Promise<RazorpayResponse> {
   const loaded = await loadRazorpayCheckoutScript();
-  if (!loaded || !(window as any).Razorpay) {
+  const Razorpay = getRazorpayConstructor();
+  if (!loaded || !Razorpay) {
     throw new Error("Failed to load Razorpay checkout. Please refresh and try again.");
   }
 
   return new Promise<RazorpayResponse>((resolve, reject) => {
-    const razorpay = new (window as any).Razorpay({
+    const razorpay = new Razorpay({
       key: opts.keyId,
       amount: opts.amountPaise,
       currency: opts.currency || "INR",
@@ -57,7 +80,7 @@ export async function openRazorpayCheckout(
       modal: {
         ondismiss: () => {
           const err = new Error("Payment cancelled by user");
-          (err as any).cancelled = true;
+          Object.assign(err, { cancelled: true });
           reject(err);
         },
       },

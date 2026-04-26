@@ -1,7 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
 
 // ── Common mocks ──
 const mockApiRequest = vi.fn();
@@ -232,7 +229,7 @@ describe("Admin — Growth Metrics", () => {
       overdue_subscriptions: 30,
     });
 
-    const result = await mockApiRequest("/api/admin/growth", { token: "admin-token" });
+    const result = await mockApiRequest("/api/admins/growth", { token: "admin-token" });
 
     expect(result.total_members).toBe(150);
     expect(result.monthly_growth).toHaveLength(2);

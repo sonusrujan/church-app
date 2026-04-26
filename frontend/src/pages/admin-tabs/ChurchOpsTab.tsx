@@ -15,7 +15,7 @@ import { useI18n } from "../../i18n";
 
 export default function ChurchOpsTab() {
   const { t } = useI18n();
-  const { token, isSuperAdmin, busyKey, setNotice: _setNotice, withAuthRequest, churches: _churches, loadChurches, loadAdmins } = useApp();
+  const { token, isSuperAdmin, busyKey, withAuthRequest, loadChurches, loadAdmins } = useApp();
 
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ChurchRow[]>([]);

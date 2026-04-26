@@ -302,7 +302,7 @@ export function useAuth(setNotice: React.Dispatch<React.SetStateAction<Notice>>)
         hasBootstrappedRef.current = false;
         setBootstrapRetry((v) => v + 1);
       }
-    } catch (err: any) {
+    } catch {
       setNotice({ tone: "error", text: "Failed to load churches" });
     }
   }, [token, setNotice]);

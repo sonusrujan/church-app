@@ -4,7 +4,14 @@ import { sendEmail } from "./mailerService";
 
 // ── Job Queue Service — processes async jobs (email, SMS, push) ──
 
-export type JobType = "send_email" | "send_sms" | "send_push" | "subscription_reminder";
+export type JobType =
+  | "send_email"
+  | "send_sms"
+  | "send_push"
+  | "subscription_reminder"
+  | "payment_captured_side_effects"
+  | "payment_failed_side_effects"
+  | "refund_processed_side_effects";
 
 export interface EnqueueJobInput {
   job_type: JobType;
@@ -181,6 +188,35 @@ async function executeJob(jobType: string, payload: Record<string, unknown>): Pr
       // Handled by dedicated reminder processing
       logger.info({ payload }, "Subscription reminder processed");
       break;
+
+    case "payment_captured_side_effects": {
+      const { processPaymentCapturedSideEffects } = await import("./paymentWebhookSideEffectsService");
+      await processPaymentCapturedSideEffects({
+        payment_ids: Array.isArray(payload.payment_ids) ? payload.payment_ids as string[] : [],
+        razorpay_payment_id: payload.razorpay_payment_id as string,
+      });
+      break;
+    }
+
+    case "payment_failed_side_effects": {
+      const { processPaymentFailedSideEffects } = await import("./paymentWebhookSideEffectsService");
+      await processPaymentFailedSideEffects({
+        payment_ids: Array.isArray(payload.payment_ids) ? payload.payment_ids as string[] : [],
+        razorpay_payment_id: payload.razorpay_payment_id as string,
+      });
+      break;
+    }
+
+    case "refund_processed_side_effects": {
+      const { processRefundProcessedSideEffects } = await import("./paymentWebhookSideEffectsService");
+      await processRefundProcessedSideEffects({
+        payment_id: payload.payment_id as string,
+        razorpay_payment_id: payload.razorpay_payment_id as string,
+        razorpay_refund_id: payload.razorpay_refund_id as string,
+        refund_amount: Number(payload.refund_amount || 0),
+      });
+      break;
+    }
 
     default:
       logger.warn({ jobType }, "Unknown job type");

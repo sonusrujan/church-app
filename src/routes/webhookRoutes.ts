@@ -1,63 +1,23 @@
 import { Router, Request, Response } from "express";
 import crypto from "crypto";
-import { db } from "../services/dbClient";
+import { db, rawQuery } from "../services/dbClient";
 import { logger } from "../utils/logger";
-import { getEffectivePaymentConfig } from "../services/churchPaymentService";
-import { enqueueEmailJob } from "../services/jobQueueService";
+import { enqueueJob } from "../services/jobQueueService";
 
-const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || "";
+const RAZORPAY_WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || "";
 
 const router = Router();
 
 /**
- * PAY-003: Multi-key webhook verification.
- * Tries the global RAZORPAY_KEY_SECRET first.
- * If that fails, extracts order_id from the payload and looks up the church's
- * own key_secret via the payment_reconciliation_queue → getEffectivePaymentConfig.
+ * Razorpay webhook signatures must be verified with the webhook secret from
+ * the Razorpay dashboard, not the API key secret used for orders.
  */
-async function verifyWebhookMultiKey(body: string, signature: string, parsedEvent: any): Promise<boolean> {
-  // 1) Try global key first
-  if (RAZORPAY_KEY_SECRET && verifyWebhookSignature(body, signature, RAZORPAY_KEY_SECRET)) {
-    return true;
+function verifyWebhook(body: string, signature: string): boolean {
+  if (!RAZORPAY_WEBHOOK_SECRET) {
+    logger.error("RAZORPAY_WEBHOOK_SECRET is not configured; rejecting Razorpay webhook");
+    return false;
   }
-
-  // 2) Fallback: look up church-specific key via order_id
-  const orderId = parsedEvent?.payload?.payment?.entity?.order_id
-    || parsedEvent?.payload?.refund?.entity?.order_id;
-  if (!orderId) return false;
-
-  try {
-    const { data: recon } = await db
-      .from("payment_reconciliation_queue")
-      .select("church_id")
-      .eq("razorpay_order_id", orderId)
-      .maybeSingle();
-
-    if (recon?.church_id) {
-      const config = await getEffectivePaymentConfig(recon.church_id);
-      if (config.key_secret && verifyWebhookSignature(body, signature, config.key_secret)) {
-        return true;
-      }
-    }
-
-    // Also try looking up church_id from payments table
-    const { data: paymentRow } = await db
-      .from("payments")
-      .select("church_id")
-      .eq("transaction_id", parsedEvent?.payload?.payment?.entity?.id)
-      .maybeSingle();
-
-    if (paymentRow?.church_id) {
-      const config = await getEffectivePaymentConfig(paymentRow.church_id);
-      if (config.key_secret && verifyWebhookSignature(body, signature, config.key_secret)) {
-        return true;
-      }
-    }
-  } catch (err) {
-    logger.warn({ err, orderId }, "Per-church webhook key lookup failed");
-  }
-
-  return false;
+  return verifyWebhookSignature(body, signature, RAZORPAY_WEBHOOK_SECRET);
 }
 
 router.post("/razorpay", async (req: Request, res: Response) => {
@@ -67,7 +27,7 @@ router.post("/razorpay", async (req: Request, res: Response) => {
       return res.status(400).json({ error: "Missing signature" });
     }
 
-    // PAY-008: Require raw body — refuse to process without it
+    // PAY-008: Require raw body; refuse to process without it
     const rawBody = (req as any).rawBody;
     if (!rawBody) {
       logger.error("Webhook received without rawBody — verify Express body-parser config");
@@ -75,8 +35,7 @@ router.post("/razorpay", async (req: Request, res: Response) => {
     }
     const body = rawBody.toString("utf8");
 
-    // PAY-003: Multi-key verification (global + per-church fallback)
-    const verified = await verifyWebhookMultiKey(body, signature, req.body);
+    const verified = verifyWebhook(body, signature);
 
     if (!verified) {
       logger.warn({ ip: req.ip }, "Razorpay webhook signature verification failed");
@@ -84,7 +43,7 @@ router.post("/razorpay", async (req: Request, res: Response) => {
     }
 
     const event = req.body;
-    // Use Razorpay's entity ID (payment_id or refund_id) for deterministic dedup — never Date.now()
+    // Use Razorpay's entity ID (payment_id or refund_id) for deterministic dedup.
     const entityId = event?.payload?.payment?.entity?.id || event?.payload?.refund?.entity?.id || "";
     if (!entityId) {
       logger.warn({ eventType: event?.event }, "Webhook event has no entity ID, skipping");
@@ -132,8 +91,8 @@ router.post("/razorpay", async (req: Request, res: Response) => {
 
       return res.status(200).json({ status: "ok" });
     } catch (processingErr: any) {
-      // Mark as failed but keep the row so notifications aren't re-sent on retry.
-      // Razorpay will retry with the same event — the dedup insert will skip it.
+      // Mark as failed but keep the row so notifications are not re-sent on retry.
+      // Razorpay will retry with the same event; the dedup insert will skip it.
       logger.error({ err: processingErr, eventId: razorpayEventId }, "Webhook event processing failed");
       await db
         .from("razorpay_webhook_events")
@@ -250,43 +209,16 @@ async function handlePaymentCaptured(payload: any) {
       .update({ payment_status: "success" })
       .eq("transaction_id", paymentId)
       .eq("payment_status", "pending")
-      .select("member_id, amount, payment_category");
+      .select("id, member_id, amount, payment_category");
 
-    // Push notification to the member about successful payment
     if (updatedPayments?.length) {
-      const { queueNotification } = await import("../services/notificationService");
-      for (const p of updatedPayments) {
-        if (p.member_id) {
-          const { data: member } = await db.from("members").select("user_id, church_id").eq("id", p.member_id).maybeSingle();
-          if (member?.user_id && member?.church_id) {
-            queueNotification({
-              church_id: member.church_id,
-              recipient_user_id: member.user_id,
-              channel: "push",
-              notification_type: "payment_success",
-              subject: "Payment Successful",
-              body: `Your payment of ₹${p.amount} (${p.payment_category || "subscription"}) has been confirmed.`,
-            }).catch((err) => { logger.warn({ err }, "Failed to send payment_success notification"); });
-          }
-
-          // Send confirmation email
-          try {
-            const { data: memberFull } = await db.from("members").select("full_name, email").eq("id", p.member_id).maybeSingle();
-            if (memberFull?.email) {
-              const { data: church } = await db.from("churches").select("name").eq("id", member.church_id).maybeSingle();
-              const churchName = church?.name || "Your Church";
-              const memberName = memberFull.full_name || "Member";
-              const cat = p.payment_category || "subscription";
-              const subject = `Payment Confirmation — ₹${p.amount} (${cat})`;
-              const text = `Dear ${memberName},\n\nYour payment of ₹${p.amount} for ${cat} at ${churchName} has been successfully processed.\n\nTransaction ID: ${paymentId}\nAmount: ₹${p.amount}\nCategory: ${cat}\nDate: ${new Date().toLocaleDateString("en-IN")}\n\nThank you for your contribution.\n\n— ${churchName}`;
-              const html = `<div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:20px"><h2 style="color:#2d5016">Payment Confirmation</h2><p>Dear ${memberName},</p><p>Your payment has been successfully processed.</p><table style="border-collapse:collapse;width:100%;margin:16px 0"><tr><td style="padding:8px;border:1px solid #ddd;font-weight:600">Amount</td><td style="padding:8px;border:1px solid #ddd">₹${p.amount}</td></tr><tr><td style="padding:8px;border:1px solid #ddd;font-weight:600">Category</td><td style="padding:8px;border:1px solid #ddd">${cat}</td></tr><tr><td style="padding:8px;border:1px solid #ddd;font-weight:600">Transaction ID</td><td style="padding:8px;border:1px solid #ddd">${paymentId}</td></tr><tr><td style="padding:8px;border:1px solid #ddd;font-weight:600">Date</td><td style="padding:8px;border:1px solid #ddd">${new Date().toLocaleDateString("en-IN")}</td></tr><tr><td style="padding:8px;border:1px solid #ddd;font-weight:600">Church</td><td style="padding:8px;border:1px solid #ddd">${churchName}</td></tr></table><p>Thank you for your contribution.</p><p style="color:#888;font-size:0.85rem">— ${churchName}</p></div>`;
-              await enqueueEmailJob(memberFull.email, subject, text, html);
-            }
-          } catch (emailErr) {
-            logger.warn({ err: emailErr }, "Failed to send payment confirmation email");
-          }
-        }
-      }
+      await enqueueJob({
+        job_type: "payment_captured_side_effects",
+        payload: {
+          payment_ids: updatedPayments.map((p: any) => p.id),
+          razorpay_payment_id: paymentId,
+        },
+      });
     }
   } catch (err) {
     logger.error({ err }, "handlePaymentCaptured failed");
@@ -307,39 +239,16 @@ async function handlePaymentFailed(payload: any) {
       .update({ payment_status: "failed" })
       .eq("transaction_id", paymentId)
       .eq("payment_status", "pending")
-      .select("member_id, amount, payment_category");
+      .select("id, member_id, amount, payment_category");
 
-    // Notify member about payment failure
     if (failedPayments?.length) {
-      const { queueNotification } = await import("../services/notificationService");
-      for (const p of failedPayments) {
-        if (p.member_id) {
-          const { data: member } = await db.from("members").select("user_id, church_id, phone_number").eq("id", p.member_id).maybeSingle();
-          if (member?.church_id) {
-            const failAmount = Number(p.amount) || amount;
-            if (member.user_id) {
-              queueNotification({
-                church_id: member.church_id,
-                recipient_user_id: member.user_id,
-                channel: "push",
-                notification_type: "payment_failed",
-                subject: "Payment Failed",
-                body: `Your payment of ₹${failAmount} could not be processed. Please try again.`,
-                metadata: { url: "/donate" },
-              }).catch((err) => { logger.warn({ err }, "Failed to send payment_failed push notification"); });
-            }
-            if (member.phone_number) {
-              queueNotification({
-                church_id: member.church_id,
-                recipient_phone: member.phone_number,
-                channel: "sms",
-                notification_type: "payment_failed",
-                body: `Your payment of ₹${failAmount} failed. Please retry at your earliest convenience. - ${(await import("../config")).APP_NAME}`,
-              }).catch((err) => { logger.warn({ err }, "Failed to send payment_failed SMS notification"); });
-            }
-          }
-        }
-      }
+      await enqueueJob({
+        job_type: "payment_failed_side_effects",
+        payload: {
+          payment_ids: failedPayments.map((p: any) => p.id),
+          razorpay_payment_id: paymentId,
+        },
+      });
     }
   } catch (err) {
     logger.error({ err }, "handlePaymentFailed failed");
@@ -360,114 +269,135 @@ async function handleRefundProcessed(payload: any) {
 
     if (!paymentId || !refundId) return;
 
-    // 1) Locate the payment row by Razorpay payment_id
-    const { data: paymentRow } = await db
+    // One Razorpay payment can map to multiple local rows for multi-subscription checkout.
+    const { data: paymentRows } = await db
       .from("payments")
       .select("id, member_id, subscription_id, amount, payment_status, church_id")
-      .eq("transaction_id", paymentId)
-      .maybeSingle();
+      .eq("transaction_id", paymentId);
 
-    if (!paymentRow) {
+    if (!paymentRows?.length) {
       logger.warn({ paymentId, refundId }, "Refund webhook: no matching payment row — skipping");
       return;
     }
 
-    // 2) Determine if any refund record was already persisted (admin-initiated flow sets gatewayRefundId in reason)
+    const localPayments = paymentRows as Array<{
+      id: string;
+      member_id: string | null;
+      subscription_id: string | null;
+      amount: number | string;
+      payment_status: string | null;
+      church_id: string | null;
+    }>;
+    const paymentIds = localPayments.map((row) => row.id);
+    const totalPaymentAmount = localPayments.reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
+    if (!Number.isFinite(totalPaymentAmount) || totalPaymentAmount <= 0) {
+      logger.warn({ paymentId, refundId }, "Refund webhook: invalid local payment total");
+      return;
+    }
+
     const { data: existingRefunds } = await db
       .from("payment_refunds")
-      .select("id, refund_amount, refund_reason")
-      .eq("payment_id", paymentRow.id);
-
-    const totalPriorRefunds = (existingRefunds || []).reduce(
-      (sum: number, r: any) => sum + (Number(r.refund_amount) || 0),
-      0,
-    );
-
-    const alreadyTracked = (existingRefunds || []).some((r: any) =>
-      typeof r.refund_reason === "string" && r.refund_reason.includes(refundId),
-    );
-
-    // 3) Insert a refund row if this refund is not already tracked (e.g. async gateway refund initiated outside admin flow)
-    if (!alreadyTracked) {
-      await db.from("payment_refunds").insert({
-        payment_id: paymentRow.id,
-        member_id: paymentRow.member_id,
-        refund_amount: refundAmount,
-        refund_method: "razorpay",
-        refund_reason: `Razorpay webhook refund ID: ${refundId}`,
-        recorded_by: null,
-      });
+      .select("id, payment_id, refund_amount, refund_reason, razorpay_refund_id")
+      .in("payment_id", paymentIds);
+    const refundsByPayment = new Map<string, any[]>();
+    for (const row of existingRefunds || []) {
+      const list = refundsByPayment.get(row.payment_id) || [];
+      list.push(row);
+      refundsByPayment.set(row.payment_id, list);
     }
 
-    // 4) Flip payment_status based on full vs partial
-    const paymentAmount = Number(paymentRow.amount) || 0;
-    const totalRefunded = (alreadyTracked ? totalPriorRefunds : totalPriorRefunds + refundAmount);
-    const newStatus = totalRefunded >= paymentAmount - 0.01 ? "refunded" : "partially_refunded";
+    let remainingRefund = refundAmount;
+    for (let i = 0; i < localPayments.length; i++) {
+      const paymentRow = localPayments[i];
+      const paymentAmount = Number(paymentRow.amount) || 0;
+      const proportionalAmount = i === localPayments.length - 1
+        ? remainingRefund
+        : Math.round(refundAmount * (paymentAmount / totalPaymentAmount) * 100) / 100;
+      const rowRefundAmount = Math.min(paymentAmount, Math.max(0, proportionalAmount));
+      remainingRefund = Math.max(0, Math.round((remainingRefund - rowRefundAmount) * 100) / 100);
+      if (rowRefundAmount <= 0) continue;
 
-    await db
-      .from("payments")
-      .update({ payment_status: newStatus })
-      .eq("id", paymentRow.id)
-      .neq("payment_status", newStatus);
+      const rowRefunds = refundsByPayment.get(paymentRow.id) || [];
+      const alreadyTracked = rowRefunds.some((r) =>
+        r.razorpay_refund_id === refundId ||
+        (typeof r.refund_reason === "string" && r.refund_reason.includes(refundId)),
+      );
+      const totalPriorRefunds = rowRefunds.reduce((sum, r) => sum + (Number(r.refund_amount) || 0), 0);
 
-    // 5) Reverse monthly dues on full refund
-    if (newStatus === "refunded") {
-      try {
-        const { reversePaymentAllocations } = await import("../services/subscriptionMonthlyDuesService");
-        const reversedCount = await reversePaymentAllocations(paymentRow.id);
-        logger.info({ paymentId: paymentRow.id, reversedCount }, "Refund webhook: reversed monthly allocations");
-      } catch (revErr) {
-        logger.warn({ err: revErr, paymentId: paymentRow.id }, "Refund webhook: failed to reverse allocations");
+      if (!alreadyTracked) {
+        const { error: refundInsertError } = await db.from("payment_refunds").insert({
+          payment_id: paymentRow.id,
+          member_id: paymentRow.member_id,
+          church_id: paymentRow.church_id,
+          refund_amount: rowRefundAmount,
+          refund_method: "razorpay",
+          refund_reason: `Razorpay webhook refund ID: ${refundId}`,
+          razorpay_refund_id: refundId,
+          refund_status: refundStatus,
+          recorded_by: null,
+        });
+        if (refundInsertError?.code !== "23505" && refundInsertError) {
+          throw refundInsertError;
+        }
       }
 
-      // 6) If this was a subscription payment, reverse subscription next_payment_date on full refund
-      if (paymentRow.subscription_id) {
+      const totalRefunded = alreadyTracked ? totalPriorRefunds : totalPriorRefunds + rowRefundAmount;
+      const newStatus = totalRefunded >= paymentAmount - 0.01 ? "refunded" : "partially_refunded";
+
+      await db
+        .from("payments")
+        .update({ payment_status: newStatus })
+        .eq("id", paymentRow.id)
+        .neq("payment_status", newStatus);
+
+      if (!alreadyTracked) {
+        await rawQuery(
+          `UPDATE platform_fee_collections
+           SET refunded_amount = LEAST(fee_amount, refunded_amount + ROUND((fee_amount * $2 / NULLIF($3, 0))::numeric, 2)),
+               refunded_at = now()
+           WHERE payment_id = $1`,
+          [paymentRow.id, rowRefundAmount, paymentAmount],
+        );
+        await rawQuery(
+          `UPDATE payment_transfers
+           SET reversed_amount = LEAST(transfer_amount, reversed_amount + ROUND((transfer_amount * $2 / NULLIF($3, 0))::numeric, 2)),
+               reversed_at = now(),
+               transfer_status = CASE WHEN $4 THEN 'reversed' ELSE transfer_status END,
+               updated_at = now()
+           WHERE payment_id = $1`,
+          [paymentRow.id, rowRefundAmount, paymentAmount, newStatus === "refunded"],
+        );
+      }
+
+      if (newStatus === "refunded") {
         try {
-          const { data: sub } = await db
-            .from("subscriptions")
-            .select("id, billing_cycle, next_payment_date, status")
-            .eq("id", paymentRow.subscription_id)
-            .maybeSingle();
-          if (sub) {
-            await db
-              .from("subscriptions")
-              .update({ status: "overdue" })
-              .eq("id", paymentRow.subscription_id)
-              .neq("status", "cancelled");
-          }
-        } catch (subErr) {
-          logger.warn({ err: subErr }, "Refund webhook: failed to rollback subscription status");
+          const { reversePaymentAllocations } = await import("../services/subscriptionMonthlyDuesService");
+          const reversedCount = await reversePaymentAllocations(paymentRow.id);
+          logger.info({ paymentId: paymentRow.id, reversedCount }, "Refund webhook: reversed monthly allocations");
+        } catch (revErr) {
+          logger.warn({ err: revErr, paymentId: paymentRow.id }, "Refund webhook: failed to reverse allocations");
         }
-      }
-    }
 
-    // 7) Notify the member
-    try {
-      const { queueNotification } = await import("../services/notificationService");
-      if (paymentRow.member_id && paymentRow.church_id) {
-        const { data: member } = await db
-          .from("members")
-          .select("user_id, email, full_name")
-          .eq("id", paymentRow.member_id)
-          .maybeSingle();
-        if (member?.user_id) {
-          queueNotification({
-            church_id: paymentRow.church_id,
-            recipient_user_id: member.user_id,
-            channel: "push",
-            notification_type: "refund_processed",
-            subject: "Refund Processed",
-            body: `A refund of ₹${refundAmount.toFixed(2)} has been processed to your original payment method.`,
-          }).catch((e) => logger.warn({ err: e }, "refund_processed push failed"));
-        }
-        if (member?.email) {
-          const subject = `Refund Confirmation — ₹${refundAmount.toFixed(2)}`;
-          const text = `Dear ${member.full_name || "Member"},\n\nA refund of ₹${refundAmount.toFixed(2)} has been processed for your payment.\n\nRefund ID: ${refundId}\nOriginal Payment: ${paymentId}\n\nThe amount should appear in your account within 5-7 business days.`;
-          await enqueueEmailJob(member.email, subject, text);
+        if (paymentRow.subscription_id) {
+          await db
+            .from("subscriptions")
+            .update({ status: "overdue" })
+            .eq("id", paymentRow.subscription_id)
+            .neq("status", "cancelled");
         }
       }
-    } catch (notifErr) {
-      logger.warn({ err: notifErr }, "Refund webhook: notification dispatch failed");
+
+      if (!alreadyTracked) {
+        await enqueueJob({
+          job_type: "refund_processed_side_effects",
+          payload: {
+            payment_id: paymentRow.id,
+            razorpay_payment_id: paymentId,
+            razorpay_refund_id: refundId,
+            refund_amount: rowRefundAmount,
+          },
+        });
+      }
     }
   } catch (err) {
     logger.error({ err }, "handleRefundProcessed failed");

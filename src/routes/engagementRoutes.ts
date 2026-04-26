@@ -10,6 +10,8 @@ import {
   listChurchEvents,
   listChurchNotifications,
   listPrayerRequests,
+  updatePrayerRequest,
+  deleteOwnPrayerRequest,
   updateChurchEvent,
   deleteChurchEvent,
   updateChurchNotification,
@@ -374,6 +376,61 @@ router.get("/prayer-requests", requireAuth, requireRegisteredUser, async (req: A
     return res.json(rows);
   } catch (err: any) {
     return res.status(400).json({ error: safeErrorMessage(err, "Failed to list prayer requests") });
+  }
+});
+
+router.patch("/prayer-requests/:id", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: "Unauthenticated" });
+    }
+
+    const requestId = String(req.params.id);
+    if (!UUID_RE.test(requestId)) return res.status(400).json({ error: "Invalid prayer request ID" });
+
+    const churchId = resolveChurchScope(req, req.body?.church_id || String(req.query.church_id || ""));
+    if (!churchId) {
+      return res.status(400).json({ error: "church_id is required" });
+    }
+
+    const updated = await updatePrayerRequest(
+      requestId,
+      churchId,
+      { email: req.user.email, phone: req.user.phone, user_id: req.user.id },
+      req.body?.details,
+    );
+
+    persistAuditLog(req, "engagement.prayer_request.update", "prayer_request", requestId, { church_id: churchId });
+    return res.json(updated);
+  } catch (err: any) {
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to update prayer request") });
+  }
+});
+
+router.delete("/prayer-requests/:id", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: "Unauthenticated" });
+    }
+
+    const requestId = String(req.params.id);
+    if (!UUID_RE.test(requestId)) return res.status(400).json({ error: "Invalid prayer request ID" });
+
+    const churchId = resolveChurchScope(req, String(req.query.church_id || req.body?.church_id || ""));
+    if (!churchId) {
+      return res.status(400).json({ error: "church_id is required" });
+    }
+
+    const deleted = await deleteOwnPrayerRequest(
+      requestId,
+      churchId,
+      { email: req.user.email, phone: req.user.phone, user_id: req.user.id },
+    );
+
+    persistAuditLog(req, "engagement.prayer_request.delete", "prayer_request", requestId, { church_id: churchId });
+    return res.json(deleted);
+  } catch (err: any) {
+    return res.status(400).json({ error: safeErrorMessage(err, "Failed to delete prayer request") });
   }
 });
 

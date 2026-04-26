@@ -89,7 +89,7 @@ export async function subscribeToPush(token: string): Promise<boolean> {
     if (permission !== "granted") return false;
 
     // Fetch VAPID public key from backend
-    const { publicKey } = await apiRequest<{ publicKey: string }>("/api/push/vapid-public-key");
+    const { publicKey } = await apiRequest<{ publicKey: string }>("/api/push/vapid-public-key", { token });
     if (!publicKey) return false;
 
     const reg = await navigator.serviceWorker.ready;

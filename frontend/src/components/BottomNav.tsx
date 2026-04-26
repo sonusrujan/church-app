@@ -29,7 +29,9 @@ export default function BottomNav({
   if (!isSuperAdmin) {
     items.push({ to: "/history", icon: Clock, label: t("nav.history") });
   }
-  items.push({ to: "/events", icon: CalendarDays, label: t("nav.events") });
+  if (!isAdminUser) {
+    items.push({ to: "/events", icon: CalendarDays, label: t("nav.events") });
+  }
   if (paymentsEnabled) {
     items.push({ to: "/donate", icon: HandHeart, label: t("nav.donate") });
   }
