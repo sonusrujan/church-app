@@ -17,13 +17,19 @@ COPY tsconfig.json ./
 COPY src/ src/
 RUN npx tsc --outDir dist
 
-# ── Stage 3: Production image ──
+# ── Stage 3: Production dependencies ──
+FROM node:20-alpine AS prod-deps
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --omit=dev --ignore-scripts
+
+# ── Stage 4: Production image ──
 FROM node:20-alpine
 WORKDIR /app
 
-# Install only production deps
-COPY package*.json ./
-RUN npm ci --omit=dev --ignore-scripts && rm -f package-lock.json
+# Copy only installed production deps so dev lockfile metadata is not present
+# in the final image layers scanned by Trivy.
+COPY --from=prod-deps /app/node_modules ./node_modules
 
 # Copy compiled backend
 COPY --from=backend-build /app/dist ./dist
