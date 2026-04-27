@@ -250,11 +250,15 @@ async function calculatePlatformFee(churchId: string | null | undefined, baseAmo
 router.get("/config", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
   try {
     const paymentConfig = await resolvePaymentConfig(req);
+    const churchId = req.user?.church_id || req.registeredProfile?.church_id || "";
+    const platformFee = await calculatePlatformFee(churchId || null, 100);
     return res.json({
       payments_enabled: paymentConfig.payments_enabled,
       key_id: paymentConfig.payments_enabled ? paymentConfig.key_id : "",
       source: paymentConfig.source,
       reason: paymentConfig.reason,
+      platform_fee_enabled: platformFee.enabled,
+      platform_fee_percentage: platformFee.percentage,
     });
   } catch (err: any) {
     return res.status(400).json({ error: safeErrorMessage(err, "Failed to load payment configuration") });
@@ -611,6 +615,7 @@ router.post("/donation/verify", requireAuth, requireRegisteredUser, paymentWrite
 
     return res.json({ success: true, payment });
   } catch (err: any) {
+    logger.error({ err, stack: err?.stack }, "donation/verify failed");
     return res.status(500).json({ error: safeErrorMessage(err, "Failed to verify donation") });
   }
 });

@@ -1,10 +1,11 @@
-import { useState, useEffect, useMemo } from "react";
+import { useContext, useState, useEffect, useMemo } from "react";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { Heart, Users, Eye, Award, ChevronRight, MapPin, Church, ExternalLink } from "lucide-react";
 import shalomLogo from "../assets/shalom-logo.png";
 import { useI18n } from "../i18n";
 import { isValidEmail } from "../types";
 import { apiRequest } from "../lib/api";
+import AppContext from "../context/AppContext";
 
 const PRESET_AMOUNTS = [100, 500, 1000, 2500, 5000, 10000];
 
@@ -15,6 +16,8 @@ type ChurchItem = { id: string; name: string; location?: string | null };
 type PublicPaymentConfig = {
   payments_enabled: boolean;
   public_donation_fee_percent: number;
+  platform_fee_enabled?: boolean;
+  platform_fee_percentage?: number;
 };
 
 type Props = {
@@ -26,6 +29,8 @@ export default function PublicDonationPage({ isLoggedIn = false, userChurch }: P
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { t } = useI18n();
+  const appContext = useContext(AppContext);
+  const token = appContext?.token || "";
 
   // URL params for QR/link pre-fill
   const urlChurchId = searchParams.get("church") || "";
@@ -71,6 +76,7 @@ export default function PublicDonationPage({ isLoggedIn = false, userChurch }: P
 
   // Whether user pre-selected a church via URL or login
   const isChurchPreSelected = !!(urlChurchId || userChurch?.id);
+  const isOwnChurchDonation = isLoggedIn && !!userChurch;
   const [loadError, setLoadError] = useState("");
 
   // Initialize fund options from translated defaults
@@ -144,17 +150,23 @@ export default function PublicDonationPage({ isLoggedIn = false, userChurch }: P
       setPaymentConfig({ payments_enabled: true, public_donation_fee_percent: 0 });
       return;
     }
-    apiRequest<PublicPaymentConfig>(`/api/payments/public/config?church_id=${encodeURIComponent(selectedChurchId)}`)
+    const configRequest = isOwnChurchDonation
+      ? apiRequest<PublicPaymentConfig>("/api/payments/config", { token })
+      : apiRequest<PublicPaymentConfig>(`/api/payments/public/config?church_id=${encodeURIComponent(selectedChurchId)}`);
+    configRequest
       .then((data) => {
+        const feePercent = isOwnChurchDonation
+          ? Number(data.platform_fee_enabled ? data.platform_fee_percentage || 0 : 0)
+          : Number(data.public_donation_fee_percent || 0);
         setPaymentConfig({
           payments_enabled: Boolean(data.payments_enabled),
-          public_donation_fee_percent: Number(data.public_donation_fee_percent || 0),
+          public_donation_fee_percent: feePercent,
         });
       })
       .catch(() => {
         setPaymentConfig({ payments_enabled: false, public_donation_fee_percent: 0 });
       });
-  }, [selectedChurchId]);
+  }, [isOwnChurchDonation, selectedChurchId, token]);
 
   const selectedAmount = customAmount ? Number(customAmount) : Number(amount);
   const publicDonationFeePercent = Number(paymentConfig.public_donation_fee_percent || 0);
@@ -223,9 +235,6 @@ export default function PublicDonationPage({ isLoggedIn = false, userChurch }: P
       },
     });
   }
-
-  // Whether the user is in their own church context (not public browsing)
-  const isOwnChurchDonation = isLoggedIn && !!userChurch;
 
   return (
     <div className={`public-donation-shell ${isOwnChurchDonation ? "church-donation-mode" : ""}`}>
