@@ -46,4 +46,14 @@ describe("i18n", () => {
     renderWithI18n(<TestComponent keyPath="csv.dropzoneHint" />);
     expect(screen.getByTestId("output")).toHaveTextContent("Drop a CSV file here or click to browse");
   });
+
+  it("resolves history ledger keys", () => {
+    renderWithI18n(<TestComponent keyPath="historyPage.title" />);
+    expect(screen.getByTestId("output")).toHaveTextContent("Payment Ledger");
+  });
+
+  it("resolves family request admin-add keys", () => {
+    renderWithI18n(<TestComponent keyPath="adminTabs.familyRequests.primaryMemberLabel" />);
+    expect(screen.getByTestId("output")).toHaveTextContent("Primary member");
+  });
 });

@@ -39,6 +39,7 @@ vi.mock("../utils/subscriptionHelpers", () => ({
 import {
   monthLabel,
   buildMonthRange,
+  ensurePendingMonthsForPaymentAtomic,
 } from "./subscriptionMonthlyDuesService";
 
 // ── Pure function tests ──
@@ -92,6 +93,64 @@ describe("buildMonthRange enforces Jan 2025 floor", () => {
     const range = buildMonthRange("2025-01-01", "2025-04-01");
     expect(range[0]).toBe("2025-01-01");
     expect(range).not.toContain("2024-12-01");
+  });
+});
+
+describe("ensurePendingMonthsForPaymentAtomic", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("does not create repair rows when enough pending dues already exist", async () => {
+    mockQuery.mockResolvedValueOnce({ rows: [{ cnt: 2 }] });
+
+    await ensurePendingMonthsForPaymentAtomic({
+      subscription_id: "s1",
+      member_id: "m1",
+      church_id: "c1",
+      start_month: "2026-04-01",
+      months_to_ensure: 2,
+      existingClient: { query: mockQuery } as any,
+    });
+
+    expect(mockQuery).toHaveBeenCalledOnce();
+    expect(mockQuery.mock.calls[0][0]).toContain("COUNT(*)::int AS cnt");
+  });
+
+  it("repairs missing pending dues from next_payment_date before allocation", async () => {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [{ cnt: 0 }] })
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({});
+
+    await ensurePendingMonthsForPaymentAtomic({
+      subscription_id: "s1",
+      member_id: "m1",
+      church_id: "c1",
+      start_month: "2026-04-01",
+      months_to_ensure: 2,
+      existingClient: { query: mockQuery } as any,
+    });
+
+    expect(mockQuery).toHaveBeenCalledTimes(3);
+    expect(mockQuery.mock.calls[1][0]).toContain("ON CONFLICT (subscription_id, due_month) DO NOTHING");
+    expect(mockQuery.mock.calls[1][1]).toEqual(["s1", "m1", "c1", "2026-04-01"]);
+    expect(mockQuery.mock.calls[2][1]).toEqual(["s1", "m1", "c1", "2026-05-01"]);
+  });
+
+  it("rejects non-positive repair month counts", async () => {
+    await expect(
+      ensurePendingMonthsForPaymentAtomic({
+        subscription_id: "s1",
+        member_id: "m1",
+        church_id: "c1",
+        start_month: "2026-04-01",
+        months_to_ensure: 0,
+        existingClient: { query: mockQuery } as any,
+      })
+    ).rejects.toThrow("months_to_ensure must be a positive integer");
+
+    expect(mockQuery).not.toHaveBeenCalled();
   });
 });
 
