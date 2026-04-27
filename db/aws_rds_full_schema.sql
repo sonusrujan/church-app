@@ -577,7 +577,8 @@ CREATE TABLE IF NOT EXISTS payments (
   payment_date timestamptz DEFAULT now(),
   payment_category text DEFAULT 'other',
   receipt_number text,
-  receipt_generated_at timestamptz
+  receipt_generated_at timestamptz,
+  fund_name text
 );
 
 CREATE INDEX IF NOT EXISTS payments_member_payment_date_idx
@@ -593,7 +594,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_tx_idempotency
 ALTER TABLE payments ADD CONSTRAINT payment_method_valid
   CHECK (payment_method IS NULL OR payment_method IN (
     'cash', 'cheque', 'bank_transfer', 'upi', 'card', 'razorpay',
-    'subscription_paynow', 'other'
+    'subscription_paynow', 'donation', 'public_donation', 'other'
   ));
 
 CREATE INDEX IF NOT EXISTS idx_payments_church

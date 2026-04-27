@@ -83,7 +83,8 @@ create table if not exists payments (
   payment_status text,
   payment_date timestamptz default now(),
   receipt_number text,
-  receipt_generated_at timestamptz
+  receipt_generated_at timestamptz,
+  fund_name text
 );
 
 create index if not exists payments_member_payment_date_idx
