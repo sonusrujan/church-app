@@ -3,7 +3,7 @@ import { useLocation, useNavigate, Navigate } from "react-router-dom";
 import { Heart, ShieldCheck, ArrowLeft, CheckCircle, Download, AlertTriangle } from "lucide-react";
 import shalomLogo from "../assets/shalom-logo.png";
 import { openRazorpayCheckout } from "../lib/razorpayCheckout";
-import { apiRequest } from "../lib/api";
+import { apiBlobRequest, apiRequest } from "../lib/api";
 import AppContext from "../context/AppContext";
 import { useI18n } from "../i18n";
 import CheckoutSummary from "../components/CheckoutSummary";
@@ -41,10 +41,28 @@ export default function DonationCheckoutPage({ isLoggedIn = false }: { isLoggedI
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
   const [successTxnId, setSuccessTxnId] = useState("");
+  const [successPaymentId, setSuccessPaymentId] = useState("");
+  const [successReceiptNumber, setSuccessReceiptNumber] = useState("");
   const { t } = useI18n();
 
-  const downloadReceipt = useCallback(() => {
+  const downloadReceipt = useCallback(async () => {
     if (!state || !successTxnId) return;
+    if (isLoggedIn && token && successPaymentId) {
+      try {
+        const blob = await apiBlobRequest(`/api/payments/${successPaymentId}/receipt`, { token });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `receipt-${successReceiptNumber || successPaymentId.slice(0, 8)}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        return;
+      } catch {
+        // Fall back to a local acknowledgement so the donor is not stranded.
+      }
+    }
     const receiptFeePct = Number(state.platformFeePercent || 0);
     const receiptFeeAmount = state.platformFeeEnabled ? Math.round(state.amount * receiptFeePct) / 100 : 0;
     const receiptTotalAmount = state.amount + receiptFeeAmount;
@@ -76,7 +94,7 @@ export default function DonationCheckoutPage({ isLoggedIn = false }: { isLoggedI
     a.download = `donation-receipt-${successTxnId.slice(0, 12)}.txt`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [state, successTxnId]);
+  }, [isLoggedIn, state, successPaymentId, successReceiptNumber, successTxnId, token]);
 
   if (!state || !state.amount) {
     return <Navigate to="/donate" replace />;
@@ -97,7 +115,9 @@ export default function DonationCheckoutPage({ isLoggedIn = false }: { isLoggedI
     try {
       // 1. Create order — pass token when logged in so server can link payment to member
       const authedToken = isLoggedIn ? token : undefined;
-      const orderData = await apiRequest<{ key_id: string; order: { id: string; amount: number; currency: string } }>("/api/payments/public/donation/order", {
+      const orderPath = isLoggedIn ? "/api/payments/donation/order" : "/api/payments/public/donation/order";
+      const verifyPath = isLoggedIn ? "/api/payments/donation/verify" : "/api/payments/public/donation/verify";
+      const orderData = await apiRequest<{ key_id: string; order: { id: string; amount: number; currency: string } }>(orderPath, {
         method: "POST",
         token: authedToken,
         body: {
@@ -133,7 +153,12 @@ export default function DonationCheckoutPage({ isLoggedIn = false }: { isLoggedI
       });
 
       // 3. Verify payment
-      await apiRequest("/api/payments/public/donation/verify", {
+      const verifyResult = await apiRequest<{
+        success?: boolean;
+        payment?: { id?: string; receipt_number?: string | null };
+        payment_id?: string;
+        receipt_number?: string | null;
+      }>(verifyPath, {
         method: "POST",
         token: authedToken,
         body: {
@@ -151,10 +176,14 @@ export default function DonationCheckoutPage({ isLoggedIn = false }: { isLoggedI
       });
 
       setSuccessTxnId(razorpayResponse.razorpay_payment_id);
+      const verifiedPaymentId = verifyResult.payment?.id || verifyResult.payment_id || "";
+      const verifiedReceipt = verifyResult.payment?.receipt_number || verifyResult.receipt_number || "";
+      setSuccessPaymentId(verifiedPaymentId);
+      setSuccessReceiptNumber(verifiedReceipt);
       setSuccess(true);
       // Refresh member dashboard so the new donation appears immediately.
       if (isLoggedIn && refreshMemberDashboard) {
-        refreshMemberDashboard().catch(() => { /* non-blocking */ });
+        await refreshMemberDashboard().catch(() => null);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : t("donation.errorPaymentFailed");

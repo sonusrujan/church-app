@@ -1,6 +1,18 @@
 export const API_BASE_URL =
   import.meta.env.VITE_API_URL || "http://localhost:4000";
 
+export class ApiError extends Error {
+  status: number;
+  payload: unknown;
+
+  constructor(message: string, status: number, payload?: unknown) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.payload = payload;
+  }
+}
+
 // ── Active church context ──
 let _activeChurchId: string | null = null;
 
@@ -161,23 +173,23 @@ export async function apiRequest<T>(
         }
       }
       if (_onAuthFailure) _onAuthFailure();
-      throw new Error("Session expired. Please sign in again.");
+      throw new ApiError("Session expired. Please sign in again.", response.status, payload);
     }
     if (response.status === 402) {
       // Church inactive or trial expired — surface the server message
-      throw new Error(message || "Your church subscription is inactive. Please contact support.");
+      throw new ApiError(message || "Your church subscription is inactive. Please contact support.", response.status, payload);
     }
     if (response.status === 403) {
-      throw new Error(message || "You do not have permission to perform this action.");
+      throw new ApiError(message || "You do not have permission to perform this action.", response.status, payload);
     }
     if (response.status === 404) {
-      throw new Error(message || "The requested resource was not found.");
+      throw new ApiError(message || "The requested resource was not found.", response.status, payload);
     }
     if (response.status >= 500) {
-      throw new Error("Server error. Please try again later.");
+      throw new ApiError("Server error. Please try again later.", response.status, payload);
     }
 
-    throw new Error(message);
+    throw new ApiError(message, response.status, payload);
   }
 
   return payload as T;

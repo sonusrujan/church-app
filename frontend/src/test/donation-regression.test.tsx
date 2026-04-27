@@ -16,6 +16,7 @@ const mockRefreshMemberDashboard = mocks.refreshMemberDashboard;
 
 vi.mock("../lib/api", () => ({
   apiRequest: (...args: unknown[]) => mocks.apiRequest(...args),
+  apiBlobRequest: vi.fn(),
   setActiveChurchId: vi.fn(),
   getActiveChurchId: () => "church-1",
   setTokenRefreshCallback: vi.fn(),
@@ -169,7 +170,7 @@ describe("DonationCheckoutPage regression coverage", () => {
     );
   }
 
-  it("creates the donation order from base amount and verifies with Razorpay identifiers", async () => {
+  it("uses authenticated donation endpoints for logged-in donors and verifies with Razorpay identifiers", async () => {
     mockApiRequest
       .mockResolvedValueOnce({ key_id: "rzp_test", order: { id: "order_1", amount: 52500, currency: "INR" } })
       .mockResolvedValueOnce({ success: true, payment: { id: "payment-1" } });
@@ -185,7 +186,7 @@ describe("DonationCheckoutPage regression coverage", () => {
     await waitFor(() => expect(screen.getByText("pay_1")).toBeVisible());
     expect(mockApiRequest).toHaveBeenNthCalledWith(
       1,
-      "/api/payments/public/donation/order",
+      "/api/payments/donation/order",
       expect.objectContaining({
         token: "member-token",
         body: expect.objectContaining({
@@ -197,7 +198,7 @@ describe("DonationCheckoutPage regression coverage", () => {
     );
     expect(mockApiRequest).toHaveBeenNthCalledWith(
       2,
-      "/api/payments/public/donation/verify",
+      "/api/payments/donation/verify",
       expect.objectContaining({
         token: "member-token",
         body: expect.objectContaining({
