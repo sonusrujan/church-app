@@ -44,6 +44,20 @@ function count(value: unknown): number {
   return Number(value || 0);
 }
 
+function appPaymentOriginWhere(alias: string) {
+  return `
+    LEFT(COALESCE(${alias}.transaction_id, ''), 4) = 'pay_'
+    AND LEFT(LOWER(COALESCE(${alias}.payment_method, '')), 7) <> 'manual_'
+  `;
+}
+
+function appSuccessfulPaymentWhere(alias: string) {
+  return `
+    LOWER(COALESCE(${alias}.payment_status, '')) = 'success'
+    AND ${appPaymentOriginWhere(alias)}
+  `;
+}
+
 function analyticsScope(churchId?: string | null) {
   const scoped = !!churchId;
   return {
@@ -85,7 +99,7 @@ export async function getChurchIncomeSummary(churchId: string) {
         COUNT(*)::text AS successful_payments_count
       FROM payments p
       JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
-      WHERE LOWER(p.payment_status) = 'success'
+      WHERE ${appSuccessfulPaymentWhere("p")}
         AND p.church_id = $1
     `, [churchId, TZ]);
 
@@ -98,7 +112,7 @@ export async function getChurchIncomeSummary(churchId: string) {
         COALESCE(SUM(p.amount), 0) AS income
       FROM payments p
       JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
-      WHERE LOWER(p.payment_status) = 'success'
+      WHERE ${appSuccessfulPaymentWhere("p")}
         AND p.church_id = $1
         AND (p.payment_date AT TIME ZONE $2)::date >= date_trunc('week', NOW() AT TIME ZONE $2)::date
         AND p.payment_date <= NOW()
@@ -141,7 +155,7 @@ export async function getPlatformIncomeSummary() {
         COUNT(*)::text AS successful_payments_count
       FROM payments p
       JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
-      WHERE LOWER(p.payment_status) = 'success'
+      WHERE ${appSuccessfulPaymentWhere("p")}
     `, [TZ]);
 
     const summary = rows[0] || { daily_income: "0", monthly_income: "0", yearly_income: "0", successful_payments_count: "0" };
@@ -152,7 +166,7 @@ export async function getPlatformIncomeSummary() {
         COALESCE(SUM(p.amount), 0) AS income
       FROM payments p
       JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
-      WHERE LOWER(p.payment_status) = 'success'
+      WHERE ${appSuccessfulPaymentWhere("p")}
         AND (p.payment_date AT TIME ZONE $1)::date >= date_trunc('week', NOW() AT TIME ZONE $1)::date
         AND p.payment_date <= NOW()
       GROUP BY 1
@@ -247,7 +261,7 @@ export async function getChurchIncomeDetail(churchId: string) {
         COUNT(*)::text AS cnt
       FROM payments p
       JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
-      WHERE LOWER(p.payment_status) = 'success'
+      WHERE ${appSuccessfulPaymentWhere("p")}
         AND p.church_id = $1
       GROUP BY 1
     `, [churchId, TZ]);
@@ -273,7 +287,7 @@ export async function getChurchIncomeDetail(churchId: string) {
         COALESCE(SUM(p.amount), 0) AS income
       FROM payments p
       JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
-      WHERE LOWER(p.payment_status) = 'success'
+      WHERE ${appSuccessfulPaymentWhere("p")}
         AND p.church_id = $1
         AND (p.payment_date AT TIME ZONE $2)::date >= date_trunc('week', NOW() AT TIME ZONE $2)::date
         AND p.payment_date <= NOW()
@@ -298,7 +312,7 @@ export async function getChurchIncomeDetail(churchId: string) {
         COALESCE(SUM(p.amount), 0) AS income
       FROM payments p
       JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
-      WHERE LOWER(p.payment_status) = 'success'
+      WHERE ${appSuccessfulPaymentWhere("p")}
         AND p.church_id = $1
         AND p.payment_date >= date_trunc('month', NOW() AT TIME ZONE $2 - INTERVAL '5 months') AT TIME ZONE $2
       GROUP BY 1, 2, date_trunc('month', p.payment_date AT TIME ZONE $2)
@@ -370,7 +384,7 @@ export async function getPlatformIncomeDetail() {
         COUNT(*)::text AS cnt
       FROM payments p
       JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
-      WHERE LOWER(p.payment_status) = 'success'
+      WHERE ${appSuccessfulPaymentWhere("p")}
       GROUP BY 1
     `, [TZ]);
 
@@ -394,7 +408,7 @@ export async function getPlatformIncomeDetail() {
         COALESCE(SUM(p.amount), 0) AS income
       FROM payments p
       JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
-      WHERE LOWER(p.payment_status) = 'success'
+      WHERE ${appSuccessfulPaymentWhere("p")}
         AND (p.payment_date AT TIME ZONE $1)::date >= date_trunc('week', NOW() AT TIME ZONE $1)::date
         AND p.payment_date <= NOW()
       GROUP BY 1, 2
@@ -417,7 +431,7 @@ export async function getPlatformIncomeDetail() {
         COALESCE(SUM(p.amount), 0) AS income
       FROM payments p
       JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
-      WHERE LOWER(p.payment_status) = 'success'
+      WHERE ${appSuccessfulPaymentWhere("p")}
         AND p.payment_date >= date_trunc('month', NOW() AT TIME ZONE $1 - INTERVAL '5 months') AT TIME ZONE $1
       GROUP BY 1, 2, date_trunc('month', p.payment_date AT TIME ZONE $1)
       ORDER BY date_trunc('month', p.payment_date AT TIME ZONE $1)
@@ -501,7 +515,7 @@ async function getIncomeAnalyticsForScope(
         JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
         CROSS JOIN bounds b
         LEFT JOIN fee_by_payment f ON f.payment_id = p.id
-        WHERE LOWER(COALESCE(p.payment_status, '')) = 'success'
+        WHERE ${appSuccessfulPaymentWhere("p")}
           AND ${scope.paymentWhere}
           AND (p.payment_date AT TIME ZONE $${scope.tzIndex})::date >= b.start_date
           AND (p.payment_date AT TIME ZONE $${scope.tzIndex})::date < b.end_date
@@ -539,6 +553,7 @@ async function getIncomeAnalyticsForScope(
       WITH bounds AS (${bounds}),
       dues AS (
         SELECT
+          smd.id,
           smd.status,
           smd.due_month,
           CASE
@@ -552,23 +567,35 @@ async function getIncomeAnalyticsForScope(
         WHERE ${scope.dueWhere}
           AND smd.due_month >= b.start_date
           AND smd.due_month < b.end_date
+      ),
+      app_paid_dues AS (
+        SELECT DISTINCT pma.due_id
+        FROM payment_month_allocations pma
+        JOIN payments p ON p.id = pma.payment_id
+        JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
+        CROSS JOIN bounds b
+        WHERE ${appSuccessfulPaymentWhere("p")}
+          AND ${scope.paymentWhere}
+          AND (p.payment_date AT TIME ZONE $${scope.tzIndex})::date >= b.start_date
+          AND (p.payment_date AT TIME ZONE $${scope.tzIndex})::date < b.end_date
       )
       SELECT
-        COALESCE(SUM(due_amount), 0)::text AS expected,
-        COALESCE(SUM(due_amount) FILTER (WHERE status IN ('paid', 'imported_paid')), 0)::text AS collected,
+        COALESCE(SUM(due_amount) FILTER (WHERE status = 'pending' OR apd.due_id IS NOT NULL), 0)::text AS expected,
+        COALESCE(SUM(due_amount) FILTER (WHERE apd.due_id IS NOT NULL), 0)::text AS collected,
         COALESCE(SUM(due_amount) FILTER (
           WHERE status = 'pending'
             AND due_month < date_trunc('month', NOW() AT TIME ZONE $${scope.tzIndex})::date
         ), 0)::text AS overdue,
         COALESCE(SUM(due_amount) FILTER (WHERE status = 'pending'), 0)::text AS pending,
-        COUNT(*)::text AS expected_count,
-        COUNT(*) FILTER (WHERE status IN ('paid', 'imported_paid'))::text AS collected_count,
+        COUNT(*) FILTER (WHERE status = 'pending' OR apd.due_id IS NOT NULL)::text AS expected_count,
+        COUNT(*) FILTER (WHERE apd.due_id IS NOT NULL)::text AS collected_count,
         COUNT(*) FILTER (
           WHERE status = 'pending'
             AND due_month < date_trunc('month', NOW() AT TIME ZONE $${scope.tzIndex})::date
         )::text AS overdue_count,
         COUNT(*) FILTER (WHERE status = 'pending')::text AS pending_count
       FROM dues
+      LEFT JOIN app_paid_dues apd ON apd.due_id = dues.id
     `, params);
 
     const agingTzIndex = scope.params.length + 1;
@@ -618,7 +645,7 @@ async function getIncomeAnalyticsForScope(
       JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
       CROSS JOIN bounds b
       LEFT JOIN fee_by_payment f ON f.payment_id = p.id
-      WHERE LOWER(COALESCE(p.payment_status, '')) = 'success'
+      WHERE ${appSuccessfulPaymentWhere("p")}
         AND ${scope.paymentWhere}
         AND (
           LOWER(COALESCE(p.payment_method, '')) IN ('donation', 'public_donation')
@@ -635,18 +662,16 @@ async function getIncomeAnalyticsForScope(
       WITH bounds AS (${bounds})
       SELECT
         CASE
-          WHEN LOWER(COALESCE(p.payment_method, '')) IN ('razorpay', 'subscription_paynow', 'card', 'donation', 'public_donation') THEN 'Razorpay'
-          WHEN LOWER(COALESCE(p.payment_method, '')) LIKE '%upi%' THEN 'UPI'
-          WHEN LOWER(COALESCE(p.payment_method, '')) = 'cash' THEN 'Cash'
-          WHEN LOWER(COALESCE(p.payment_method, '')) IN ('bank_transfer', 'cheque') THEN 'Bank/Cheque'
-          ELSE 'Other'
+          WHEN LOWER(COALESCE(p.payment_method, '')) = 'subscription_paynow' THEN 'Subscription checkout'
+          WHEN LOWER(COALESCE(p.payment_method, '')) IN ('donation', 'public_donation') THEN 'Donation checkout'
+          ELSE 'Razorpay checkout'
         END AS method,
         COALESCE(SUM(p.amount), 0)::text AS amount,
         COUNT(*)::text AS cnt
       FROM payments p
       JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
       CROSS JOIN bounds b
-      WHERE LOWER(COALESCE(p.payment_status, '')) = 'success'
+      WHERE ${appSuccessfulPaymentWhere("p")}
         AND ${scope.paymentWhere}
         AND (p.payment_date AT TIME ZONE $${scope.tzIndex})::date >= b.start_date
         AND (p.payment_date AT TIME ZONE $${scope.tzIndex})::date < b.end_date
@@ -688,7 +713,7 @@ async function getIncomeAnalyticsForScope(
         FROM payments p
         JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
         LEFT JOIN fee_by_payment f ON f.payment_id = p.id
-        WHERE LOWER(COALESCE(p.payment_status, '')) = 'success'
+        WHERE ${appSuccessfulPaymentWhere("p")}
           AND ${scope.paymentWhere}
           AND (p.payment_date AT TIME ZONE $${monthlyTzIndex})::date >= (
             date_trunc('month', NOW() AT TIME ZONE $${monthlyTzIndex}) - INTERVAL '11 months'
@@ -715,6 +740,7 @@ async function getIncomeAnalyticsForScope(
         JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
         CROSS JOIN bounds b
         WHERE ${scope.paymentWhere}
+          AND ${appPaymentOriginWhere("p")}
           AND (p.payment_date AT TIME ZONE $${scope.tzIndex})::date >= b.start_date
           AND (p.payment_date AT TIME ZONE $${scope.tzIndex})::date < b.end_date
       ),
@@ -764,7 +790,7 @@ async function getIncomeAnalyticsForScope(
         JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
         CROSS JOIN bounds b
         LEFT JOIN fee_by_payment f ON f.payment_id = p.id
-        WHERE LOWER(COALESCE(p.payment_status, '')) = 'success'
+        WHERE ${appSuccessfulPaymentWhere("p")}
           AND ${scope.paymentWhere}
           AND (p.payment_date AT TIME ZONE $${scope.tzIndex})::date >= b.start_date
           AND (p.payment_date AT TIME ZONE $${scope.tzIndex})::date < b.end_date
@@ -940,7 +966,7 @@ export async function generatePaymentReport(
     JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
     LEFT JOIN members m ON m.id = p.member_id AND m.deleted_at IS NULL
     LEFT JOIN subscriptions s ON s.id = p.subscription_id
-    WHERE LOWER(p.payment_status) = 'success'
+    WHERE ${appSuccessfulPaymentWhere("p")}
       AND p.church_id = $1
     ${dateFilter}
     ORDER BY p.payment_date DESC
