@@ -43,7 +43,7 @@ export default function HistoryPage() {
       seen.add(o.value);
       return true;
     });
-  }, [memberDashboard?.member?.full_name, memberDashboard?.family_members]);
+  }, [memberDashboard?.member?.full_name, memberDashboard?.family_members, t]);
 
   const visibleRows = useMemo(() => {
     return rows.filter((row) => {
@@ -105,7 +105,7 @@ export default function HistoryPage() {
     return () => {
       cancelled = true;
     };
-  }, [token, page, selectedPersonKey, setNotice]);
+  }, [token, page, selectedPersonKey, setNotice, t]);
 
   async function downloadReceipt(row: MonthlyPaymentHistoryRow) {
     const pid = row.payment_id;
@@ -164,33 +164,33 @@ export default function HistoryPage() {
       <div className="history-stats-grid">
         <div className="history-stat-card">
           <div className="history-stat-top">
-            <span className="history-stat-label">Ledger Rows</span>
+            <span className="history-stat-label">{t("historyPage.ledgerRows")}</span>
             <Receipt className="history-stat-icon history-stat-icon--success" size={18} />
           </div>
           <span className="history-stat-value">{visibleRows.length}</span>
-          <span className="history-stat-sub">Filtered entries</span>
+          <span className="history-stat-sub">{t("historyPage.filteredEntries")}</span>
         </div>
         <div className="history-stat-card">
           <div className="history-stat-top">
-            <span className="history-stat-label">Paid</span>
+            <span className="history-stat-label">{t("historyPage.paid")}</span>
             <Download className="history-stat-icon history-stat-icon--success" size={18} />
           </div>
           <span className="history-stat-value">{formatAmount(ledgerTotals.paid)}</span>
-          <span className="history-stat-sub history-stat-sub--success">Receipts available where generated</span>
+          <span className="history-stat-sub history-stat-sub--success">{t("historyPage.receiptsAvailable")}</span>
         </div>
         <div className="history-stat-card">
           <div className="history-stat-top">
-            <span className="history-stat-label">Pending</span>
+            <span className="history-stat-label">{t("historyPage.pending")}</span>
             <AlertTriangle className="history-stat-icon history-stat-icon--warning" size={18} />
           </div>
           <span className="history-stat-value">{formatAmount(ledgerTotals.pending)}</span>
-          <span className="history-stat-sub">Open dues in this view</span>
+          <span className="history-stat-sub">{t("historyPage.openDues")}</span>
         </div>
       </div>
 
       <div className="history-table-container">
         <div className="history-section-header">
-          <h2>Ledger</h2>
+          <h2>{t("historyPage.ledger")}</h2>
         </div>
         <div className="history-filters">
           <label className="history-filter-select">
@@ -204,15 +204,15 @@ export default function HistoryPage() {
               ))}
             </select>
           </label>
-          <div className="history-filter-tabs" aria-label="Entry type">
-            <button className={`history-filter-btn${typeFilter === "all" ? " active" : ""}`} onClick={() => setTypeFilter("all")} type="button">All</button>
-            <button className={`history-filter-btn${typeFilter === "subscription" ? " active" : ""}`} onClick={() => setTypeFilter("subscription")} type="button">Dues</button>
-            <button className={`history-filter-btn${typeFilter === "donation" ? " active" : ""}`} onClick={() => setTypeFilter("donation")} type="button">Donations</button>
+          <div className="history-filter-tabs" aria-label={t("historyPage.entryType")}>
+            <button className={`history-filter-btn${typeFilter === "all" ? " active" : ""}`} onClick={() => setTypeFilter("all")} type="button">{t("historyPage.filterAll")}</button>
+            <button className={`history-filter-btn${typeFilter === "subscription" ? " active" : ""}`} onClick={() => setTypeFilter("subscription")} type="button">{t("historyPage.filterDues")}</button>
+            <button className={`history-filter-btn${typeFilter === "donation" ? " active" : ""}`} onClick={() => setTypeFilter("donation")} type="button">{t("historyPage.filterDonations")}</button>
           </div>
-          <div className="history-filter-tabs" aria-label="Payment status">
-            <button className={`history-filter-btn${statusFilter === "all" ? " active" : ""}`} onClick={() => setStatusFilter("all")} type="button">All Status</button>
-            <button className={`history-filter-btn${statusFilter === "paid" ? " active" : ""}`} onClick={() => setStatusFilter("paid")} type="button">Paid</button>
-            <button className={`history-filter-btn${statusFilter === "pending" ? " active" : ""}`} onClick={() => setStatusFilter("pending")} type="button">Unpaid</button>
+          <div className="history-filter-tabs" aria-label={t("historyPage.paymentStatus")}>
+            <button className={`history-filter-btn${statusFilter === "all" ? " active" : ""}`} onClick={() => setStatusFilter("all")} type="button">{t("historyPage.filterAllStatus")}</button>
+            <button className={`history-filter-btn${statusFilter === "paid" ? " active" : ""}`} onClick={() => setStatusFilter("paid")} type="button">{t("historyPage.filterPaid")}</button>
+            <button className={`history-filter-btn${statusFilter === "pending" ? " active" : ""}`} onClick={() => setStatusFilter("pending")} type="button">{t("historyPage.filterUnpaid")}</button>
           </div>
         </div>
 
@@ -223,7 +223,7 @@ export default function HistoryPage() {
             <table className="history-table">
               <thead>
                 <tr>
-                  <th>Entry</th>
+                  <th>{t("historyPage.entry")}</th>
                   <th>{t("historyPage.monthAndYear")}</th>
                   <th>{t("historyPage.status")}</th>
                   <th>{t("historyPage.paidAmount")}</th>
@@ -248,7 +248,7 @@ export default function HistoryPage() {
                         </span>
                         <div>
                           <span className="history-cell-title">{isDonation ? row.fund_name || t("historyPage.donationLabel") : row.person_name || t("common.member")}</span>
-                          <span className="history-cell-receipt-no">{row.receipt_number || (isDonation ? "Donation" : "Subscription due")}</span>
+                          <span className="history-cell-receipt-no">{row.receipt_number || (isDonation ? t("historyPage.donationLabel") : t("historyPage.subscriptionDue"))}</span>
                         </div>
                       </div>
                     </td>

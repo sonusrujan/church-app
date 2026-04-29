@@ -32,6 +32,7 @@ vi.mock("twilio", () => ({
 
 const mockMaybeSingle = vi.fn();
 const mockSingle = vi.fn();
+const mockAwaitQuery = vi.fn();
 vi.mock("../services/dbClient", () => ({
   db: (() => {
     // Chainable mock — every query-builder method returns `chain` so .eq().eq().order().limit() etc. all work
@@ -42,6 +43,7 @@ vi.mock("../services/dbClient", () => ({
       }
       chain.maybeSingle = mockMaybeSingle;
       chain.single = mockSingle;
+      chain.then = (resolve: any, reject: any) => Promise.resolve(mockAwaitQuery()).then(resolve, reject);
       return chain;
     };
     return {
@@ -145,6 +147,12 @@ describe("Auth Integration Flow", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    mockAwaitQuery.mockReset();
+    mockMaybeSingle.mockReset();
+    mockSingle.mockReset();
+    mockAwaitQuery.mockResolvedValue({ data: null, error: null });
+    mockMaybeSingle.mockResolvedValue({ data: null, error: null });
+    mockSingle.mockResolvedValue({ data: { id: "mock-id" }, error: null });
     app = buildApp();
     serverInfo = await startServer(app);
   });
@@ -169,9 +177,19 @@ describe("Auth Integration Flow", () => {
 
     // Step 2: Verify OTP
     mockVerificationChecksCreate.mockResolvedValue({ status: "approved" });
-    mockMaybeSingle.mockResolvedValueOnce({
-      data: { id: "user-1", email: "test@test.com", phone_number: "+919876543210", auth_user_id: "user-1" },
-    });
+    // Existing user lookup now uses a list query so duplicate phone numbers are
+    // handled deterministically instead of trusting maybeSingle().
+    mockAwaitQuery
+      .mockResolvedValueOnce({
+        data: [{ id: "user-1", email: "test@test.com", phone_number: "+919876543210", auth_user_id: "user-1", church_id: "church-1" }],
+        error: null,
+      })
+      // getUserProfileForJwt: active memberships for default church resolution
+      .mockResolvedValueOnce({ data: [{ church_id: "church-1", role: "member" }], error: null })
+      // ensureJunctionRows: linked member rows
+      .mockResolvedValueOnce({ data: [{ id: "member-1", church_id: "church-1" }], error: null })
+      // user church picker rows returned to the frontend
+      .mockResolvedValueOnce({ data: [{ church_id: "church-1", role: "member", churches: { name: "Test Church" } }], error: null });
     // member check
     mockMaybeSingle.mockResolvedValueOnce({ data: { id: "member-1" } });
     // family-dependent check: member lookup by phone
@@ -179,7 +197,7 @@ describe("Auth Integration Flow", () => {
     // family-dependent check: family_members link (not a dependent)
     mockMaybeSingle.mockResolvedValueOnce({ data: null });
     // getUserProfileForJwt
-    mockMaybeSingle.mockResolvedValueOnce({ data: { role: "member", church_id: "church-1" } });
+    mockMaybeSingle.mockResolvedValueOnce({ data: { id: "user-1", role: "member", church_id: "church-1" } });
 
     const verifyRes = await fetch(`${serverInfo.url}/api/otp/verify`, {
       method: "POST",

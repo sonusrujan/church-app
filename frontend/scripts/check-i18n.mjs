@@ -36,6 +36,7 @@ const REQUIRED_PREFIXES = [
   "donate.",
   "cookie.",
   "history.",
+  "historyPage.",
   "profile.",
 ];
 
