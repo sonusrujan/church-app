@@ -41,6 +41,7 @@ import OfflineIndicator from "./components/OfflineIndicator";
 import CookieConsentBanner from "./components/CookieConsentBanner";
 import LanguageSelector from "./components/LanguageSelector";
 import NotificationBadge from "./components/NotificationBadge";
+import BottomNav from "./components/BottomNav";
 import { useI18n } from "./i18n";
 
 // ── Helpers ──
@@ -251,9 +252,9 @@ function App() {
 
   // Public pages accessible regardless of auth state
   const isPublicDonationRoute = location.pathname.startsWith("/donate");
-  const isPublicStaticRoute = location.pathname === "/privacy";
+  const isPublicStaticRoute = location.pathname === "/privacy" || location.pathname === "/terms";
 
-  if (isPublicDonationRoute || isPublicStaticRoute) {
+  if (isPublicStaticRoute || (isPublicDonationRoute && !loadingSession && !isLoggedIn)) {
     return (
       <Suspense fallback={<div className="auth-shell"><p>{t("common.loading")}</p></div>}>
       <Routes>
@@ -460,7 +461,17 @@ function App() {
       <OfflineIndicator />
       <CookieConsentBanner />
       <div className={`app-layout ${workspaceToneClass}`}>
-        <nav className="sidebar">
+        <button
+          className={`floating-burger ${mobileNavOpen ? "fab-open" : ""}`}
+          onClick={() => setMobileNavOpen((v) => !v)}
+          aria-label={t("nav.toggleNavigation")}
+          aria-expanded={mobileNavOpen}
+          aria-controls="mobile-nav"
+        >
+          {mobileNavOpen ? <X size={22} /> : <Menu size={22} />}
+        </button>
+
+        <nav className={`sidebar ${mobileNavOpen ? "sidebar-open" : ""}`}>
           <div className="brand-block">
             <img src={shalomLogo} alt="Shalom" className="nav-logo" />
             <span className="brand-name">{authContext?.profile.full_name || (isSuperAdmin ? t("profile.superAdmin") : "Shalom")}</span>
@@ -669,6 +680,14 @@ function App() {
             </section>
           ) : null}
         </main>
+
+        <BottomNav
+          isSuperAdmin={isSuperAdmin}
+          isAdminUser={isAdminUser}
+          paymentsEnabled={paymentsEnabled}
+          duesCount={duesCount}
+          adminPendingCount={totalAdminPending}
+        />
       </div>
     </AppContext.Provider>
   );
