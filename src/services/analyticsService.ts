@@ -606,7 +606,7 @@ async function getIncomeAnalyticsForScope(
             LOWER(COALESCE(p.payment_method, '')) IN ('donation', 'public_donation')
             OR LOWER(COALESCE(p.payment_category, '')) = 'donation'
           ) AS is_donation,
-          GREATEST(p.amount - COALESCE(f.fee_amount, 0), 0) AS net_amount,
+          ${churchPaymentAmount("p", "f")} AS net_amount,
           COALESCE(f.fee_amount, 0) AS fee_amount
         FROM payments p
         JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
@@ -812,7 +812,7 @@ async function getIncomeAnalyticsForScope(
             LOWER(COALESCE(p.payment_method, '')) IN ('donation', 'public_donation')
             OR LOWER(COALESCE(p.payment_category, '')) = 'donation'
           ) AS is_donation,
-          GREATEST(p.amount - COALESCE(f.fee_amount, 0), 0) AS net_amount,
+          ${churchPaymentAmount("p", "f")} AS net_amount,
           COALESCE(f.fee_amount, 0) AS fee_amount
         FROM payments p
         JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
@@ -896,7 +896,7 @@ async function getIncomeAnalyticsForScope(
       payer_totals AS (
         SELECT
           COALESCE(p.member_id::text, p.transaction_id, p.id::text) AS payer_key,
-          COALESCE(SUM(GREATEST(p.amount - COALESCE(f.fee_amount, 0), 0)), 0) AS total_amount
+          COALESCE(SUM(${churchPaymentAmount("p", "f")}), 0) AS total_amount
         FROM payments p
         JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
         CROSS JOIN bounds b
