@@ -79,16 +79,123 @@ type CurrentMemberDashboard = {
 
 type PaymentReceiptRow = {
   id: string;
-  member_id: string;
+  member_id: string | null;
   subscription_id: string | null;
   amount: number | string;
   payment_method: string | null;
+  payment_category?: string | null;
   transaction_id: string | null;
   payment_status: string | null;
   payment_date: string;
   receipt_number: string | null;
   receipt_generated_at: string | null;
 };
+
+type PaymentReceiptWithChurch = PaymentReceiptRow & { church_id: string };
+
+function isDonationReceiptPayment(payment: PaymentReceiptRow) {
+  const method = String(payment.payment_method || "").toLowerCase();
+  const category = String(payment.payment_category || "").toLowerCase();
+  return !payment.subscription_id && (method === "donation" || method === "public_donation" || category === "donation");
+}
+
+async function getChurchFacingPaymentAmount(payment: PaymentReceiptRow) {
+  const amount = Number(payment.amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error("Invalid payment amount");
+  }
+
+  if (!isDonationReceiptPayment(payment)) {
+    return amount;
+  }
+
+  const { rows } = await rawQuery<{ fee_amount: string }>(
+    `SELECT COALESCE(SUM(fee_amount), 0)::text AS fee_amount
+     FROM platform_fee_collections
+     WHERE payment_id = $1`,
+    [payment.id],
+  );
+  const feeAmount = Number(rows[0]?.fee_amount || 0);
+  return Math.max(0, amount - (Number.isFinite(feeAmount) ? feeAmount : 0));
+}
+
+async function generateReceiptForPayment(payment: PaymentReceiptWithChurch, receiptNumber: string, fallbackContact = "") {
+  const paymentAmount = await getChurchFacingPaymentAmount(payment);
+
+  const { data: paymentMember } = payment.member_id
+    ? await db
+      .from("members")
+      .select("full_name, email")
+      .eq("id", payment.member_id)
+      .maybeSingle<{ full_name: string | null; email: string | null }>()
+    : { data: null };
+
+  const { data: church } = await db
+    .from("churches")
+    .select("name, legal_name, registered_address, pan_number, gstin, tax_80g_registration_number, receipt_signatory_name, receipt_signatory_title")
+    .eq("id", payment.church_id)
+    .maybeSingle<{
+      name: string;
+      legal_name: string | null;
+      registered_address: string | null;
+      pan_number: string | null;
+      gstin: string | null;
+      tax_80g_registration_number: string | null;
+      receipt_signatory_name: string | null;
+      receipt_signatory_title: string | null;
+    }>();
+
+  let subscriptionName: string | null = null;
+  if (payment.subscription_id) {
+    const { data: sub } = await db
+      .from("subscriptions")
+      .select("plan_name")
+      .eq("id", payment.subscription_id)
+      .maybeSingle<{ plan_name: string }>();
+    subscriptionName = sub?.plan_name || null;
+  }
+
+  let monthsCovered: string | null = null;
+  try {
+    const { rows: monthRows } = await rawQuery<{ months: string }>(
+      `SELECT string_agg(to_char(smd.due_month, 'Mon YYYY'), ', ' ORDER BY smd.due_month) AS months
+       FROM payment_month_allocations pma
+       JOIN subscription_monthly_dues smd ON smd.id = pma.due_id
+       WHERE pma.payment_id = $1`,
+      [payment.id],
+    );
+    if (monthRows.length > 0 && monthRows[0].months) {
+      monthsCovered = monthRows[0].months;
+    }
+  } catch (monthErr) {
+    logger.warn({ err: monthErr, paymentId: payment.id }, "Failed to fetch months covered for receipt, continuing without");
+  }
+
+  const memberName = paymentMember?.full_name || paymentMember?.email || fallbackContact || "Public donor";
+
+  return generateReceiptPdfBuffer({
+    receipt_number: receiptNumber,
+    payment_id: payment.id,
+    payment_date: payment.payment_date,
+    amount: paymentAmount,
+    payment_method: payment.payment_method || "manual",
+    payment_status: payment.payment_status || "success",
+    transaction_id: payment.transaction_id,
+    member_name: memberName,
+    member_email: paymentMember?.email || fallbackContact || "",
+    church_name: church?.name || null,
+    subscription_id: payment.subscription_id,
+    subscription_name: subscriptionName,
+    months_covered: monthsCovered,
+    church_legal_name: church?.legal_name || null,
+    church_registered_address: church?.registered_address || null,
+    church_pan_number: church?.pan_number || null,
+    church_gstin: church?.gstin || null,
+    church_tax_80g_number: church?.tax_80g_registration_number || null,
+    receipt_signatory_name: church?.receipt_signatory_name || null,
+    receipt_signatory_title: church?.receipt_signatory_title || null,
+  });
+}
 
 async function getCurrentMemberDashboard(req: AuthRequest): Promise<CurrentMemberDashboard> {
   if (!req.user) {
@@ -985,6 +1092,49 @@ router.post("/subscription/verify", requireAuth, requireRegisteredUser, paymentW
   }
 });
 
+router.get("/public/:paymentId/receipt", async (req, res) => {
+  try {
+    const paymentId = typeof req.params.paymentId === "string" ? req.params.paymentId.trim() : "";
+    const receiptNumber = typeof req.query.receipt_number === "string" ? req.query.receipt_number.trim() : "";
+    if (!paymentId || !UUID_REGEX.test(paymentId) || !receiptNumber) {
+      return res.status(400).json({ error: "Invalid receipt request" });
+    }
+
+    const { data: payment, error: paymentError } = await db
+      .from("payments")
+      .select(
+        "id, member_id, subscription_id, church_id, amount, payment_method, payment_category, transaction_id, payment_status, payment_date, receipt_number, receipt_generated_at"
+      )
+      .eq("id", paymentId)
+      .maybeSingle<PaymentReceiptWithChurch>();
+
+    if (paymentError) {
+      return res.status(500).json({ error: "Failed to load payment" });
+    }
+    if (
+      !payment ||
+      payment.receipt_number !== receiptNumber ||
+      String(payment.payment_method || "").toLowerCase() !== "public_donation" ||
+      payment.member_id
+    ) {
+      return res.status(404).json({ error: "Receipt not found" });
+    }
+    if ((payment.payment_status || "").toLowerCase() !== "success") {
+      return res.status(400).json({ error: "Receipt is available only for successful payments" });
+    }
+
+    const pdfBuffer = await generateReceiptForPayment(payment, receiptNumber, "Public donor");
+    const safeFileName = `receipt-${receiptNumber}.pdf`;
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename=\"${safeFileName}\"`);
+    res.setHeader("Cache-Control", "no-store");
+    return res.status(200).send(pdfBuffer);
+  } catch (err: any) {
+    logger.error({ err, paymentId: req.params.paymentId }, "Public receipt download failed");
+    return res.status(500).json({ error: safeErrorMessage(err, "Failed to download receipt") });
+  }
+});
+
 router.get("/:paymentId/receipt", requireAuth, requireRegisteredUser, async (req: AuthRequest, res) => {
   try {
     if (!req.user) {
@@ -1000,10 +1150,10 @@ router.get("/:paymentId/receipt", requireAuth, requireRegisteredUser, async (req
     const { data: payment, error: paymentError } = await db
       .from("payments")
       .select(
-        "id, member_id, subscription_id, church_id, amount, payment_method, transaction_id, payment_status, payment_date, receipt_number, receipt_generated_at"
+        "id, member_id, subscription_id, church_id, amount, payment_method, payment_category, transaction_id, payment_status, payment_date, receipt_number, receipt_generated_at"
       )
       .eq("id", paymentId)
-      .maybeSingle<PaymentReceiptRow & { church_id: string }>();
+      .maybeSingle<PaymentReceiptWithChurch>();
 
     if (paymentError) {
       return res.status(500).json({ error: "Failed to load payment" });
@@ -1058,7 +1208,7 @@ router.get("/:paymentId/receipt", requireAuth, requireRegisteredUser, async (req
     const receiptNumber =
       payment.receipt_number ||
       createReceiptNumber({
-        member_id: payment.member_id,
+        member_id: payment.member_id || "PUBLIC",
         payment_date: payment.payment_date,
         transaction_id: payment.transaction_id,
       });
@@ -1073,84 +1223,7 @@ router.get("/:paymentId/receipt", requireAuth, requireRegisteredUser, async (req
         .eq("id", payment.id);
     }
 
-    const paymentAmount = Number(payment.amount);
-    if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
-      return res.status(400).json({ error: "Invalid payment amount" });
-    }
-
-    // Fetch member + church info for the receipt
-    const { data: paymentMember } = await db
-      .from("members")
-      .select("full_name, email")
-      .eq("id", payment.member_id)
-      .maybeSingle<{ full_name: string | null; email: string | null }>();
-
-    const { data: church } = await db
-      .from("churches")
-      .select("name, legal_name, registered_address, pan_number, gstin, tax_80g_registration_number, receipt_signatory_name, receipt_signatory_title")
-      .eq("id", payment.church_id)
-      .maybeSingle<{
-        name: string;
-        legal_name: string | null;
-        registered_address: string | null;
-        pan_number: string | null;
-        gstin: string | null;
-        tax_80g_registration_number: string | null;
-        receipt_signatory_name: string | null;
-        receipt_signatory_title: string | null;
-      }>();
-
-    let subscriptionName: string | null = null;
-    if (payment.subscription_id) {
-      const { data: sub } = await db
-        .from("subscriptions")
-        .select("plan_name")
-        .eq("id", payment.subscription_id)
-        .maybeSingle<{ plan_name: string }>();
-      subscriptionName = sub?.plan_name || null;
-    }
-
-    // Fetch months covered by this payment from the monthly ledger
-    let monthsCovered: string | null = null;
-    try {
-      const { rows: monthRows } = await rawQuery<{ months: string }>(
-        `SELECT string_agg(to_char(smd.due_month, 'Mon YYYY'), ', ' ORDER BY smd.due_month) AS months
-         FROM payment_month_allocations pma
-         JOIN subscription_monthly_dues smd ON smd.id = pma.due_id
-         WHERE pma.payment_id = $1`,
-        [payment.id],
-      );
-      if (monthRows.length > 0 && monthRows[0].months) {
-        monthsCovered = monthRows[0].months;
-      }
-    } catch (monthErr) {
-      logger.warn({ err: monthErr, paymentId: payment.id }, "Failed to fetch months covered for receipt, continuing without");
-    }
-
-    const memberName = paymentMember?.full_name || paymentMember?.email || req.user.email || req.user.phone || "Church Member";
-
-    const pdfBuffer = await generateReceiptPdfBuffer({
-      receipt_number: receiptNumber,
-      payment_id: payment.id,
-      payment_date: payment.payment_date,
-      amount: paymentAmount,
-      payment_method: payment.payment_method || "manual",
-      payment_status: payment.payment_status || "success",
-      transaction_id: payment.transaction_id,
-      member_name: memberName,
-      member_email: paymentMember?.email || req.user.email || req.user.phone || "",
-      church_name: church?.name || null,
-      subscription_id: payment.subscription_id,
-      subscription_name: subscriptionName,
-      months_covered: monthsCovered,
-      church_legal_name: church?.legal_name || null,
-      church_registered_address: church?.registered_address || null,
-      church_pan_number: church?.pan_number || null,
-      church_gstin: church?.gstin || null,
-      church_tax_80g_number: church?.tax_80g_registration_number || null,
-      receipt_signatory_name: church?.receipt_signatory_name || null,
-      receipt_signatory_title: church?.receipt_signatory_title || null,
-    });
+    const pdfBuffer = await generateReceiptForPayment(payment, receiptNumber, req.user.email || req.user.phone || "");
 
     const safeFileName = `receipt-${receiptNumber}.pdf`;
     res.setHeader("Content-Type", "application/pdf");

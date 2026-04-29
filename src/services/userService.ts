@@ -1,4 +1,4 @@
-import { db, getClient } from "./dbClient";
+import { db, getClient, rawQuery } from "./dbClient";
 import { logger } from "../utils/logger";
 import { computeNextDueDate, isDueSubscription } from "../utils/subscriptionHelpers";
 import { normalizeIndianPhone } from "../utils/phone";
@@ -159,6 +159,12 @@ function normalizeEmail(email: string) {
 function toAmount(value: number | string | null | undefined) {
   const numeric = Number(value ?? 0);
   return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function isDonationPayment(payment: Pick<PaymentRow, "payment_method" | "payment_category" | "subscription_id">) {
+  const method = String(payment.payment_method || "").toLowerCase();
+  const category = String(payment.payment_category || "").toLowerCase();
+  return !payment.subscription_id && (method === "donation" || method === "public_donation" || category === "donation");
 }
 
 function deriveSubscriptionStatus(subscriptions: SubscriptionRow[]) {
@@ -339,6 +345,31 @@ async function listMemberPayments(memberId: string | null | undefined) {
   directPayments.sort((a, b) =>
     new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime()
   );
+
+  const donationPaymentIds = directPayments
+    .filter((row) => isDonationPayment(row as PaymentRow))
+    .map((row) => row.id);
+  if (donationPaymentIds.length > 0) {
+    try {
+      const { rows: feeRows } = await rawQuery<{ payment_id: string; fee_amount: string }>(
+        `SELECT payment_id, COALESCE(SUM(fee_amount), 0)::text AS fee_amount
+         FROM platform_fee_collections
+         WHERE payment_id = ANY($1::uuid[])
+         GROUP BY payment_id`,
+        [donationPaymentIds],
+      );
+      const feeByPayment = new Map(feeRows.map((row) => [row.payment_id, toAmount(row.fee_amount)]));
+      for (const payment of directPayments) {
+        if (!isDonationPayment(payment as PaymentRow)) continue;
+        const fee = feeByPayment.get(payment.id) || 0;
+        if (fee > 0) {
+          payment.amount = Math.max(0, toAmount(payment.amount) - fee);
+        }
+      }
+    } catch (feeErr) {
+      logger.warn({ err: feeErr, memberId }, "payment fee adjustment failed; falling back to stored amounts");
+    }
+  }
 
   const normalized = directPayments.map((row) => ({
     ...row,

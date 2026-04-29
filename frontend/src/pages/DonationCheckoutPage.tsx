@@ -47,54 +47,28 @@ export default function DonationCheckoutPage({ isLoggedIn = false }: { isLoggedI
 
   const downloadReceipt = useCallback(async () => {
     if (!state || !successTxnId) return;
-    if (isLoggedIn && token && successPaymentId) {
-      try {
-        const blob = await apiBlobRequest(`/api/payments/${successPaymentId}/receipt`, { token });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `receipt-${successReceiptNumber || successPaymentId.slice(0, 8)}.pdf`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-        return;
-      } catch {
-        // Fall back to a local acknowledgement so the donor is not stranded.
-      }
+    if (!successPaymentId || !successReceiptNumber) {
+      setError("Failed to download receipt");
+      return;
     }
-    const receiptFeePct = Number(state.platformFeePercent || 0);
-    const receiptFeeAmount = state.platformFeeEnabled ? Math.round(state.amount * receiptFeePct) / 100 : 0;
-    const receiptTotalAmount = state.amount + receiptFeeAmount;
-    const lines = [
-      "═══════════════════════════════════════",
-      "        DONATION RECEIPT",
-      "═══════════════════════════════════════",
-      "",
-      `Date:           ${new Date().toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}`,
-      `Church:         ${state.churchName}`,
-      `Fund:           ${state.fund}`,
-      `Amount Paid:    ₹${receiptTotalAmount.toLocaleString("en-IN")}`,
-      `Transaction ID: ${successTxnId}`,
-      "",
-      `Donor Name:     ${state.donorName || "Anonymous"}`,
-      `Donor Email:    ${state.donorEmail || "-"}`,
-      `Donor Phone:    ${state.donorPhone || "-"}`,
-      state.message ? `Message:        ${state.message}` : "",
-      "",
-      "═══════════════════════════════════════",
-      "  Thank you for your generous gift!",
-      "  Powered by Shalom Church Platform",
-      "═══════════════════════════════════════",
-    ].filter(Boolean).join("\n");
-    const blob = new Blob([lines], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `donation-receipt-${successTxnId.slice(0, 12)}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [isLoggedIn, state, successPaymentId, successReceiptNumber, successTxnId, token]);
+
+    try {
+      const receiptPath = isLoggedIn && token
+        ? `/api/payments/${successPaymentId}/receipt`
+        : `/api/payments/public/${successPaymentId}/receipt?receipt_number=${encodeURIComponent(successReceiptNumber)}`;
+      const blob = await apiBlobRequest(receiptPath, isLoggedIn && token ? { token } : {});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `receipt-${successReceiptNumber}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError("Failed to download receipt");
+    }
+  }, [isLoggedIn, state, successPaymentId, successReceiptNumber, successTxnId, t, token]);
 
   if (!state || !state.amount) {
     return <Navigate to="/donate" replace />;
@@ -243,6 +217,7 @@ export default function DonationCheckoutPage({ isLoggedIn = false }: { isLoggedI
           <button className="btn btn-primary" onClick={downloadReceipt} style={{ marginBottom: "0.75rem", width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: "0.5rem" }}>
             <Download size={16} /> {t("donation.saveReceipt")}
           </button>
+          {error ? <div className="notice notice-error" style={{ marginBottom: "0.75rem" }}>{error}</div> : null}
 
           <div className="public-donation-success-actions">
             <button className="btn btn-primary" onClick={() => navigate("/donate")}>

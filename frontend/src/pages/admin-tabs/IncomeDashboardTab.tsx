@@ -155,6 +155,7 @@ function MonthlyGrowthLine({
 }) {
   const hasData = data.some((row) => row.total > 0);
   if (!hasData) return <EmptyAnalyticsChart label={emptyLabel} />;
+  const showPlatformFee = data.some((row) => Number(row.platform_fee || 0) > 0);
 
   return (
     <div className="income-analytics-chart income-analytics-chart-wide">
@@ -167,7 +168,7 @@ function MonthlyGrowthLine({
           <Legend verticalAlign="bottom" height={36} iconType="line" />
           <Line type="monotone" dataKey="subscription" stroke="#2563eb" strokeWidth={2.5} dot={false} name={labels.subscription} />
           <Line type="monotone" dataKey="donation" stroke="#16a34a" strokeWidth={2.5} dot={false} name={labels.donation} />
-          <Line type="monotone" dataKey="platform_fee" stroke="#f59e0b" strokeWidth={2.5} dot={false} name={labels.platformFee} />
+          {showPlatformFee ? <Line type="monotone" dataKey="platform_fee" stroke="#f59e0b" strokeWidth={2.5} dot={false} name={labels.platformFee} /> : null}
         </LineChart>
       </ResponsiveContainer>
     </div>

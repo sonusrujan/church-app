@@ -296,7 +296,7 @@ router.get(
       const period = typeof req.query.period === "string" ? req.query.period : undefined;
       const analytics = isPlatformScope
         ? await getPlatformIncomeAnalytics(period)
-        : await getChurchIncomeAnalytics(churchId, period);
+        : await getChurchIncomeAnalytics(churchId, period, { includePlatformFees: isSuperAdminRequest(req) });
       return res.json({ church_id: churchId || "all", ...analytics });
     } catch (err: any) {
       return res.status(400).json({ error: safeErrorMessage(err, "Failed to load income analytics") });

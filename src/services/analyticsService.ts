@@ -58,8 +58,26 @@ function appSuccessfulPaymentWhere(alias: string) {
   `;
 }
 
+function paymentIsDonationSql(alias: string) {
+  return `
+    (
+      LOWER(COALESCE(${alias}.payment_method, '')) IN ('donation', 'public_donation')
+      OR LOWER(COALESCE(${alias}.payment_category, '')) = 'donation'
+    )
+  `;
+}
+
+function churchPaymentAmount(alias = "p", feeAlias = "f") {
+  return `
+    CASE
+      WHEN ${paymentIsDonationSql(alias)} THEN GREATEST(${alias}.amount - COALESCE(${feeAlias}.fee_amount, 0), 0)
+      ELSE ${alias}.amount
+    END
+  `;
+}
+
 function netPaymentAmount(alias = "p", feeAlias = "f") {
-  return `GREATEST(${alias}.amount - COALESCE(${feeAlias}.fee_amount, 0), 0)`;
+  return churchPaymentAmount(alias, feeAlias);
 }
 
 function analyticsScope(churchId?: string | null) {
@@ -564,11 +582,13 @@ export async function getPlatformIncomeDetail() {
 async function getIncomeAnalyticsForScope(
   churchId: string | null,
   requestedPeriod?: string,
+  options: { includePlatformFees?: boolean } = {},
 ): Promise<IncomeAnalytics> {
   const period = normalizeIncomeAnalyticsPeriod(requestedPeriod);
   const scope = analyticsScope(churchId);
   const params = [...scope.params, period, TZ];
   const bounds = periodBoundsSql(scope.periodIndex, scope.tzIndex);
+  const includePlatformFees = options.includePlatformFees ?? !churchId;
 
   try {
     const { rows: revenueRows } = await rawQuery<{ label: string; amount: string; cnt: string; sort_order: number }>(`
@@ -925,10 +945,14 @@ async function getIncomeAnalyticsForScope(
     const expected = money(collection.expected);
     const collected = money(collection.collected);
 
+    const revenueMix = revenueRows
+      .filter((r) => includePlatformFees || r.label !== "Platform fees")
+      .map((r) => ({ label: r.label, amount: money(r.amount), count: count(r.cnt) }));
+
     return {
       period,
       scope: churchId ? "church" : "platform",
-      revenue_mix: revenueRows.map((r) => ({ label: r.label, amount: money(r.amount), count: count(r.cnt) })),
+      revenue_mix: revenueMix,
       collection_rate: {
         expected,
         collected,
@@ -943,13 +967,18 @@ async function getIncomeAnalyticsForScope(
       aging_ledger: agingRows.map((r) => ({ bucket: r.bucket, amount: money(r.amount), count: count(r.cnt) })),
       donation_funds: fundRows.map((r) => ({ fund: r.fund, amount: money(r.amount), count: count(r.cnt) })),
       payment_methods: methodRows.map((r) => ({ method: r.method, amount: money(r.amount), count: count(r.cnt) })),
-      monthly_growth: growthRows.map((r) => ({
-        month: r.month,
-        subscription: money(r.subscription),
-        donation: money(r.donation),
-        platform_fee: money(r.platform_fee),
-        total: money(r.total),
-      })),
+      monthly_growth: growthRows.map((r) => {
+        const subscription = money(r.subscription);
+        const donation = money(r.donation);
+        const platformFee = includePlatformFees ? money(r.platform_fee) : 0;
+        return {
+          month: r.month,
+          subscription,
+          donation,
+          platform_fee: platformFee,
+          total: includePlatformFees ? money(r.total) : money(subscription + donation),
+        };
+      }),
       payment_funnel: funnelRows.map((r) => ({ stage: r.stage, count: count(r.cnt), amount: money(r.amount) })),
       donor_bands: donorRows.map((r) => ({ band: r.band, donors: count(r.donors), amount: money(r.amount) })),
     };
@@ -959,12 +988,16 @@ async function getIncomeAnalyticsForScope(
   }
 }
 
-export async function getChurchIncomeAnalytics(churchId: string, period?: string): Promise<IncomeAnalytics> {
-  return getIncomeAnalyticsForScope(churchId, period);
+export async function getChurchIncomeAnalytics(
+  churchId: string,
+  period?: string,
+  options: { includePlatformFees?: boolean } = {},
+): Promise<IncomeAnalytics> {
+  return getIncomeAnalyticsForScope(churchId, period, options);
 }
 
 export async function getPlatformIncomeAnalytics(period?: string): Promise<IncomeAnalytics> {
-  return getIncomeAnalyticsForScope(null, period);
+  return getIncomeAnalyticsForScope(null, period, { includePlatformFees: true });
 }
 
 // ── Rich Payment Report (CSV) ──
@@ -1026,6 +1059,12 @@ export async function generatePaymentReport(
   }
 
   const { rows } = await rawQuery<PaymentReportRow>(`
+    WITH fee_by_payment AS (
+      SELECT payment_id, COALESCE(SUM(fee_amount), 0) AS fee_amount
+      FROM platform_fee_collections
+      WHERE church_id = $1
+      GROUP BY payment_id
+    )
     SELECT
       to_char(p.payment_date AT TIME ZONE $2, 'YYYY-MM-DD HH24:MI') AS payment_date,
       COALESCE(m.full_name, 'Public donor') AS member_name,
@@ -1033,7 +1072,7 @@ export async function generatePaymentReport(
       COALESCE(m.email, '') AS email,
       COALESCE(m.phone_number, '') AS phone,
       COALESCE(p.payment_method, '') AS payment_method,
-      p.amount::text AS amount,
+      ${churchPaymentAmount()}::text AS amount,
       COALESCE(p.payment_status, '') AS payment_status,
       p.receipt_number,
       p.transaction_id,
@@ -1057,6 +1096,7 @@ export async function generatePaymentReport(
     JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
     LEFT JOIN members m ON m.id = p.member_id AND m.deleted_at IS NULL
     LEFT JOIN subscriptions s ON s.id = p.subscription_id
+    LEFT JOIN fee_by_payment f ON f.payment_id = p.id
     WHERE ${appSuccessfulPaymentWhere("p")}
       AND p.church_id = $1
     ${dateFilter}

@@ -1,4 +1,6 @@
 import { randomBytes } from "crypto";
+import { existsSync, readdirSync } from "fs";
+import path from "path";
 import PDFDocument from "pdfkit";
 
 export type ReceiptDocumentInput = {
@@ -42,6 +44,46 @@ function formatAmount(amount: number) {
     return "INR 0.00";
   }
   return `INR ${numeric.toFixed(2)}`;
+}
+
+let cachedShalomLogoPath: string | null | undefined;
+
+function findShalomLogoPath() {
+  if (cachedShalomLogoPath !== undefined) return cachedShalomLogoPath;
+
+  const directCandidates = [
+    path.resolve(process.cwd(), "frontend", "src", "assets", "shalom-logo.png"),
+    path.resolve(process.cwd(), "public", "shalom-logo.png"),
+    path.resolve(process.cwd(), "public", "assets", "shalom-logo.png"),
+  ];
+
+  for (const candidate of directCandidates) {
+    if (existsSync(candidate)) {
+      cachedShalomLogoPath = candidate;
+      return cachedShalomLogoPath;
+    }
+  }
+
+  const assetDirs = [
+    path.resolve(process.cwd(), "public", "assets"),
+    path.resolve(process.cwd(), "frontend", "dist", "assets"),
+  ];
+
+  for (const dir of assetDirs) {
+    try {
+      if (!existsSync(dir)) continue;
+      const logo = readdirSync(dir).find((file) => /^shalom-logo.*\.png$/i.test(file));
+      if (logo) {
+        cachedShalomLogoPath = path.join(dir, logo);
+        return cachedShalomLogoPath;
+      }
+    } catch {
+      // Ignore missing or unreadable asset folders; receipts still render.
+    }
+  }
+
+  cachedShalomLogoPath = null;
+  return cachedShalomLogoPath;
 }
 
 function amountInWords(amount: number): string {
@@ -118,6 +160,16 @@ export function generateReceiptPdfBuffer(input: ReceiptDocumentInput): Promise<B
     doc.on("error", (err) => {
       reject(err);
     });
+
+    const logoPath = findShalomLogoPath();
+    if (logoPath) {
+      try {
+        doc.image(logoPath, doc.page.width / 2 - 32, doc.y, { fit: [64, 64] });
+        doc.moveDown(4.2);
+      } catch {
+        doc.moveDown(0.2);
+      }
+    }
 
     // ── Header: tenant-branded ──
     const displayName = input.church_legal_name || input.church_name || "Church";

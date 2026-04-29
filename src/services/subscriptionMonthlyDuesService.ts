@@ -237,7 +237,12 @@ export async function listMonthlyHistoryForMember(input: {
     const offsetIdx = params.push(safeOffset);
 
     const sql = `
-      WITH dues AS (
+      WITH fee_by_payment AS (
+        SELECT payment_id, COALESCE(SUM(fee_amount), 0) AS fee_amount
+        FROM platform_fee_collections
+        GROUP BY payment_id
+      ),
+      dues AS (
         SELECT smd.id::text AS id,
                smd.due_month::date AS month_year,
                smd.status AS due_status,
@@ -265,7 +270,7 @@ export async function listMonthlyHistoryForMember(input: {
                NULL::uuid AS subscription_id,
                COALESCE(m.full_name, 'Member') AS person_name,
                p.id AS payment_id,
-               p.amount::numeric AS paid_amount,
+               GREATEST(p.amount - COALESCE(f.fee_amount, 0), 0)::numeric AS paid_amount,
                p.payment_date::timestamptz AS payment_date,
                p.receipt_number,
                p.payment_status,
@@ -273,6 +278,7 @@ export async function listMonthlyHistoryForMember(input: {
                p.fund_name AS fund_name
         FROM payments p
         LEFT JOIN members m ON m.id = p.member_id
+        LEFT JOIN fee_by_payment f ON f.payment_id = p.id
         WHERE p.member_id = $1
           AND p.subscription_id IS NULL
           AND p.payment_status = 'success'${personFilterDonations}${fromDateFilterDonations}
