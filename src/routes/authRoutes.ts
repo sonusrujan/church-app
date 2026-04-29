@@ -111,6 +111,15 @@ router.get("/me", requireAuth, async (req: AuthRequest, res) => {
     if (!profile) {
       return res.status(403).json({ error: "This account is not registered" });
     }
+    if (profile.id !== req.user.id && profile.auth_user_id !== req.user.id) {
+      logger.error(
+        { tokenUserId: req.user.id, profileId: profile.id },
+        "Auth identity mismatch: /me resolved a different profile than JWT subject"
+      );
+      await revokeAllRefreshTokens(req.user.id).catch(() => {});
+      res.clearCookie("refresh_token", clearRefreshCookieOptions());
+      return res.status(401).json({ error: "Session identity mismatch. Please sign in again." });
+    }
 
     // Block login for members who are added as someone's family dependent
     if (!isSuperAdminEmail(req.user.email, req.user.phone)) {
@@ -180,7 +189,7 @@ router.get("/member-dashboard", requireAuth, async (req: AuthRequest, res) => {
       return res.status(401).json({ error: "Unauthenticated" });
     }
 
-    const dashboard = await getMemberDashboardByEmail(req.user.email, req.user.phone);
+    const dashboard = await getMemberDashboardByEmail(req.user.email, req.user.phone, req.user.id, req.user.church_id);
     if (!dashboard) {
       return res.status(403).json({ error: "This account is not registered" });
     }
@@ -320,6 +329,9 @@ router.post("/family-members", requireAuth, requireRegisteredUser, validate(addF
 
     const result = await addFamilyMemberForCurrentUser({
       email: req.user.email,
+      phone: req.user.phone,
+      authUserId: req.user.id,
+      churchId: req.user.church_id,
       full_name,
       gender: typeof gender === "string" ? gender : undefined,
       relation: typeof relation === "string" ? relation : undefined,
@@ -425,6 +437,8 @@ router.patch("/family-members/:id", requireAuth, requireRegisteredUser, validate
     const updated = await updateFamilyMember({
       email: req.user.email,
       phone: req.user.phone,
+      authUserId: req.user.id,
+      churchId: req.user.church_id,
       family_member_id: familyMemberId,
       full_name: typeof full_name === "string" ? full_name : undefined,
       gender: typeof gender === "string" ? gender : undefined,
@@ -456,7 +470,7 @@ router.delete("/family-members/:id", requireAuth, requireRegisteredUser, async (
       return res.status(400).json({ error: "Invalid family member ID" });
     }
 
-    const result = await deleteFamilyMember(req.user.email, familyMemberId);
+    const result = await deleteFamilyMember(req.user.email, familyMemberId, req.user.id, req.user.phone, req.user.church_id);
     persistAuditLog(req, "family_member.delete", "family_member", familyMemberId, {});
     return res.json(result);
   } catch (err: any) {
@@ -475,7 +489,7 @@ router.get("/family-members/:id/profile", requireAuth, requireRegisteredUser, as
       return res.status(400).json({ error: "Invalid family member ID" });
     }
 
-    const dashboard = await getMemberDashboardByEmail(req.user.email, req.user.phone);
+    const dashboard = await getMemberDashboardByEmail(req.user.email, req.user.phone, req.user.id, req.user.church_id);
     if (!dashboard?.member) {
       return res.status(400).json({ error: "Member profile not found" });
     }
@@ -1027,7 +1041,7 @@ router.get("/export-my-data", requireAuth, async (req: AuthRequest, res) => {
       return res.status(403).json({ error: "No email or phone linked to your account." });
     }
 
-    const dashboard = await getMemberDashboardByEmail(userEmail, userPhone);
+    const dashboard = await getMemberDashboardByEmail(userEmail, userPhone, req.user.id, req.user.church_id);
     if (!dashboard) {
       return res.status(403).json({ error: "No member record found for this account." });
     }

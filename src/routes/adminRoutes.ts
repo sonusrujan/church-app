@@ -15,11 +15,63 @@ import {
   searchAdmins,
   updateAdminById,
 } from "../services/adminService";
-import { getChurchIncomeSummary, getPlatformIncomeSummary, getChurchGrowthMetrics, getChurchIncomeDetail, getPlatformIncomeDetail, generatePaymentReport } from "../services/analyticsService";
+import {
+  generatePaymentReport,
+  getChurchGrowthMetrics,
+  getChurchIncomeAnalytics,
+  getChurchIncomeDetail,
+  getChurchIncomeSummary,
+  getPlatformIncomeAnalytics,
+  getPlatformIncomeDetail,
+  getPlatformIncomeSummary,
+} from "../services/analyticsService";
 import { logSuperAdminAudit } from "../utils/superAdminAudit";
 import { persistAuditLog } from "../utils/auditLog";
+import { rlsStorage } from "../middleware/rlsContext";
 
 const router = Router();
+
+function isSuperAdminRequest(req: AuthRequest) {
+  return req.user?.role === "super_admin" || isSuperAdminEmail(req.user?.email || "", req.user?.phone);
+}
+
+function isIncomeAdminRequest(req: AuthRequest) {
+  return req.user?.role === "admin" || isSuperAdminRequest(req);
+}
+
+function setRequestRlsScope(churchId: string | null) {
+  const store = rlsStorage.getStore();
+  if (store) store.churchId = churchId;
+}
+
+function getRequestedChurchId(req: AuthRequest) {
+  const requestedChurchId =
+    typeof req.query.church_id === "string" && req.query.church_id.trim()
+      ? req.query.church_id.trim()
+      : "";
+  if (requestedChurchId && !UUID_REGEX.test(requestedChurchId)) {
+    throw new Error("Invalid church_id format");
+  }
+  return requestedChurchId;
+}
+
+function resolveIncomeScope(req: AuthRequest, allowPlatform: boolean) {
+  const superAdmin = isSuperAdminRequest(req);
+  const requestedChurchId = getRequestedChurchId(req);
+  const churchId = superAdmin
+    ? requestedChurchId || (allowPlatform ? "" : req.user?.church_id || "")
+    : req.user?.church_id || "";
+
+  if (!churchId && !allowPlatform) {
+    throw new Error("church_id is required");
+  }
+  if (!churchId && !superAdmin) {
+    throw new Error("church_id is required");
+  }
+
+  setRequestRlsScope(churchId || null);
+  return { churchId, isPlatformScope: superAdmin && allowPlatform && !requestedChurchId };
+}
 
 router.get(
   "/list",
@@ -163,24 +215,12 @@ router.get(
         return res.status(401).json({ error: "Unauthenticated" });
       }
 
-      if (req.user.role !== "admin" && !isSuperAdminEmail(req.user.email, req.user.phone)) {
+      if (!isIncomeAdminRequest(req)) {
         return res.status(403).json({ error: "Only admin can view income summary" });
       }
 
-      const requestedChurchId =
-        typeof req.query.church_id === "string" && req.query.church_id.trim()
-          ? req.query.church_id.trim()
-          : "";
-
-      const churchId = isSuperAdminEmail(req.user.email, req.user.phone)
-        ? requestedChurchId || req.user.church_id
-        : req.user.church_id;
-
-      if (!churchId && !isSuperAdminEmail(req.user.email, req.user.phone)) {
-        return res.status(400).json({ error: "church_id is required" });
-      }
-
-      if (!churchId) {
+      const { churchId, isPlatformScope } = resolveIncomeScope(req, true);
+      if (isPlatformScope) {
         const summary = await getPlatformIncomeSummary();
         return res.json({ church_id: "all", ...summary });
       }
@@ -203,22 +243,11 @@ router.get(
         return res.status(401).json({ error: "Unauthenticated" });
       }
 
-      if (req.user.role !== "admin" && !isSuperAdminEmail(req.user.email, req.user.phone)) {
+      if (!isIncomeAdminRequest(req)) {
         return res.status(403).json({ error: "Only admin can view growth metrics" });
       }
 
-      const requestedChurchId =
-        typeof req.query.church_id === "string" && req.query.church_id.trim()
-          ? req.query.church_id.trim()
-          : "";
-
-      const churchId = isSuperAdminEmail(req.user.email, req.user.phone)
-        ? requestedChurchId || req.user.church_id
-        : req.user.church_id;
-
-      if (!churchId) {
-        return res.status(400).json({ error: "church_id is required" });
-      }
+      const { churchId } = resolveIncomeScope(req, false);
 
       const metrics = await getChurchGrowthMetrics(churchId);
       return res.json({ church_id: churchId, ...metrics });
@@ -237,24 +266,40 @@ router.get(
       if (!req.user) {
         return res.status(401).json({ error: "Unauthenticated" });
       }
-      if (req.user.role !== "admin" && !isSuperAdminEmail(req.user.email, req.user.phone)) {
+      if (!isIncomeAdminRequest(req)) {
         return res.status(403).json({ error: "Only admin can view income detail" });
       }
-      const requestedChurchId =
-        typeof req.query.church_id === "string" && req.query.church_id.trim()
-          ? req.query.church_id.trim()
-          : "";
-      const churchId = isSuperAdminEmail(req.user.email, req.user.phone)
-        ? requestedChurchId || req.user.church_id
-        : req.user.church_id;
-      if (!churchId && !isSuperAdminEmail(req.user.email, req.user.phone)) {
-        return res.status(400).json({ error: "church_id is required" });
-      }
 
-      const detail = churchId ? await getChurchIncomeDetail(churchId) : await getPlatformIncomeDetail();
+      const { churchId, isPlatformScope } = resolveIncomeScope(req, true);
+      const detail = isPlatformScope ? await getPlatformIncomeDetail() : await getChurchIncomeDetail(churchId);
       return res.json({ church_id: churchId || "all", ...detail });
     } catch (err: any) {
       return res.status(400).json({ error: safeErrorMessage(err, "Failed to load income detail") });
+    }
+  }
+);
+
+router.get(
+  "/income-analytics",
+  requireAuth,
+  requireRegisteredUser,
+  async (req: AuthRequest, res) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: "Unauthenticated" });
+      }
+      if (!isIncomeAdminRequest(req)) {
+        return res.status(403).json({ error: "Only admin can view income analytics" });
+      }
+
+      const { churchId, isPlatformScope } = resolveIncomeScope(req, true);
+      const period = typeof req.query.period === "string" ? req.query.period : undefined;
+      const analytics = isPlatformScope
+        ? await getPlatformIncomeAnalytics(period)
+        : await getChurchIncomeAnalytics(churchId, period);
+      return res.json({ church_id: churchId || "all", ...analytics });
+    } catch (err: any) {
+      return res.status(400).json({ error: safeErrorMessage(err, "Failed to load income analytics") });
     }
   }
 );
@@ -268,19 +313,10 @@ router.get(
       if (!req.user) {
         return res.status(401).json({ error: "Unauthenticated" });
       }
-      if (req.user.role !== "admin" && !isSuperAdminEmail(req.user.email, req.user.phone)) {
+      if (!isIncomeAdminRequest(req)) {
         return res.status(403).json({ error: "Only admin can download reports" });
       }
-      const requestedChurchId =
-        typeof req.query.church_id === "string" && req.query.church_id.trim()
-          ? req.query.church_id.trim()
-          : "";
-      const churchId = isSuperAdminEmail(req.user.email, req.user.phone)
-        ? requestedChurchId || req.user.church_id
-        : req.user.church_id;
-      if (!churchId) {
-        return res.status(400).json({ error: "church_id is required" });
-      }
+      const { churchId } = resolveIncomeScope(req, false);
 
       const period = (req.query.period as string) || "monthly";
       if (!["daily", "monthly", "yearly", "custom"].includes(period)) {

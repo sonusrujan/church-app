@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useApp } from "../context/AppContext";
 import { apiRequest } from "../lib/api";
 import { useI18n } from "../i18n";
@@ -6,7 +6,6 @@ import PhotoUpload from "../components/PhotoUpload";
 import Pagination, { paginate, totalPages } from "../components/Pagination";
 import {
   formatDate,
-  formatAmount,
   initials,
   isValidIndianPhone,
   stripIndianPrefix,
@@ -50,50 +49,6 @@ interface SpecialDateRow {
   created_at: string;
 }
 
-function toDateInputValue(value?: string | null) {
-  if (!value) return "";
-  const isoDate = value.match(/^(\d{4}-\d{2}-\d{2})/);
-  if (isoDate) return isoDate[1];
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "";
-  const yyyy = parsed.getFullYear();
-  const mm = String(parsed.getMonth() + 1).padStart(2, "0");
-  const dd = String(parsed.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-function compactKey(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
-function normalizeOccupationValue(value: string | null | undefined, options: string[]) {
-  if (!value) return "";
-  return options.find((option) => compactKey(option) === compactKey(value)) || value;
-}
-
-function optionsWithCurrent(options: string[], current: string) {
-  return current && !options.includes(current) ? [current, ...options] : options;
-}
-
-function titleCaseStatus(status: string | null | undefined) {
-  if (!status) return "Unknown";
-  return status
-    .split(/[_\s-]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
-    .join(" ");
-}
-
-function formatBillingCycle(cycle: string | null | undefined) {
-  if (!cycle) return "Billing not set";
-  return titleCaseStatus(cycle);
-}
-
-const OCCUPATION_OPTIONS = [
-  "Farmer", "Teacher", "Business", "Government Employee", "Private Employee",
-  "Self-Employed", "Self Employed", "Student", "Retired", "Homemaker", "Pastor", "Other",
-];
-
 export default function ProfilePage() {
   const {
     token,
@@ -125,6 +80,11 @@ export default function ProfilePage() {
   const [profileConfirmationTaken, setProfileConfirmationTaken] = useState<boolean | null>(null);
   const [profileAge, setProfileAge] = useState("");
   const [profileEditing, setProfileEditing] = useState(false);
+
+  const occupationOptions = [
+    "Farmer", "Teacher", "Business", "Government Employee", "Private Employee",
+    "Self Employed", "Student", "Retired", "Homemaker", "Pastor", "Other",
+  ];
 
   // ── Phone change OTP state ──
   const [originalPhone, setOriginalPhone] = useState("");
@@ -174,14 +134,6 @@ export default function ProfilePage() {
   const [famPhoneVerified, setFamPhoneVerified] = useState(false);
   const [famPhoneOtpBusy, setFamPhoneOtpBusy] = useState(false);
   const famPhoneChanged = editLinkedPhone !== origLinkedPhone;
-  const occupationSelectOptions = useMemo(
-    () => optionsWithCurrent(OCCUPATION_OPTIONS, profileOccupation),
-    [profileOccupation],
-  );
-  const linkedOccupationSelectOptions = useMemo(
-    () => optionsWithCurrent(OCCUPATION_OPTIONS, editLinkedOccupation),
-    [editLinkedOccupation],
-  );
 
   // ── Special Dates ──
   const [specialDates, setSpecialDates] = useState<SpecialDateRow[]>([]);
@@ -303,8 +255,8 @@ export default function ProfilePage() {
     setOriginalPhone(phone);
     setProfileAltPhone(stripIndianPrefix(memberDashboard?.member?.alt_phone_number || ""));
     setProfileGender(memberDashboard?.member?.gender || "");
-    setProfileDob(toDateInputValue(memberDashboard?.member?.dob));
-    setProfileOccupation(normalizeOccupationValue(memberDashboard?.member?.occupation, OCCUPATION_OPTIONS));
+    setProfileDob(memberDashboard?.member?.dob || "");
+    setProfileOccupation(memberDashboard?.member?.occupation || "");
     setProfileConfirmationTaken(memberDashboard?.member?.confirmation_taken ?? null);
     setProfileAge(memberDashboard?.member?.age != null ? String(memberDashboard.member.age) : "");
     setProfileEditing(false);
@@ -333,8 +285,8 @@ export default function ProfilePage() {
     setProfilePhone(stripIndianPrefix(memberDashboard?.member?.phone_number || ""));
     setProfileAltPhone(stripIndianPrefix(memberDashboard?.member?.alt_phone_number || ""));
     setProfileGender(memberDashboard?.member?.gender || "");
-    setProfileDob(toDateInputValue(memberDashboard?.member?.dob));
-    setProfileOccupation(normalizeOccupationValue(memberDashboard?.member?.occupation, OCCUPATION_OPTIONS));
+    setProfileDob(memberDashboard?.member?.dob || "");
+    setProfileOccupation(memberDashboard?.member?.occupation || "");
     setProfileConfirmationTaken(memberDashboard?.member?.confirmation_taken ?? null);
     setProfileAge(memberDashboard?.member?.age != null ? String(memberDashboard.member.age) : "");
     setProfileEditing(false);
@@ -518,7 +470,7 @@ export default function ProfilePage() {
       setEditLinkedPhone(expandedProfile.phone_number || "");
       setOrigLinkedPhone(expandedProfile.phone_number || "");
       setEditLinkedAltPhone(expandedProfile.alt_phone_number || "");
-      setEditLinkedOccupation(normalizeOccupationValue(expandedProfile.occupation, OCCUPATION_OPTIONS));
+      setEditLinkedOccupation(expandedProfile.occupation || "");
       setEditLinkedConfirmation(expandedProfile.confirmation_taken);
     }
     // Reset family phone OTP state
@@ -568,7 +520,7 @@ export default function ProfilePage() {
         setEditLinkedPhone(resp.linked_profile.phone_number || "");
         setOrigLinkedPhone(resp.linked_profile.phone_number || "");
         setEditLinkedAltPhone(resp.linked_profile.alt_phone_number || "");
-        setEditLinkedOccupation(normalizeOccupationValue(resp.linked_profile.occupation, OCCUPATION_OPTIONS));
+        setEditLinkedOccupation(resp.linked_profile.occupation || "");
         setEditLinkedConfirmation(resp.linked_profile.confirmation_taken);
       }
     } catch {
@@ -691,7 +643,6 @@ export default function ProfilePage() {
   }
 
   const profileNameDisplay = profileName || userPhone || userEmail;
-  const approvedFamilyRequests = familyRequests.filter((request) => request.status === "approved").length;
 
   const relationOptions = [
     { value: "Spouse", label: t("profile.relationSpouse") },
@@ -712,7 +663,7 @@ export default function ProfilePage() {
   ];
 
   return (
-    <section className="page-grid profile-page-grid">
+    <section className="page-grid">
       {/* ── Profile Header Card ── */}
       <article className="panel panel-wide profile-header-card">
         <div className="profile-header">
@@ -757,7 +708,6 @@ export default function ProfilePage() {
                 </div>
               }
             />
-            <span className="profile-avatar-hint">{t("profile.changePhoto")}</span>
           </div>
           <div className="profile-header-info">
             <h2>{profileNameDisplay}</h2>
@@ -772,9 +722,9 @@ export default function ProfilePage() {
 
       {/* ── Profile Tab Bar ── */}
       <div className="profile-tabs panel-wide">
-        <button className={`profile-tab${activeProfileTab === "personal" ? " active" : ""}`} aria-pressed={activeProfileTab === "personal"} onClick={() => setActiveProfileTab("personal")}>{t("profile.tabPersonal")}</button>
-        {!isSuperAdmin && <button className={`profile-tab${activeProfileTab === "family" ? " active" : ""}`} aria-pressed={activeProfileTab === "family"} onClick={() => setActiveProfileTab("family")}>{t("profile.tabFamily")}</button>}
-        <button className={`profile-tab${activeProfileTab === "dates" ? " active" : ""}`} aria-pressed={activeProfileTab === "dates"} onClick={() => setActiveProfileTab("dates")}>{t("profile.tabDates")}</button>
+        <button className={`profile-tab${activeProfileTab === "personal" ? " active" : ""}`} onClick={() => setActiveProfileTab("personal")}>{t("profile.tabPersonal")}</button>
+        {!isSuperAdmin && <button className={`profile-tab${activeProfileTab === "family" ? " active" : ""}`} onClick={() => setActiveProfileTab("family")}>{t("profile.tabFamily")}</button>}
+        <button className={`profile-tab${activeProfileTab === "dates" ? " active" : ""}`} onClick={() => setActiveProfileTab("dates")}>{t("profile.tabDates")}</button>
       </div>
 
       {/* ── Personal Details ── */}
@@ -794,43 +744,43 @@ export default function ProfilePage() {
           <div className="detail-list" style={{ display: "grid", gap: "0.75rem", marginTop: "0.5rem" }}>
             <div className="detail-row">
               <span className="detail-label">{t("profile.fullName")}</span>
-              <span style={{ fontWeight: 600 }}>{profileName || t("common.notSet")}</span>
+              <span style={{ fontWeight: 600 }}>{profileName || "—"}</span>
             </div>
             <div className="detail-row">
               <span className="detail-label">{t("profile.phoneNumber")}</span>
-              <span style={{ fontWeight: 600 }}>{profilePhone ? `+91 ${profilePhone}` : t("common.notSet")}</span>
+              <span style={{ fontWeight: 600 }}>{profilePhone ? `+91 ${profilePhone}` : "—"}</span>
             </div>
             <div className="detail-row">
               <span className="detail-label">{t("profile.altPhone")}</span>
-              <span style={{ fontWeight: 600 }}>{profileAltPhone ? `+91 ${profileAltPhone}` : t("common.notSet")}</span>
+              <span style={{ fontWeight: 600 }}>{profileAltPhone ? `+91 ${profileAltPhone}` : "—"}</span>
             </div>
             <div className="detail-row">
               <span className="detail-label">{t("profile.address")}</span>
-              <span style={{ fontWeight: 600, whiteSpace: "pre-wrap" }}>{profileAddress || t("common.notSet")}</span>
+              <span style={{ fontWeight: 600, whiteSpace: "pre-wrap" }}>{profileAddress || "—"}</span>
             </div>
             <div className="detail-row">
               <span className="detail-label">{t("profile.gender")}</span>
-              <span style={{ fontWeight: 600 }}>{profileGender || t("common.notSet")}</span>
+              <span style={{ fontWeight: 600 }}>{profileGender || "—"}</span>
             </div>
             <div className="detail-row">
               <span className="detail-label">{t("profile.dateOfBirth")}</span>
-              <span style={{ fontWeight: 600 }}>{profileDob ? formatDate(profileDob, false) : t("common.notSet")}</span>
+              <span style={{ fontWeight: 600 }}>{profileDob ? formatDate(profileDob, false) : "—"}</span>
             </div>
             <div className="detail-row">
               <span className="detail-label">{t("profile.occupation")}</span>
-              <span style={{ fontWeight: 600 }}>{profileOccupation || t("common.notSet")}</span>
+              <span style={{ fontWeight: 600 }}>{profileOccupation || "—"}</span>
             </div>
             <div className="detail-row">
               <span className="detail-label">{t("profile.confirmationTaken")}</span>
-              <span style={{ fontWeight: 600 }}>{profileConfirmationTaken === true ? t("common.yes") : profileConfirmationTaken === false ? t("common.no") : t("common.notSet")}</span>
+              <span style={{ fontWeight: 600 }}>{profileConfirmationTaken === true ? t("common.yes") : profileConfirmationTaken === false ? t("common.no") : "—"}</span>
             </div>
             <div className="detail-row">
               <span className="detail-label">{t("profile.age")}</span>
-              <span style={{ fontWeight: 600 }}>{profileAge || t("common.notSet")}</span>
+              <span style={{ fontWeight: 600 }}>{profileAge || "—"}</span>
             </div>
             <div className="detail-row">
               <span className="detail-label">{t("profile.membershipId")}</span>
-              <span style={{ fontWeight: 600 }}>{memberDashboard?.member?.membership_id || t("common.notSet")}</span>
+              <span style={{ fontWeight: 600 }}>{memberDashboard?.member?.membership_id || "—"}</span>
             </div>
           </div>
         ) : (
@@ -995,7 +945,7 @@ export default function ProfilePage() {
                   onChange={(e) => setProfileOccupation(e.target.value)}
                 >
                   <option value="">{t("profile.selectOccupation")}</option>
-                  {occupationSelectOptions.map((o) => <option key={o} value={o}>{o}</option>)}
+                  {occupationOptions.map((o) => <option key={o} value={o}>{o}</option>)}
                 </select>
               </label>
               <label>
@@ -1177,7 +1127,7 @@ export default function ProfilePage() {
                                   {t("profile.occupation")}
                                   <select value={editLinkedOccupation} onChange={(e) => setEditLinkedOccupation(e.target.value)}>
                                     <option value="">{t("profile.selectOccupation")}</option>
-                                    {linkedOccupationSelectOptions.map((o) => <option key={o} value={o}>{o}</option>)}
+                                    {occupationOptions.map((o) => <option key={o} value={o}>{o}</option>)}
                                   </select>
                                 </label>
                                 <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
@@ -1249,12 +1199,7 @@ export default function ProfilePage() {
               <Pagination page={familyPage} total={totalPages(memberDashboard.family_members.length, ITEMS_PER_PAGE)} onPageChange={setFamilyPage} />
               </>
             ) : (
-              <div className="profile-empty-callout">
-                <p>{t("profile.noFamilyMembers")}</p>
-                {approvedFamilyRequests > 0 && (
-                  <span>{t("profile.approvedRequestsPendingLink", { count: approvedFamilyRequests })}</span>
-                )}
-              </div>
+              <p className="muted empty-state">{t("profile.noFamilyMembers")}</p>
             )}
           </div>
 
@@ -1398,7 +1343,7 @@ export default function ProfilePage() {
           {familyRequests.length > 0 && (
             <div style={{ marginTop: "1.5rem" }}>
               <h4>{t("profile.yourRequests")}</h4>
-              <div className="list-stack profile-request-list">
+              <div className="list-stack">
                 {familyRequests.map((fr) => (
                   <div key={fr.id} className="list-item">
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -1570,27 +1515,24 @@ export default function ProfilePage() {
                 <span className="profile-detail-value">{memberDashboard.member.membership_id}</span>
               </div>
             )}
+            <div className="profile-detail-card">
+              <span className="profile-detail-label">{t("profile.systemId")}</span>
+              <span className="profile-detail-value profile-detail-mono">{memberDashboard.member.id}</span>
+            </div>
             {paginate(memberDashboard.subscriptions || [], subsPage, ITEMS_PER_PAGE).map((sub) => (
-              <div key={sub.id} className="profile-detail-card profile-subscription-card">
-                <div className="profile-subscription-card-head">
-                  <span className="profile-detail-label">{sub.person_name || t("profile.subscriptionForSelf")}</span>
-                  <span className={`profile-status-chip profile-status-chip--${sub.status === "active" ? "active" : sub.status === "cancelled" ? "cancelled" : "pending"}`}>
-                    {titleCaseStatus(sub.status)}
-                  </span>
-                </div>
-                <span className="profile-detail-value">{sub.plan_name || t("profile.defaultPlan")}</span>
-                <div className="profile-subscription-meta">
-                  <span>{formatAmount(sub.monthly_amount ?? sub.amount)}</span>
-                  <span>{formatBillingCycle(sub.billing_cycle)}</span>
-                  <span>{sub.next_payment_date ? t("profile.nextDue", { date: formatDate(sub.next_payment_date, false) }) : t("profile.nextDueNotSet")}</span>
-                </div>
+              <div key={sub.id} className="profile-detail-card">
+                <span className="profile-detail-label">
+                  {t("profile.subscriptionLabel", { plan: sub.plan_name || t("profile.defaultPlan") })}
+                  {" "}
+                  <span style={{
+                    fontSize: "0.7rem", fontWeight: 600, padding: "0.1rem 0.35rem", borderRadius: "4px",
+                    background: sub.status === "active" ? "#e6f4ea" : sub.status === "cancelled" ? "#fde8e8" : "#fff8e1",
+                    color: sub.status === "active" ? "#1b7a3d" : sub.status === "cancelled" ? "#c0392b" : "#b8860b",
+                  }}>{sub.status}</span>
+                </span>
+                <span className="profile-detail-value profile-detail-mono">{sub.id}</span>
               </div>
             ))}
-            {!memberDashboard.subscriptions?.length && (
-              <div className="profile-empty-callout">
-                <p>{t("profile.noSubscriptions")}</p>
-              </div>
-            )}
           </div>
           {(memberDashboard.subscriptions?.length || 0) > ITEMS_PER_PAGE && (
             <Pagination page={subsPage} total={totalPages(memberDashboard.subscriptions?.length || 0, ITEMS_PER_PAGE)} onPageChange={setSubsPage} />

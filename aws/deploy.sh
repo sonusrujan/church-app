@@ -148,7 +148,7 @@ echo "🏗️  Building frontend..."
 FRONTEND_BUCKET="${APP_NAME}-frontend-${ACCOUNT_ID}"
 
 cd frontend
-VITE_API_URL="https://shalomapp.in" npm run build
+VITE_API_URL="${VITE_API_URL:-https://api.shalomapp.in}" npm run build
 aws s3 sync dist/ "s3://${FRONTEND_BUCKET}/" --delete
 cd ..
 

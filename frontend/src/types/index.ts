@@ -274,6 +274,32 @@ export type IncomeDetail = {
   total_income: { daily: number; monthly: number; yearly: number; count: number };
 };
 
+export type IncomeAnalyticsPeriod = "current_month" | "year_to_date" | "last_12_months";
+
+export type IncomeAnalytics = {
+  church_id: string;
+  period: IncomeAnalyticsPeriod;
+  scope: "church" | "platform";
+  revenue_mix: Array<{ label: string; amount: number; count: number }>;
+  collection_rate: {
+    expected: number;
+    collected: number;
+    overdue: number;
+    pending: number;
+    collection_rate: number;
+    expected_count: number;
+    collected_count: number;
+    overdue_count: number;
+    pending_count: number;
+  };
+  aging_ledger: Array<{ bucket: string; amount: number; count: number }>;
+  donation_funds: Array<{ fund: string; amount: number; count: number }>;
+  payment_methods: Array<{ method: string; amount: number; count: number }>;
+  monthly_growth: Array<{ month: string; subscription: number; donation: number; platform_fee: number; total: number }>;
+  payment_funnel: Array<{ stage: string; count: number; amount: number }>;
+  donor_bands: Array<{ band: string; donors: number; amount: number }>;
+};
+
 export type PastorRow = {
   id: string;
   church_id: string;

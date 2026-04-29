@@ -228,7 +228,7 @@ router.post("/cancellation-requests", requireAuth, requireRegisteredUser, valida
 
     // Get member from dashboard
     const { getMemberDashboardByEmail } = require("../services/userService");
-    const dashboard = await getMemberDashboardByEmail(req.user!.email, req.user!.phone);
+    const dashboard = await getMemberDashboardByEmail(req.user!.email, req.user!.phone, req.user!.id, req.user!.church_id);
 
     if (!dashboard?.member) {
       return res.status(400).json({ error: "Member profile not found." });
@@ -365,7 +365,7 @@ router.post("/cancellation-requests/batch-review", requireAuth, requireRegistere
 router.post("/family-create-requests", requireAuth, requireRegisteredUser, validate(familyCreateRequestSchema), async (req: AuthRequest, res: Response) => {
   try {
     const { getMemberDashboardByEmail } = require("../services/userService");
-    const dashboard = await getMemberDashboardByEmail(req.user!.email, req.user!.phone);
+    const dashboard = await getMemberDashboardByEmail(req.user!.email, req.user!.phone, req.user!.id, req.user!.church_id);
     if (!dashboard?.member) {
       return res.status(400).json({ error: "Member profile not found." });
     }
@@ -397,7 +397,7 @@ router.post("/family-create-requests", requireAuth, requireRegisteredUser, valid
 router.get("/family-create-requests/mine", requireAuth, requireRegisteredUser, async (req: AuthRequest, res: Response) => {
   try {
     const { getMemberDashboardByEmail } = require("../services/userService");
-    const dashboard = await getMemberDashboardByEmail(req.user!.email, req.user!.phone);
+    const dashboard = await getMemberDashboardByEmail(req.user!.email, req.user!.phone, req.user!.id, req.user!.church_id);
     if (!dashboard?.member) {
       return res.status(400).json({ error: "Member profile not found." });
     }
@@ -496,7 +496,7 @@ router.post("/account-deletion-requests", requireAuth, requireRegisteredUser, va
     const { reason } = req.body;
 
     const { getMemberDashboardByEmail } = require("../services/userService");
-    const dashboard = await getMemberDashboardByEmail(req.user!.email, req.user!.phone);
+    const dashboard = await getMemberDashboardByEmail(req.user!.email, req.user!.phone, req.user!.id, req.user!.church_id);
 
     if (!dashboard?.member) {
       return res.status(400).json({ error: "Member profile not found." });

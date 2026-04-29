@@ -4,6 +4,70 @@ import { logger } from "../utils/logger";
 const TZ = "Asia/Kolkata";
 const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const incomeAnalyticsPeriods = new Set(["current_month", "year_to_date", "last_12_months"]);
+
+export type IncomeAnalyticsPeriod = "current_month" | "year_to_date" | "last_12_months";
+
+export interface IncomeAnalytics {
+  period: IncomeAnalyticsPeriod;
+  scope: "church" | "platform";
+  revenue_mix: Array<{ label: string; amount: number; count: number }>;
+  collection_rate: {
+    expected: number;
+    collected: number;
+    overdue: number;
+    pending: number;
+    collection_rate: number;
+    expected_count: number;
+    collected_count: number;
+    overdue_count: number;
+    pending_count: number;
+  };
+  aging_ledger: Array<{ bucket: string; amount: number; count: number }>;
+  donation_funds: Array<{ fund: string; amount: number; count: number }>;
+  payment_methods: Array<{ method: string; amount: number; count: number }>;
+  monthly_growth: Array<{ month: string; subscription: number; donation: number; platform_fee: number; total: number }>;
+  payment_funnel: Array<{ stage: string; count: number; amount: number }>;
+  donor_bands: Array<{ band: string; donors: number; amount: number }>;
+}
+
+export function normalizeIncomeAnalyticsPeriod(period?: string): IncomeAnalyticsPeriod {
+  return incomeAnalyticsPeriods.has(period || "") ? period as IncomeAnalyticsPeriod : "current_month";
+}
+
+function money(value: unknown): number {
+  const next = Number(value || 0);
+  return Number(Number.isFinite(next) ? next.toFixed(2) : 0);
+}
+
+function count(value: unknown): number {
+  return Number(value || 0);
+}
+
+function analyticsScope(churchId?: string | null) {
+  const scoped = !!churchId;
+  return {
+    paymentWhere: scoped ? "p.church_id = $1::uuid" : "TRUE",
+    dueWhere: scoped ? "smd.church_id = $1::uuid" : "TRUE",
+    feeWhere: scoped ? "pfc.church_id = $1::uuid" : "TRUE",
+    reconciliationWhere: scoped ? "prq.church_id = $1::uuid" : "TRUE",
+    params: scoped ? [churchId] : [],
+    periodIndex: scoped ? 2 : 1,
+    tzIndex: scoped ? 3 : 2,
+  };
+}
+
+function periodBoundsSql(periodIndex: number, tzIndex: number) {
+  return `
+    SELECT
+      CASE $${periodIndex}
+        WHEN 'year_to_date' THEN date_trunc('year', NOW() AT TIME ZONE $${tzIndex})::date
+        WHEN 'last_12_months' THEN (date_trunc('month', NOW() AT TIME ZONE $${tzIndex}) - INTERVAL '11 months')::date
+        ELSE date_trunc('month', NOW() AT TIME ZONE $${tzIndex})::date
+      END AS start_date,
+      ((NOW() AT TIME ZONE $${tzIndex})::date + INTERVAL '1 day')::date AS end_date
+  `;
+}
 
 export async function getChurchIncomeSummary(churchId: string) {
   try {
@@ -20,8 +84,9 @@ export async function getChurchIncomeSummary(churchId: string) {
         COALESCE(SUM(CASE WHEN date_trunc('year', p.payment_date AT TIME ZONE $2) = date_trunc('year', NOW() AT TIME ZONE $2) THEN p.amount END), 0) AS yearly_income,
         COUNT(*)::text AS successful_payments_count
       FROM payments p
-      JOIN members m ON m.id = p.member_id AND m.church_id = $1 AND m.deleted_at IS NULL
+      JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
       WHERE LOWER(p.payment_status) = 'success'
+        AND p.church_id = $1
     `, [churchId, TZ]);
 
     const summary = rows[0] || { daily_income: "0", monthly_income: "0", yearly_income: "0", successful_payments_count: "0" };
@@ -32,8 +97,9 @@ export async function getChurchIncomeSummary(churchId: string) {
         EXTRACT(DOW FROM p.payment_date AT TIME ZONE $2)::int AS dow,
         COALESCE(SUM(p.amount), 0) AS income
       FROM payments p
-      JOIN members m ON m.id = p.member_id AND m.church_id = $1 AND m.deleted_at IS NULL
+      JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
       WHERE LOWER(p.payment_status) = 'success'
+        AND p.church_id = $1
         AND (p.payment_date AT TIME ZONE $2)::date >= date_trunc('week', NOW() AT TIME ZONE $2)::date
         AND p.payment_date <= NOW()
       GROUP BY 1
@@ -74,8 +140,7 @@ export async function getPlatformIncomeSummary() {
         COALESCE(SUM(CASE WHEN date_trunc('year', p.payment_date AT TIME ZONE $1) = date_trunc('year', NOW() AT TIME ZONE $1) THEN p.amount END), 0) AS yearly_income,
         COUNT(*)::text AS successful_payments_count
       FROM payments p
-      JOIN members m ON m.id = p.member_id AND m.deleted_at IS NULL
-      JOIN churches c ON c.id = m.church_id AND c.deleted_at IS NULL
+      JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
       WHERE LOWER(p.payment_status) = 'success'
     `, [TZ]);
 
@@ -86,8 +151,7 @@ export async function getPlatformIncomeSummary() {
         EXTRACT(DOW FROM p.payment_date AT TIME ZONE $1)::int AS dow,
         COALESCE(SUM(p.amount), 0) AS income
       FROM payments p
-      JOIN members m ON m.id = p.member_id AND m.deleted_at IS NULL
-      JOIN churches c ON c.id = m.church_id AND c.deleted_at IS NULL
+      JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
       WHERE LOWER(p.payment_status) = 'success'
         AND (p.payment_date AT TIME ZONE $1)::date >= date_trunc('week', NOW() AT TIME ZONE $1)::date
         AND p.payment_date <= NOW()
@@ -173,14 +237,18 @@ export async function getChurchIncomeDetail(churchId: string) {
       daily: string; monthly: string; yearly: string; cnt: string;
     }>(`
       SELECT
-        (LOWER(p.payment_method) = 'donation') AS is_donation,
+        (
+          LOWER(COALESCE(p.payment_method, '')) IN ('donation', 'public_donation')
+          OR LOWER(COALESCE(p.payment_category, '')) = 'donation'
+        ) AS is_donation,
         COALESCE(SUM(CASE WHEN (p.payment_date AT TIME ZONE $2)::date = (NOW() AT TIME ZONE $2)::date THEN p.amount END), 0) AS daily,
         COALESCE(SUM(CASE WHEN date_trunc('month', p.payment_date AT TIME ZONE $2) = date_trunc('month', NOW() AT TIME ZONE $2) THEN p.amount END), 0) AS monthly,
         COALESCE(SUM(CASE WHEN date_trunc('year', p.payment_date AT TIME ZONE $2) = date_trunc('year', NOW() AT TIME ZONE $2) THEN p.amount END), 0) AS yearly,
         COUNT(*)::text AS cnt
       FROM payments p
-      JOIN members m ON m.id = p.member_id AND m.church_id = $1 AND m.deleted_at IS NULL
+      JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
       WHERE LOWER(p.payment_status) = 'success'
+        AND p.church_id = $1
       GROUP BY 1
     `, [churchId, TZ]);
 
@@ -197,12 +265,16 @@ export async function getChurchIncomeDetail(churchId: string) {
     // Weekly breakdown by day-of-week, split by donation vs subscription
     const { rows: weeklyRows } = await rawQuery<{ is_donation: boolean; dow: number; income: string }>(`
       SELECT
-        (LOWER(p.payment_method) = 'donation') AS is_donation,
+        (
+          LOWER(COALESCE(p.payment_method, '')) IN ('donation', 'public_donation')
+          OR LOWER(COALESCE(p.payment_category, '')) = 'donation'
+        ) AS is_donation,
         EXTRACT(DOW FROM p.payment_date AT TIME ZONE $2)::int AS dow,
         COALESCE(SUM(p.amount), 0) AS income
       FROM payments p
-      JOIN members m ON m.id = p.member_id AND m.church_id = $1 AND m.deleted_at IS NULL
+      JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
       WHERE LOWER(p.payment_status) = 'success'
+        AND p.church_id = $1
         AND (p.payment_date AT TIME ZONE $2)::date >= date_trunc('week', NOW() AT TIME ZONE $2)::date
         AND p.payment_date <= NOW()
       GROUP BY 1, 2
@@ -218,12 +290,16 @@ export async function getChurchIncomeDetail(churchId: string) {
     // Monthly trend (last 6 months), split by type
     const { rows: trendRows } = await rawQuery<{ is_donation: boolean; ym: string; income: string }>(`
       SELECT
-        (LOWER(p.payment_method) = 'donation') AS is_donation,
+        (
+          LOWER(COALESCE(p.payment_method, '')) IN ('donation', 'public_donation')
+          OR LOWER(COALESCE(p.payment_category, '')) = 'donation'
+        ) AS is_donation,
         to_char(p.payment_date AT TIME ZONE $2, 'Mon YY') AS ym,
         COALESCE(SUM(p.amount), 0) AS income
       FROM payments p
-      JOIN members m ON m.id = p.member_id AND m.church_id = $1 AND m.deleted_at IS NULL
+      JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
       WHERE LOWER(p.payment_status) = 'success'
+        AND p.church_id = $1
         AND p.payment_date >= date_trunc('month', NOW() AT TIME ZONE $2 - INTERVAL '5 months') AT TIME ZONE $2
       GROUP BY 1, 2, date_trunc('month', p.payment_date AT TIME ZONE $2)
       ORDER BY date_trunc('month', p.payment_date AT TIME ZONE $2)
@@ -284,14 +360,16 @@ export async function getPlatformIncomeDetail() {
       daily: string; monthly: string; yearly: string; cnt: string;
     }>(`
       SELECT
-        (LOWER(p.payment_method) = 'donation') AS is_donation,
+        (
+          LOWER(COALESCE(p.payment_method, '')) IN ('donation', 'public_donation')
+          OR LOWER(COALESCE(p.payment_category, '')) = 'donation'
+        ) AS is_donation,
         COALESCE(SUM(CASE WHEN (p.payment_date AT TIME ZONE $1)::date = (NOW() AT TIME ZONE $1)::date THEN p.amount END), 0) AS daily,
         COALESCE(SUM(CASE WHEN date_trunc('month', p.payment_date AT TIME ZONE $1) = date_trunc('month', NOW() AT TIME ZONE $1) THEN p.amount END), 0) AS monthly,
         COALESCE(SUM(CASE WHEN date_trunc('year', p.payment_date AT TIME ZONE $1) = date_trunc('year', NOW() AT TIME ZONE $1) THEN p.amount END), 0) AS yearly,
         COUNT(*)::text AS cnt
       FROM payments p
-      JOIN members m ON m.id = p.member_id AND m.deleted_at IS NULL
-      JOIN churches c ON c.id = m.church_id AND c.deleted_at IS NULL
+      JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
       WHERE LOWER(p.payment_status) = 'success'
       GROUP BY 1
     `, [TZ]);
@@ -308,12 +386,14 @@ export async function getPlatformIncomeDetail() {
 
     const { rows: weeklyRows } = await rawQuery<{ is_donation: boolean; dow: number; income: string }>(`
       SELECT
-        (LOWER(p.payment_method) = 'donation') AS is_donation,
+        (
+          LOWER(COALESCE(p.payment_method, '')) IN ('donation', 'public_donation')
+          OR LOWER(COALESCE(p.payment_category, '')) = 'donation'
+        ) AS is_donation,
         EXTRACT(DOW FROM p.payment_date AT TIME ZONE $1)::int AS dow,
         COALESCE(SUM(p.amount), 0) AS income
       FROM payments p
-      JOIN members m ON m.id = p.member_id AND m.deleted_at IS NULL
-      JOIN churches c ON c.id = m.church_id AND c.deleted_at IS NULL
+      JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
       WHERE LOWER(p.payment_status) = 'success'
         AND (p.payment_date AT TIME ZONE $1)::date >= date_trunc('week', NOW() AT TIME ZONE $1)::date
         AND p.payment_date <= NOW()
@@ -329,12 +409,14 @@ export async function getPlatformIncomeDetail() {
 
     const { rows: trendRows } = await rawQuery<{ is_donation: boolean; ym: string; income: string }>(`
       SELECT
-        (LOWER(p.payment_method) = 'donation') AS is_donation,
+        (
+          LOWER(COALESCE(p.payment_method, '')) IN ('donation', 'public_donation')
+          OR LOWER(COALESCE(p.payment_category, '')) = 'donation'
+        ) AS is_donation,
         to_char(p.payment_date AT TIME ZONE $1, 'Mon YY') AS ym,
         COALESCE(SUM(p.amount), 0) AS income
       FROM payments p
-      JOIN members m ON m.id = p.member_id AND m.deleted_at IS NULL
-      JOIN churches c ON c.id = m.church_id AND c.deleted_at IS NULL
+      JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
       WHERE LOWER(p.payment_status) = 'success'
         AND p.payment_date >= date_trunc('month', NOW() AT TIME ZONE $1 - INTERVAL '5 months') AT TIME ZONE $1
       GROUP BY 1, 2, date_trunc('month', p.payment_date AT TIME ZONE $1)
@@ -386,6 +468,386 @@ export async function getPlatformIncomeDetail() {
     logger.error({ err }, "getPlatformIncomeDetail failed");
     throw err;
   }
+}
+
+async function getIncomeAnalyticsForScope(
+  churchId: string | null,
+  requestedPeriod?: string,
+): Promise<IncomeAnalytics> {
+  const period = normalizeIncomeAnalyticsPeriod(requestedPeriod);
+  const scope = analyticsScope(churchId);
+  const params = [...scope.params, period, TZ];
+  const bounds = periodBoundsSql(scope.periodIndex, scope.tzIndex);
+
+  try {
+    const { rows: revenueRows } = await rawQuery<{ label: string; amount: string; cnt: string; sort_order: number }>(`
+      WITH bounds AS (${bounds}),
+      fee_by_payment AS (
+        SELECT pfc.payment_id, COALESCE(SUM(pfc.fee_amount), 0) AS fee_amount
+        FROM platform_fee_collections pfc
+        WHERE ${scope.feeWhere}
+        GROUP BY pfc.payment_id
+      ),
+      payment_base AS (
+        SELECT
+          p.id,
+          (
+            LOWER(COALESCE(p.payment_method, '')) IN ('donation', 'public_donation')
+            OR LOWER(COALESCE(p.payment_category, '')) = 'donation'
+          ) AS is_donation,
+          GREATEST(p.amount - COALESCE(f.fee_amount, 0), 0) AS net_amount,
+          COALESCE(f.fee_amount, 0) AS fee_amount
+        FROM payments p
+        JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
+        CROSS JOIN bounds b
+        LEFT JOIN fee_by_payment f ON f.payment_id = p.id
+        WHERE LOWER(COALESCE(p.payment_status, '')) = 'success'
+          AND ${scope.paymentWhere}
+          AND (p.payment_date AT TIME ZONE $${scope.tzIndex})::date >= b.start_date
+          AND (p.payment_date AT TIME ZONE $${scope.tzIndex})::date < b.end_date
+      )
+      SELECT 'Subscriptions' AS label,
+             COALESCE(SUM(net_amount) FILTER (WHERE NOT is_donation), 0)::text AS amount,
+             COUNT(*) FILTER (WHERE NOT is_donation)::text AS cnt,
+             1 AS sort_order
+      FROM payment_base
+      UNION ALL
+      SELECT 'Donations',
+             COALESCE(SUM(net_amount) FILTER (WHERE is_donation), 0)::text,
+             COUNT(*) FILTER (WHERE is_donation)::text,
+             2
+      FROM payment_base
+      UNION ALL
+      SELECT 'Platform fees',
+             COALESCE(SUM(fee_amount), 0)::text,
+             COUNT(*) FILTER (WHERE fee_amount > 0)::text,
+             3
+      FROM payment_base
+      ORDER BY sort_order
+    `, params);
+
+    const { rows: collectionRows } = await rawQuery<{
+      expected: string;
+      collected: string;
+      overdue: string;
+      pending: string;
+      expected_count: string;
+      collected_count: string;
+      overdue_count: string;
+      pending_count: string;
+    }>(`
+      WITH bounds AS (${bounds}),
+      dues AS (
+        SELECT
+          smd.status,
+          smd.due_month,
+          CASE
+            WHEN LOWER(COALESCE(s.billing_cycle, '')) = 'yearly' THEN s.amount / 12.0
+            ELSE s.amount
+          END AS due_amount
+        FROM subscription_monthly_dues smd
+        JOIN subscriptions s ON s.id = smd.subscription_id
+        JOIN churches c ON c.id = smd.church_id AND c.deleted_at IS NULL
+        CROSS JOIN bounds b
+        WHERE ${scope.dueWhere}
+          AND smd.due_month >= b.start_date
+          AND smd.due_month < b.end_date
+      )
+      SELECT
+        COALESCE(SUM(due_amount), 0)::text AS expected,
+        COALESCE(SUM(due_amount) FILTER (WHERE status IN ('paid', 'imported_paid')), 0)::text AS collected,
+        COALESCE(SUM(due_amount) FILTER (
+          WHERE status = 'pending'
+            AND due_month < date_trunc('month', NOW() AT TIME ZONE $${scope.tzIndex})::date
+        ), 0)::text AS overdue,
+        COALESCE(SUM(due_amount) FILTER (WHERE status = 'pending'), 0)::text AS pending,
+        COUNT(*)::text AS expected_count,
+        COUNT(*) FILTER (WHERE status IN ('paid', 'imported_paid'))::text AS collected_count,
+        COUNT(*) FILTER (
+          WHERE status = 'pending'
+            AND due_month < date_trunc('month', NOW() AT TIME ZONE $${scope.tzIndex})::date
+        )::text AS overdue_count,
+        COUNT(*) FILTER (WHERE status = 'pending')::text AS pending_count
+      FROM dues
+    `, params);
+
+    const agingTzIndex = scope.params.length + 1;
+    const { rows: agingRows } = await rawQuery<{ bucket: string; amount: string; cnt: string; sort_order: number }>(`
+      WITH pending_dues AS (
+        SELECT
+          CASE
+            WHEN ((NOW() AT TIME ZONE $${agingTzIndex})::date - smd.due_month::date) <= 30 THEN '0-30 days'
+            WHEN ((NOW() AT TIME ZONE $${agingTzIndex})::date - smd.due_month::date) <= 60 THEN '31-60 days'
+            ELSE '60+ days'
+          END AS bucket,
+          CASE
+            WHEN ((NOW() AT TIME ZONE $${agingTzIndex})::date - smd.due_month::date) <= 30 THEN 1
+            WHEN ((NOW() AT TIME ZONE $${agingTzIndex})::date - smd.due_month::date) <= 60 THEN 2
+            ELSE 3
+          END AS sort_order,
+          CASE
+            WHEN LOWER(COALESCE(s.billing_cycle, '')) = 'yearly' THEN s.amount / 12.0
+            ELSE s.amount
+          END AS due_amount
+        FROM subscription_monthly_dues smd
+        JOIN subscriptions s ON s.id = smd.subscription_id
+        JOIN churches c ON c.id = smd.church_id AND c.deleted_at IS NULL
+        WHERE ${scope.dueWhere}
+          AND smd.status = 'pending'
+          AND smd.due_month < (NOW() AT TIME ZONE $${agingTzIndex})::date
+      )
+      SELECT bucket, COALESCE(SUM(due_amount), 0)::text AS amount, COUNT(*)::text AS cnt, sort_order
+      FROM pending_dues
+      GROUP BY bucket, sort_order
+      ORDER BY sort_order
+    `, [...scope.params, TZ]);
+
+    const { rows: fundRows } = await rawQuery<{ fund: string; amount: string; cnt: string }>(`
+      WITH bounds AS (${bounds}),
+      fee_by_payment AS (
+        SELECT pfc.payment_id, COALESCE(SUM(pfc.fee_amount), 0) AS fee_amount
+        FROM platform_fee_collections pfc
+        WHERE ${scope.feeWhere}
+        GROUP BY pfc.payment_id
+      )
+      SELECT
+        COALESCE(NULLIF(TRIM(p.fund_name), ''), 'General') AS fund,
+        COALESCE(SUM(GREATEST(p.amount - COALESCE(f.fee_amount, 0), 0)), 0)::text AS amount,
+        COUNT(*)::text AS cnt
+      FROM payments p
+      JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
+      CROSS JOIN bounds b
+      LEFT JOIN fee_by_payment f ON f.payment_id = p.id
+      WHERE LOWER(COALESCE(p.payment_status, '')) = 'success'
+        AND ${scope.paymentWhere}
+        AND (
+          LOWER(COALESCE(p.payment_method, '')) IN ('donation', 'public_donation')
+          OR LOWER(COALESCE(p.payment_category, '')) = 'donation'
+        )
+        AND (p.payment_date AT TIME ZONE $${scope.tzIndex})::date >= b.start_date
+        AND (p.payment_date AT TIME ZONE $${scope.tzIndex})::date < b.end_date
+      GROUP BY 1
+      ORDER BY SUM(GREATEST(p.amount - COALESCE(f.fee_amount, 0), 0)) DESC, fund
+      LIMIT 8
+    `, params);
+
+    const { rows: methodRows } = await rawQuery<{ method: string; amount: string; cnt: string }>(`
+      WITH bounds AS (${bounds})
+      SELECT
+        CASE
+          WHEN LOWER(COALESCE(p.payment_method, '')) IN ('razorpay', 'subscription_paynow', 'card', 'donation', 'public_donation') THEN 'Razorpay'
+          WHEN LOWER(COALESCE(p.payment_method, '')) LIKE '%upi%' THEN 'UPI'
+          WHEN LOWER(COALESCE(p.payment_method, '')) = 'cash' THEN 'Cash'
+          WHEN LOWER(COALESCE(p.payment_method, '')) IN ('bank_transfer', 'cheque') THEN 'Bank/Cheque'
+          ELSE 'Other'
+        END AS method,
+        COALESCE(SUM(p.amount), 0)::text AS amount,
+        COUNT(*)::text AS cnt
+      FROM payments p
+      JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
+      CROSS JOIN bounds b
+      WHERE LOWER(COALESCE(p.payment_status, '')) = 'success'
+        AND ${scope.paymentWhere}
+        AND (p.payment_date AT TIME ZONE $${scope.tzIndex})::date >= b.start_date
+        AND (p.payment_date AT TIME ZONE $${scope.tzIndex})::date < b.end_date
+      GROUP BY 1
+      ORDER BY SUM(p.amount) DESC, method
+    `, params);
+
+    const monthlyTzIndex = scope.params.length + 1;
+    const { rows: growthRows } = await rawQuery<{
+      month: string;
+      subscription: string;
+      donation: string;
+      platform_fee: string;
+      total: string;
+      month_start: string;
+    }>(`
+      WITH months AS (
+        SELECT generate_series(
+          date_trunc('month', NOW() AT TIME ZONE $${monthlyTzIndex}) - INTERVAL '11 months',
+          date_trunc('month', NOW() AT TIME ZONE $${monthlyTzIndex}),
+          INTERVAL '1 month'
+        )::date AS month_start
+      ),
+      fee_by_payment AS (
+        SELECT pfc.payment_id, COALESCE(SUM(pfc.fee_amount), 0) AS fee_amount
+        FROM platform_fee_collections pfc
+        WHERE ${scope.feeWhere}
+        GROUP BY pfc.payment_id
+      ),
+      payment_base AS (
+        SELECT
+          date_trunc('month', p.payment_date AT TIME ZONE $${monthlyTzIndex})::date AS month_start,
+          (
+            LOWER(COALESCE(p.payment_method, '')) IN ('donation', 'public_donation')
+            OR LOWER(COALESCE(p.payment_category, '')) = 'donation'
+          ) AS is_donation,
+          GREATEST(p.amount - COALESCE(f.fee_amount, 0), 0) AS net_amount,
+          COALESCE(f.fee_amount, 0) AS fee_amount
+        FROM payments p
+        JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
+        LEFT JOIN fee_by_payment f ON f.payment_id = p.id
+        WHERE LOWER(COALESCE(p.payment_status, '')) = 'success'
+          AND ${scope.paymentWhere}
+          AND (p.payment_date AT TIME ZONE $${monthlyTzIndex})::date >= (
+            date_trunc('month', NOW() AT TIME ZONE $${monthlyTzIndex}) - INTERVAL '11 months'
+          )::date
+      )
+      SELECT
+        to_char(m.month_start, 'Mon YY') AS month,
+        COALESCE(SUM(pb.net_amount) FILTER (WHERE pb.is_donation = false), 0)::text AS subscription,
+        COALESCE(SUM(pb.net_amount) FILTER (WHERE pb.is_donation = true), 0)::text AS donation,
+        COALESCE(SUM(pb.fee_amount), 0)::text AS platform_fee,
+        COALESCE(SUM(pb.net_amount + pb.fee_amount), 0)::text AS total,
+        m.month_start::text AS month_start
+      FROM months m
+      LEFT JOIN payment_base pb ON pb.month_start = m.month_start
+      GROUP BY m.month_start
+      ORDER BY m.month_start
+    `, [...scope.params, TZ]);
+
+    const { rows: funnelRows } = await rawQuery<{ stage: string; cnt: string; amount: string; sort_order: number }>(`
+      WITH bounds AS (${bounds}),
+      payments_in_period AS (
+        SELECT p.payment_status, p.amount
+        FROM payments p
+        JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
+        CROSS JOIN bounds b
+        WHERE ${scope.paymentWhere}
+          AND (p.payment_date AT TIME ZONE $${scope.tzIndex})::date >= b.start_date
+          AND (p.payment_date AT TIME ZONE $${scope.tzIndex})::date < b.end_date
+      ),
+      reconciliation_in_period AS (
+        SELECT prq.status, prq.expected_amount
+        FROM payment_reconciliation_queue prq
+        JOIN churches c ON c.id = prq.church_id AND c.deleted_at IS NULL
+        CROSS JOIN bounds b
+        WHERE ${scope.reconciliationWhere}
+          AND (prq.created_at AT TIME ZONE $${scope.tzIndex})::date >= b.start_date
+          AND (prq.created_at AT TIME ZONE $${scope.tzIndex})::date < b.end_date
+      )
+      SELECT 'Recorded attempts' AS stage, COUNT(*)::text AS cnt, COALESCE(SUM(amount), 0)::text AS amount, 1 AS sort_order
+      FROM payments_in_period
+      UNION ALL
+      SELECT 'Successful', COUNT(*)::text, COALESCE(SUM(amount), 0)::text, 2
+      FROM payments_in_period
+      WHERE LOWER(COALESCE(payment_status, '')) = 'success'
+      UNION ALL
+      SELECT 'Pending', COUNT(*)::text, COALESCE(SUM(amount), 0)::text, 3
+      FROM payments_in_period
+      WHERE LOWER(COALESCE(payment_status, '')) = 'pending'
+      UNION ALL
+      SELECT 'Failed', COUNT(*)::text, COALESCE(SUM(amount), 0)::text, 4
+      FROM payments_in_period
+      WHERE LOWER(COALESCE(payment_status, '')) = 'failed'
+      UNION ALL
+      SELECT 'Needs review', COUNT(*)::text, COALESCE(SUM(expected_amount), 0)::text, 5
+      FROM reconciliation_in_period
+      WHERE status IN ('pending', 'failed', 'manual_review')
+      ORDER BY sort_order
+    `, params);
+
+    const { rows: donorRows } = await rawQuery<{ band: string; donors: string; amount: string; sort_order: number }>(`
+      WITH bounds AS (${bounds}),
+      fee_by_payment AS (
+        SELECT pfc.payment_id, COALESCE(SUM(pfc.fee_amount), 0) AS fee_amount
+        FROM platform_fee_collections pfc
+        WHERE ${scope.feeWhere}
+        GROUP BY pfc.payment_id
+      ),
+      payer_totals AS (
+        SELECT
+          COALESCE(p.member_id::text, p.transaction_id, p.id::text) AS payer_key,
+          COALESCE(SUM(GREATEST(p.amount - COALESCE(f.fee_amount, 0), 0)), 0) AS total_amount
+        FROM payments p
+        JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
+        CROSS JOIN bounds b
+        LEFT JOIN fee_by_payment f ON f.payment_id = p.id
+        WHERE LOWER(COALESCE(p.payment_status, '')) = 'success'
+          AND ${scope.paymentWhere}
+          AND (p.payment_date AT TIME ZONE $${scope.tzIndex})::date >= b.start_date
+          AND (p.payment_date AT TIME ZONE $${scope.tzIndex})::date < b.end_date
+        GROUP BY 1
+      ),
+      bands AS (
+        SELECT
+          CASE
+            WHEN total_amount <= 500 THEN '0-500'
+            WHEN total_amount <= 1000 THEN '501-1,000'
+            WHEN total_amount <= 5000 THEN '1,001-5,000'
+            WHEN total_amount <= 10000 THEN '5,001-10,000'
+            ELSE '10,000+'
+          END AS band,
+          CASE
+            WHEN total_amount <= 500 THEN 1
+            WHEN total_amount <= 1000 THEN 2
+            WHEN total_amount <= 5000 THEN 3
+            WHEN total_amount <= 10000 THEN 4
+            ELSE 5
+          END AS sort_order,
+          total_amount
+        FROM payer_totals
+      )
+      SELECT band, COUNT(*)::text AS donors, COALESCE(SUM(total_amount), 0)::text AS amount, sort_order
+      FROM bands
+      GROUP BY band, sort_order
+      ORDER BY sort_order
+    `, params);
+
+    const collection = collectionRows[0] || {
+      expected: "0",
+      collected: "0",
+      overdue: "0",
+      pending: "0",
+      expected_count: "0",
+      collected_count: "0",
+      overdue_count: "0",
+      pending_count: "0",
+    };
+    const expected = money(collection.expected);
+    const collected = money(collection.collected);
+
+    return {
+      period,
+      scope: churchId ? "church" : "platform",
+      revenue_mix: revenueRows.map((r) => ({ label: r.label, amount: money(r.amount), count: count(r.cnt) })),
+      collection_rate: {
+        expected,
+        collected,
+        overdue: money(collection.overdue),
+        pending: money(collection.pending),
+        collection_rate: expected > 0 ? Number(((collected / expected) * 100).toFixed(1)) : 0,
+        expected_count: count(collection.expected_count),
+        collected_count: count(collection.collected_count),
+        overdue_count: count(collection.overdue_count),
+        pending_count: count(collection.pending_count),
+      },
+      aging_ledger: agingRows.map((r) => ({ bucket: r.bucket, amount: money(r.amount), count: count(r.cnt) })),
+      donation_funds: fundRows.map((r) => ({ fund: r.fund, amount: money(r.amount), count: count(r.cnt) })),
+      payment_methods: methodRows.map((r) => ({ method: r.method, amount: money(r.amount), count: count(r.cnt) })),
+      monthly_growth: growthRows.map((r) => ({
+        month: r.month,
+        subscription: money(r.subscription),
+        donation: money(r.donation),
+        platform_fee: money(r.platform_fee),
+        total: money(r.total),
+      })),
+      payment_funnel: funnelRows.map((r) => ({ stage: r.stage, count: count(r.cnt), amount: money(r.amount) })),
+      donor_bands: donorRows.map((r) => ({ band: r.band, donors: count(r.donors), amount: money(r.amount) })),
+    };
+  } catch (err) {
+    logger.error({ err, churchId, period }, "getIncomeAnalyticsForScope failed");
+    throw err;
+  }
+}
+
+export async function getChurchIncomeAnalytics(churchId: string, period?: string): Promise<IncomeAnalytics> {
+  return getIncomeAnalyticsForScope(churchId, period);
+}
+
+export async function getPlatformIncomeAnalytics(period?: string): Promise<IncomeAnalytics> {
+  return getIncomeAnalyticsForScope(null, period);
 }
 
 // ── Rich Payment Report (CSV) ──
@@ -449,7 +911,7 @@ export async function generatePaymentReport(
   const { rows } = await rawQuery<PaymentReportRow>(`
     SELECT
       to_char(p.payment_date AT TIME ZONE $2, 'YYYY-MM-DD HH24:MI') AS payment_date,
-      COALESCE(m.full_name, '') AS member_name,
+      COALESCE(m.full_name, 'Public donor') AS member_name,
       m.membership_id,
       COALESCE(m.email, '') AS email,
       COALESCE(m.phone_number, '') AS phone,
@@ -460,7 +922,12 @@ export async function generatePaymentReport(
       p.transaction_id,
       s.plan_name,
       s.billing_cycle,
-      CASE WHEN LOWER(p.payment_method) = 'donation' THEN 'Donation' ELSE 'Subscription' END AS payment_type,
+      CASE
+        WHEN LOWER(COALESCE(p.payment_method, '')) IN ('donation', 'public_donation')
+          OR LOWER(COALESCE(p.payment_category, '')) = 'donation'
+        THEN 'Donation'
+        ELSE 'Subscription'
+      END AS payment_type,
       to_char(p.payment_date AT TIME ZONE $2, 'Mon YYYY') AS month_label,
       p.fund_name,
       (
@@ -470,9 +937,11 @@ export async function generatePaymentReport(
         WHERE pma.payment_id = p.id
       ) AS months_covered
     FROM payments p
-    JOIN members m ON m.id = p.member_id AND m.church_id = $1 AND m.deleted_at IS NULL
+    JOIN churches c ON c.id = p.church_id AND c.deleted_at IS NULL
+    LEFT JOIN members m ON m.id = p.member_id AND m.deleted_at IS NULL
     LEFT JOIN subscriptions s ON s.id = p.subscription_id
     WHERE LOWER(p.payment_status) = 'success'
+      AND p.church_id = $1
     ${dateFilter}
     ORDER BY p.payment_date DESC
   `, dateParams);

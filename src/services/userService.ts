@@ -45,6 +45,9 @@ export interface UpdateUserProfileInput {
 
 export interface AddFamilyMemberInput {
   email: string;
+  phone?: string;
+  authUserId?: string;
+  churchId?: string;
   full_name: string;
   gender?: string;
   relation?: string;
@@ -384,32 +387,52 @@ export async function getRegisteredUserByPhone(phone: string) {
   return (data?.[0] as UserProfileRow | undefined) || null;
 }
 
-export async function getRegisteredUserContext(authUserId: string, authEmail: string, authPhone?: string) {
-  const { data: byAuthIdRows, error: byAuthIdError } = await db
+export async function getRegisteredUserByIdOrAuthId(userId: string) {
+  if (!userId) return null;
+
+  const { data: byId, error: byIdError } = await db
     .from("users")
     .select("id, auth_user_id, email, phone_number, full_name, avatar_url, role, church_id")
-    .eq("auth_user_id", authUserId)
+    .eq("id", userId)
+    .maybeSingle<UserProfileRow>();
+
+  if (byIdError) {
+    logger.error({ err: byIdError, userId }, "getRegisteredUserByIdOrAuthId by id failed");
+    throw byIdError;
+  }
+  if (byId) return byId;
+
+  const { data: byAuthId, error: byAuthIdError } = await db
+    .from("users")
+    .select("id, auth_user_id, email, phone_number, full_name, avatar_url, role, church_id")
+    .eq("auth_user_id", userId)
     .order("created_at", { ascending: true })
-    .limit(1);
+    .limit(1)
+    .maybeSingle<UserProfileRow>();
 
   if (byAuthIdError) {
-    logger.error(
-      { err: byAuthIdError, authUserId },
-      "getRegisteredUserContext by auth_user_id failed"
-    );
+    logger.error({ err: byAuthIdError, userId }, "getRegisteredUserByIdOrAuthId by auth_user_id failed");
     throw byAuthIdError;
   }
 
-  const byAuthId = (byAuthIdRows?.[0] as UserProfileRow | undefined) || null;
+  return byAuthId || null;
+}
 
-  if (byAuthId) {
-    return byAuthId;
-  }
+export async function getRegisteredUserContext(authUserId: string, authEmail: string, authPhone?: string) {
+  const byTokenSubject = await getRegisteredUserByIdOrAuthId(authUserId);
+  if (byTokenSubject) return byTokenSubject;
 
   // Try phone lookup first (primary identifier for OTP auth)
   if (authPhone) {
     const byPhone = await getRegisteredUserByPhone(authPhone);
     if (byPhone) {
+      if (byPhone.auth_user_id && byPhone.auth_user_id !== authUserId) {
+        logger.warn(
+          { authUserId, profileId: byPhone.id },
+          "getRegisteredUserContext phone fallback matched a different auth_user_id"
+        );
+        return null;
+      }
       if (!byPhone.auth_user_id) {
         // Atomic update: only link if auth_user_id is still null (prevents race condition)
         const { data: linked, error: linkError } = await db
@@ -504,10 +527,20 @@ export async function getUserProfileById(userId: string) {
   return data;
 }
 
-export async function getMemberDashboardByEmail(email: string, phone?: string) {
-  // Phone-primary lookup on users table
+export async function getMemberDashboardByEmail(
+  email: string,
+  phone?: string,
+  authUserId?: string,
+  churchContextId?: string,
+) {
+  // Authenticated requests must resolve by JWT subject first. Phone/email are
+  // fallback identifiers only; using them first can hydrate the wrong account
+  // when duplicate phone data exists across legacy rows.
   let profile: UserProfileRow | null = null;
-  if (phone) {
+  if (authUserId) {
+    profile = await getRegisteredUserByIdOrAuthId(authUserId);
+  }
+  if (!profile && phone) {
     profile = await getRegisteredUserByPhone(phone);
   }
   if (!profile) {
@@ -518,6 +551,11 @@ export async function getMemberDashboardByEmail(email: string, phone?: string) {
     return null;
   }
 
+  const effectiveChurchId = churchContextId || profile.church_id || null;
+  if (effectiveChurchId && profile.church_id !== effectiveChurchId) {
+    profile = { ...profile, church_id: effectiveChurchId };
+  }
+
   const churchPromise = profile.church_id
     ? db
         .from("churches")
@@ -526,20 +564,22 @@ export async function getMemberDashboardByEmail(email: string, phone?: string) {
         .maybeSingle<ChurchRow>()
     : Promise.resolve({ data: null, error: null } as { data: ChurchRow | null; error: any });
 
-  const byUserMember = await db
+  const byUserMember = db
     .from("members")
     .select(
       "id, user_id, full_name, email, phone_number, alt_phone_number, address, membership_id, verification_status, subscription_amount, church_id, created_at, gender, dob, occupation, confirmation_taken, age"
     )
-    .eq("user_id", profile.id)
-    .maybeSingle<MemberRow>();
+    .eq("user_id", profile.id);
 
-  if (byUserMember.error) {
-    logger.error({ err: byUserMember.error, userId: profile.id }, "dashboard member by user_id failed");
-    throw byUserMember.error;
+  const byUserMemberScoped = profile.church_id ? byUserMember.eq("church_id", profile.church_id) : byUserMember;
+  const byUserMemberResult = await byUserMemberScoped.maybeSingle<MemberRow>();
+
+  if (byUserMemberResult.error) {
+    logger.error({ err: byUserMemberResult.error, userId: profile.id }, "dashboard member by user_id failed");
+    throw byUserMemberResult.error;
   }
 
-  let member = byUserMember.data;
+  let member = byUserMemberResult.data;
 
   // Step 2: Try phone lookup on members table — scoped to user's church to prevent cross-church collision
   if (!member && phone) {
@@ -601,7 +641,21 @@ export async function getMemberDashboardByEmail(email: string, phone?: string) {
       profileUpdates.email = member.email;
     }
     if ((!profile.phone_number || profile.phone_number === "") && member.phone_number) {
-      profileUpdates.phone_number = member.phone_number;
+      const { data: existingPhoneOwner } = await db
+        .from("users")
+        .select("id")
+        .eq("phone_number", member.phone_number)
+        .neq("id", profile.id)
+        .limit(1)
+        .maybeSingle<{ id: string }>();
+      if (existingPhoneOwner?.id) {
+        logger.warn(
+          { userId: profile.id, existingUserId: existingPhoneOwner.id },
+          "Skipping user phone sync because phone belongs to another user row"
+        );
+      } else {
+        profileUpdates.phone_number = member.phone_number;
+      }
     }
     if (Object.keys(profileUpdates).length > 0) {
       const { data: updatedProfile } = await db
@@ -939,6 +993,8 @@ export async function getMemberDashboardByEmail(email: string, phone?: string) {
 export interface UpdateFamilyMemberInput {
   email: string;
   phone?: string;
+  authUserId?: string;
+  churchId?: string;
   family_member_id: string;
   full_name?: string;
   gender?: string;
@@ -953,7 +1009,7 @@ export interface UpdateFamilyMemberInput {
 }
 
 export async function updateFamilyMember(input: UpdateFamilyMemberInput) {
-  const dashboard = await getMemberDashboardByEmail(input.email, input.phone);
+  const dashboard = await getMemberDashboardByEmail(input.email, input.phone, input.authUserId, input.churchId);
   if (!dashboard?.member) {
     throw new Error("Member profile not found");
   }
@@ -1055,8 +1111,8 @@ async function syncLinkedMemberProfile(
   }
 }
 
-export async function deleteFamilyMember(email: string, familyMemberId: string) {
-  const dashboard = await getMemberDashboardByEmail(email);
+export async function deleteFamilyMember(email: string, familyMemberId: string, authUserId?: string, phone?: string, churchId?: string) {
+  const dashboard = await getMemberDashboardByEmail(email, phone, authUserId, churchId);
   if (!dashboard?.member) {
     throw new Error("Member profile not found");
   }
@@ -1083,7 +1139,7 @@ export async function deleteFamilyMember(email: string, familyMemberId: string) 
 }
 
 export async function addFamilyMemberForCurrentUser(input: AddFamilyMemberInput) {
-  const dashboard = await getMemberDashboardByEmail(input.email);
+  const dashboard = await getMemberDashboardByEmail(input.email, input.phone, input.authUserId, input.churchId);
   if (!dashboard?.member) {
     throw new Error("Member profile not found");
   }
@@ -1502,7 +1558,7 @@ export async function updateCurrentUserProfile(input: UpdateUserProfileInput) {
     }
   }
 
-  return getMemberDashboardByEmail(input.email);
+  return getMemberDashboardByEmail(input.email, input.auth_phone, input.id);
 }
 
 /**

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { ShieldCheck, Search, Zap } from "lucide-react";
+import { AlertTriangle, RefreshCw, ShieldCheck, Search, Zap } from "lucide-react";
 import { apiRequest } from "../../lib/api";
 import { useApp } from "../../context/AppContext";
 import Pagination, { paginate, totalPages } from "../../components/Pagination";
@@ -17,6 +17,45 @@ type GlobalMemberHit = {
   church_name?: string;
   membership_id?: string;
   verification_status?: string;
+};
+
+type IdentityDuplicateUser = {
+  id: string;
+  auth_user_id: string | null;
+  email: string | null;
+  phone_number: string | null;
+  full_name: string | null;
+  role: string | null;
+  church_id: string | null;
+  church_name: string | null;
+  created_at: string | null;
+  has_auth_link: boolean;
+};
+
+type IdentityDuplicateMember = {
+  id: string;
+  user_id: string | null;
+  full_name: string | null;
+  email: string | null;
+  phone_number: string | null;
+  membership_id: string | null;
+  verification_status: string | null;
+  church_id: string | null;
+  church_name: string | null;
+  created_at: string | null;
+};
+
+type IdentityDuplicateGroup = {
+  phone_number: string;
+  user_count: number;
+  member_count: number;
+  church_count: number;
+  linked_mismatch_count: number;
+  unlinked_member_count: number;
+  risk_flags: string[];
+  risk_score: number;
+  users: IdentityDuplicateUser[];
+  members: IdentityDuplicateMember[];
 };
 
 const JOB_NAMES = [
@@ -46,12 +85,19 @@ export default function AdminOpsTab() {
   const [globalResults, setGlobalResults] = useState<GlobalMemberHit[]>([]);
   const [globalPage, setGlobalPage] = useState(1);
 
+  // Identity collision report
+  const [identityChurchId, setIdentityChurchId] = useState("");
+  const [identityDuplicates, setIdentityDuplicates] = useState<IdentityDuplicateGroup[]>([]);
+  const [identityPage, setIdentityPage] = useState(1);
+  const [identityChecked, setIdentityChecked] = useState(false);
+
   // Job trigger
   const [selectedJob, setSelectedJob] = useState(JOB_NAMES[0].key);
   const [jobResult, setJobResult] = useState<string | null>(null);
 
   useEffect(() => { setPage(1); }, [results]);
   useEffect(() => { setGlobalPage(1); }, [globalResults]);
+  useEffect(() => { setIdentityPage(1); }, [identityDuplicates]);
 
   async function searchAdmins() {
     if (!isSuperAdmin) return;
@@ -110,6 +156,47 @@ export default function AdminOpsTab() {
       undefined,
     );
     if (hits) setGlobalResults(hits);
+  }
+
+  async function loadIdentityDuplicates() {
+    if (!isSuperAdmin) return;
+    const params = new URLSearchParams();
+    params.set("limit", "150");
+    if (identityChurchId.trim()) params.set("church_id", identityChurchId.trim());
+    const rows = await withAuthRequest(
+      "identity-duplicates",
+      () => apiRequest<IdentityDuplicateGroup[]>(`/api/ops/identity-duplicates?${params.toString()}`, { token }),
+      t("adminTabs.adminOps.identityReportLoaded"),
+    );
+    if (rows) {
+      setIdentityDuplicates(rows);
+      setIdentityChecked(true);
+    }
+  }
+
+  function formatIdentityName(row: { full_name?: string | null; email?: string | null; id: string }) {
+    return row.full_name || row.email || row.id.slice(0, 8);
+  }
+
+  function formatChurch(row: { church_name?: string | null; church_id?: string | null }) {
+    return row.church_name || row.church_id?.slice(0, 8) || t("adminTabs.adminOps.noChurch");
+  }
+
+  function formatRiskFlag(flag: string) {
+    switch (flag) {
+      case "duplicate_users":
+        return t("adminTabs.adminOps.identityRiskDuplicateUsers");
+      case "duplicate_members":
+        return t("adminTabs.adminOps.identityRiskDuplicateMembers");
+      case "cross_church_members":
+        return t("adminTabs.adminOps.identityRiskCrossChurchMembers");
+      case "member_link_mismatch":
+        return t("adminTabs.adminOps.identityRiskMemberLinkMismatch");
+      case "unlinked_member_same_phone":
+        return t("adminTabs.adminOps.identityRiskUnlinkedMember");
+      default:
+        return flag.replace(/_/g, " ");
+    }
   }
 
   async function triggerJob() {
@@ -243,6 +330,89 @@ export default function AdminOpsTab() {
             </div>
           </div>
         )}
+      </div>
+
+      {/* Identity Collision Report */}
+      <div style={{ marginTop: "2rem", borderTop: "1px solid var(--outline-variant)", paddingTop: "1.25rem" }}>
+        <h4 style={{ marginBottom: "0.5rem", display: "flex", alignItems: "center", gap: 6 }}>
+          <AlertTriangle size={16} /> {t("adminTabs.adminOps.identityReportTitle")}
+        </h4>
+        <div className="actions-row" style={{ flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ flex: "1 1 260px" }}>
+            {t("adminTabs.adminOps.identityChurchFilter")}
+            <select value={identityChurchId} onChange={(e) => setIdentityChurchId(e.target.value)}>
+              <option value="">{t("adminTabs.adminOps.optionAllChurches")}</option>
+              {churches.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.unique_id || c.church_code || c.id.slice(0, 8)})</option>)}
+            </select>
+          </label>
+          <button className="btn" onClick={() => void loadIdentityDuplicates()} disabled={busyKey === "identity-duplicates"}>
+            <RefreshCw size={14} /> {busyKey === "identity-duplicates" ? t("common.loading") : t("adminTabs.adminOps.identityRefresh")}
+          </button>
+          {identityDuplicates.length > 0 && (
+            <button className="btn" onClick={() => { setIdentityDuplicates([]); setIdentityChecked(false); }}>{t("adminTabs.adminOps.clearButton")}</button>
+          )}
+        </div>
+        {identityDuplicates.length > 0 ? (
+          <div style={{ marginTop: "0.75rem" }}>
+            <p className="muted" style={{ marginBottom: "0.5rem" }}>{t("adminTabs.adminOps.identityResultsCount", { count: identityDuplicates.length })}</p>
+            <div className="table-wrapper">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>{t("adminTabs.adminOps.columnPhone")}</th>
+                    <th>{t("adminTabs.adminOps.identityRisk")}</th>
+                    <th>{t("adminTabs.adminOps.identityUsers")}</th>
+                    <th>{t("adminTabs.adminOps.identityMembers")}</th>
+                    <th>{t("adminTabs.adminOps.identityChurches")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginate(identityDuplicates, identityPage, 10).map((group) => (
+                    <tr key={group.phone_number}>
+                      <td style={{ fontWeight: 700 }}>{group.phone_number}</td>
+                      <td>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                          <span className={`event-badge ${group.risk_score >= 75 ? "badge-overdue" : "badge-system"}`}>
+                            {group.risk_score}
+                          </span>
+                          {group.risk_flags.map((flag) => (
+                            <span key={flag} className="event-badge badge-system">{formatRiskFlag(flag)}</span>
+                          ))}
+                        </div>
+                      </td>
+                      <td>
+                        <div className="list-stack" style={{ gap: 6 }}>
+                          {group.users.length ? group.users.map((user) => (
+                            <div key={user.id}>
+                              <strong>{formatIdentityName(user)}</strong>
+                              <div className="muted">{user.role || "member"} · {formatChurch(user)} · {user.has_auth_link ? t("adminTabs.adminOps.identityAuthLinked") : t("adminTabs.adminOps.identityNoAuthLink")}</div>
+                            </div>
+                          )) : <span className="muted">—</span>}
+                        </div>
+                      </td>
+                      <td>
+                        <div className="list-stack" style={{ gap: 6 }}>
+                          {group.members.length ? group.members.map((member) => (
+                            <div key={member.id}>
+                              <strong>{formatIdentityName(member)}</strong>
+                              <div className="muted">
+                                {formatChurch(member)} · {member.membership_id || t("adminTabs.adminOps.noMembershipId")} · {member.user_id ? t("adminTabs.adminOps.identityLinkedMember") : t("adminTabs.adminOps.identityUnlinkedMember")}
+                              </div>
+                            </div>
+                          )) : <span className="muted">—</span>}
+                        </div>
+                      </td>
+                      <td>{group.church_count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <Pagination page={identityPage} total={totalPages(identityDuplicates.length, 10)} onPageChange={setIdentityPage} />
+            </div>
+          </div>
+        ) : identityChecked ? (
+          <EmptyState icon={<ShieldCheck size={32} />} title={t("adminTabs.adminOps.identityEmptyTitle")} description={t("adminTabs.adminOps.identityEmptyDescription")} />
+        ) : null}
       </div>
 
       {/* Manual Job Trigger */}

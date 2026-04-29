@@ -36,13 +36,11 @@ const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const UserHomePage = lazy(() => import("./pages/UserHomePage"));
 const PrivacyPolicyPage = lazy(() => import("./pages/PrivacyPolicyPage"));
 const TermsAndConditionsPage = lazy(() => import("./pages/TermsAndConditionsPage"));
-const SubscriptionManagePage = lazy(() => import("./pages/SubscriptionManagePage"));
 import ErrorBoundary from "./components/ErrorBoundary";
 import OfflineIndicator from "./components/OfflineIndicator";
 import CookieConsentBanner from "./components/CookieConsentBanner";
 import LanguageSelector from "./components/LanguageSelector";
 import NotificationBadge from "./components/NotificationBadge";
-import BottomNav from "./components/BottomNav";
 import { useI18n } from "./i18n";
 
 // ── Helpers ──
@@ -253,19 +251,16 @@ function App() {
 
   // Public pages accessible regardless of auth state
   const isPublicDonationRoute = location.pathname.startsWith("/donate");
-  const isPublicStaticRoute = location.pathname === "/privacy" || location.pathname === "/terms";
-  const isSubscriptionManageRoute = location.pathname === "/subscribe/manage";
+  const isPublicStaticRoute = location.pathname === "/privacy";
 
-  if (isPublicStaticRoute || isSubscriptionManageRoute || (isPublicDonationRoute && !loadingSession && !isLoggedIn)) {
+  if (isPublicDonationRoute || isPublicStaticRoute) {
     return (
       <Suspense fallback={<div className="auth-shell"><p>{t("common.loading")}</p></div>}>
       <Routes>
         <Route path="/donate" element={<PublicDonationPage isLoggedIn={isLoggedIn} />} />
-        <Route path="/donate/public" element={<PublicDonationPage isLoggedIn={false} />} />
         <Route path="/donate/checkout" element={<DonationCheckoutPage isLoggedIn={isLoggedIn} />} />
         <Route path="/privacy" element={<PrivacyPolicyPage />} />
         <Route path="/terms" element={<TermsAndConditionsPage />} />
-        <Route path="/subscribe/manage" element={<SubscriptionManagePage />} />
         <Route path="*" element={<Navigate to="/donate" replace />} />
       </Routes>
       </Suspense>
@@ -291,9 +286,9 @@ function App() {
         <Route path="/signin" element={
             <div className="auth-shell">
               <section className="auth-card">
-                <p className="auth-eyebrow">{t("auth.churchManagement")}</p>
-                <img src={shalomLogo} alt="Shalom" className="auth-logo" />
                 <h1>{t("auth.welcome")}</h1>
+                <img src={shalomLogo} alt="Shalom" className="auth-logo" />
+                <p className="auth-eyebrow">{t("auth.churchManagement")}</p>
                 <form onSubmit={(e) => { e.preventDefault(); if (auth.otpStep === "phone") auth.sendOtp(); else auth.verifyOtp(); }}>
                 {auth.otpStep === "phone" ? (
                   <>
@@ -465,23 +460,15 @@ function App() {
       <OfflineIndicator />
       <CookieConsentBanner />
       <div className={`app-layout ${workspaceToneClass}`}>
-        {/* Floating burger (mobile only — top-left) */}
-        <button
-          className={`floating-burger ${mobileNavOpen ? "fab-open" : ""}`}
-          onClick={() => setMobileNavOpen((v) => !v)}
-          aria-label={t("nav.toggleNavigation")}
-          aria-expanded={mobileNavOpen}
-          aria-controls="mobile-nav"
-        >
-          {mobileNavOpen ? <X size={22} /> : <Menu size={22} />}
-        </button>
-
-        <nav className={`sidebar ${mobileNavOpen ? "sidebar-open" : ""}`}>
+        <nav className="sidebar">
           <div className="brand-block">
             <img src={shalomLogo} alt="Shalom" className="nav-logo" />
             <span className="brand-name">{authContext?.profile.full_name || (isSuperAdmin ? t("profile.superAdmin") : "Shalom")}</span>
+            <button className="hamburger-btn" onClick={() => setMobileNavOpen((v) => !v)} aria-label={t("nav.toggleNavigation")} aria-expanded={mobileNavOpen} aria-controls="mobile-nav">
+              {mobileNavOpen ? <X size={22} /> : <Menu size={22} />}
+            </button>
           </div>
-          <nav id="mobile-nav" className="nav-stack">
+          <nav id="mobile-nav" className={`nav-stack ${mobileNavOpen ? "nav-open" : ""}`}>
             <div className="sidebar-user-badge">
               {avatarUrl ? (
                 <img className="avatar" src={avatarUrl} alt={memberName} />
@@ -630,8 +617,7 @@ function App() {
             <Route path="/profile" element={<ProfilePage />} />
             <Route path="/history" element={isSuperAdmin ? <Navigate to="/dashboard" replace /> : <HistoryPage />} />
             <Route path="/events" element={<EventsPage />} />
-            <Route path="/donate" element={<PublicDonationPage isLoggedIn={true} userChurch={memberDashboard?.church ? { id: memberDashboard.church.id, name: memberDashboard.church.name } : undefined} />} />
-            <Route path="/donate/public" element={<PublicDonationPage isLoggedIn={false} />} />
+            <Route path="/donate" element={<PublicDonationPage isLoggedIn={true} />} />
             <Route path="/donate/checkout" element={<DonationCheckoutPage isLoggedIn={true} />} />
             <Route path="/prayer-request" element={<PrayerRequestPage />} />
             <Route path="/privacy" element={<PrivacyPolicyPage />} />
@@ -683,15 +669,6 @@ function App() {
             </section>
           ) : null}
         </main>
-
-        {/* Floating bottom navigation bar (mobile only — CSS hides on desktop) */}
-        <BottomNav
-          isSuperAdmin={isSuperAdmin}
-          isAdminUser={isAdminUser}
-          paymentsEnabled={paymentsEnabled}
-          duesCount={duesCount}
-          adminPendingCount={totalAdminPending}
-        />
       </div>
     </AppContext.Provider>
   );

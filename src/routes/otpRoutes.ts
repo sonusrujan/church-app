@@ -281,12 +281,19 @@ router.post("/verify", validate(otpVerifySchema), async (req: Request, res: Resp
     let userEmail: string = "";
 
     // Step 1: Try to find existing user by phone_number in users table
-    const { data: existingRow } = await db
+    const { data: existingRows } = await db
       .from("users")
       .select("id, email, phone_number, auth_user_id, church_id")
       .eq("phone_number", cleaned)
-      .limit(1)
-      .maybeSingle();
+      .order("created_at", { ascending: true })
+      .limit(2);
+    const existingRow = existingRows?.[0] || null;
+    if (existingRows && existingRows.length > 1) {
+      logger.warn(
+        { phone: cleaned, pickedUserId: existingRow?.id, duplicateCountSeen: existingRows.length },
+        "Multiple users share same phone — picked oldest user row"
+      );
+    }
 
     if (existingRow) {
       // Even if user exists, verify they still have a member record (unless super admin)

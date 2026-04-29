@@ -1592,6 +1592,180 @@ router.get("/global-member-search", requireAuth, requireRegisteredUser, requireS
   }
 });
 
+// ── H3: Identity collision report (Super Admin only) ──
+router.get("/identity-duplicates", requireAuth, requireRegisteredUser, requireSuperAdmin, async (req: AuthRequest, res) => {
+  try {
+    const churchId = String(req.query.church_id || "").trim();
+    if (churchId && !UUID_REGEX.test(churchId)) {
+      return res.status(400).json({ error: "Invalid church_id format" });
+    }
+
+    const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 300);
+    const params: Array<string | number> = [];
+    let userChurchClause = "";
+    let memberChurchClause = "";
+
+    if (churchId) {
+      params.push(churchId);
+      userChurchClause = `AND u.church_id = $${params.length}`;
+      memberChurchClause = `AND m.church_id = $${params.length}`;
+    }
+
+    params.push(limit);
+    const limitParam = `$${params.length}`;
+
+    const { rows } = await pool.query(
+      `WITH user_rows AS (
+         SELECT
+           u.id,
+           u.auth_user_id,
+           NULLIF(u.email, '') AS email,
+           BTRIM(u.phone_number) AS phone_number,
+           NULLIF(u.full_name, '') AS full_name,
+           u.role,
+           u.church_id,
+           u.created_at,
+           c.name AS church_name
+         FROM users u
+         LEFT JOIN churches c ON c.id = u.church_id
+         WHERE NULLIF(BTRIM(u.phone_number), '') IS NOT NULL
+           ${userChurchClause}
+       ),
+       member_rows AS (
+         SELECT
+           m.id,
+           m.user_id,
+           NULLIF(m.full_name, '') AS full_name,
+           NULLIF(m.email, '') AS email,
+           BTRIM(m.phone_number) AS phone_number,
+           NULLIF(m.membership_id, '') AS membership_id,
+           m.verification_status,
+           m.church_id,
+           m.created_at,
+           c.name AS church_name
+         FROM members m
+         LEFT JOIN churches c ON c.id = m.church_id
+         WHERE m.deleted_at IS NULL
+           AND NULLIF(BTRIM(m.phone_number), '') IS NOT NULL
+           ${memberChurchClause}
+       ),
+       phones AS (
+         SELECT phone_number FROM user_rows
+         UNION
+         SELECT phone_number FROM member_rows
+       ),
+       summary AS (
+         SELECT
+           p.phone_number,
+           (SELECT COUNT(*)::int FROM user_rows u WHERE u.phone_number = p.phone_number) AS user_count,
+           (SELECT COUNT(*)::int FROM member_rows m WHERE m.phone_number = p.phone_number) AS member_count,
+           (SELECT COUNT(DISTINCT m.church_id)::int FROM member_rows m WHERE m.phone_number = p.phone_number AND m.church_id IS NOT NULL) AS church_count,
+           (
+             SELECT COUNT(*)::int
+             FROM member_rows m
+             WHERE m.phone_number = p.phone_number
+               AND m.user_id IS NOT NULL
+               AND NOT EXISTS (
+                 SELECT 1
+                 FROM user_rows u
+                 WHERE u.id = m.user_id
+                   AND u.phone_number = m.phone_number
+               )
+           ) AS linked_mismatch_count,
+           (
+             SELECT COUNT(*)::int
+             FROM member_rows m
+             WHERE m.phone_number = p.phone_number
+               AND m.user_id IS NULL
+           ) AS unlinked_member_count
+         FROM phones p
+       ),
+       risky AS (
+         SELECT
+           s.*,
+           ARRAY_REMOVE(ARRAY[
+             CASE WHEN s.user_count > 1 THEN 'duplicate_users' END,
+             CASE WHEN s.member_count > 1 THEN 'duplicate_members' END,
+             CASE WHEN s.church_count > 1 THEN 'cross_church_members' END,
+             CASE WHEN s.linked_mismatch_count > 0 THEN 'member_link_mismatch' END,
+             CASE WHEN s.user_count > 0 AND s.unlinked_member_count > 0 THEN 'unlinked_member_same_phone' END
+           ], NULL) AS risk_flags,
+           CASE
+             WHEN s.user_count > 1 THEN 100
+             WHEN s.linked_mismatch_count > 0 THEN 90
+             WHEN s.member_count > 1 AND s.church_count > 1 THEN 85
+             WHEN s.member_count > 1 THEN 75
+             WHEN s.user_count > 0 AND s.unlinked_member_count > 0 THEN 55
+             ELSE 0
+           END AS risk_score
+         FROM summary s
+         WHERE s.user_count > 1
+            OR s.member_count > 1
+            OR s.church_count > 1
+            OR s.linked_mismatch_count > 0
+            OR (s.user_count > 0 AND s.unlinked_member_count > 0)
+       )
+       SELECT
+         r.phone_number,
+         r.user_count,
+         r.member_count,
+         r.church_count,
+         r.linked_mismatch_count,
+         r.unlinked_member_count,
+         r.risk_flags,
+         r.risk_score,
+         COALESCE((
+           SELECT jsonb_agg(
+             jsonb_build_object(
+               'id', u.id,
+               'auth_user_id', u.auth_user_id,
+               'email', u.email,
+               'phone_number', u.phone_number,
+               'full_name', u.full_name,
+               'role', u.role,
+               'church_id', u.church_id,
+               'church_name', u.church_name,
+               'created_at', u.created_at,
+               'has_auth_link', u.auth_user_id IS NOT NULL
+             )
+             ORDER BY u.created_at NULLS LAST
+           )
+           FROM user_rows u
+           WHERE u.phone_number = r.phone_number
+         ), '[]'::jsonb) AS users,
+         COALESCE((
+           SELECT jsonb_agg(
+             jsonb_build_object(
+               'id', m.id,
+               'user_id', m.user_id,
+               'full_name', m.full_name,
+               'email', m.email,
+               'phone_number', m.phone_number,
+               'membership_id', m.membership_id,
+               'verification_status', m.verification_status,
+               'church_id', m.church_id,
+               'church_name', m.church_name,
+               'created_at', m.created_at
+             )
+             ORDER BY m.created_at NULLS LAST
+           )
+           FROM member_rows m
+           WHERE m.phone_number = r.phone_number
+         ), '[]'::jsonb) AS members
+       FROM risky r
+       ORDER BY r.risk_score DESC, r.member_count DESC, r.user_count DESC, r.phone_number
+       LIMIT ${limitParam}`,
+      params,
+    );
+
+    logSuperAdminAudit(req, "identity_duplicates_report", { church_id: churchId || "all", results: rows.length });
+    return res.json(rows);
+  } catch (err: any) {
+    logger.error({ err }, "Identity duplicate report failed");
+    return res.status(500).json({ error: safeErrorMessage(err, "Identity duplicate report failed") });
+  }
+});
+
 // ── M2: Manual job trigger (Super Admin only) ──
 router.post("/jobs/:jobName/trigger", requireAuth, requireRegisteredUser, requireSuperAdmin, adminWriteLimiter, async (req: AuthRequest, res) => {
   try {

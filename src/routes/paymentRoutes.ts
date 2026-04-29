@@ -95,7 +95,7 @@ async function getCurrentMemberDashboard(req: AuthRequest): Promise<CurrentMembe
     throw new Error("Unauthenticated");
   }
 
-  const dashboard = await getMemberDashboardByEmail(req.user.email, req.user.phone);
+  const dashboard = await getMemberDashboardByEmail(req.user.email, req.user.phone, req.user.id, req.user.church_id);
   if (!dashboard?.member) {
     throw new Error("Member profile not found");
   }
@@ -1331,7 +1331,12 @@ router.post("/public/donation/verify", publicDonationLimiter, validate(publicDon
         if (token && token.split(".").length === 3) {
           const decoded = jwt.verify(token, JWT_SECRET) as { sub?: string; email?: string; phone?: string; church_id?: string };
           if (decoded?.sub && decoded?.church_id === churchId) {
-            const memberDashboard = await getMemberDashboardByEmail(decoded.email || "", decoded.phone || "");
+            const memberDashboard = await getMemberDashboardByEmail(
+              decoded.email || "",
+              decoded.phone || "",
+              decoded.sub,
+              decoded.church_id,
+            );
             if (memberDashboard?.member?.id) {
               linkedMemberId = memberDashboard.member.id;
             }
@@ -1385,6 +1390,25 @@ router.post("/public/donation/verify", publicDonationLimiter, validate(publicDon
         }
       }
       throw error;
+    }
+
+    const storedFee = Number(razorpayOrder.notes?.platform_fee || 0);
+    const storedPct = Number(razorpayOrder.notes?.platform_fee_pct || 0);
+    if (data?.id && storedFee > 0) {
+      try {
+        await db
+          .from("platform_fee_collections")
+          .insert([{
+            church_id: churchId,
+            payment_id: data.id,
+            member_id: linkedMemberId,
+            base_amount: verifiedAmount - storedFee,
+            fee_percentage: storedPct,
+            fee_amount: storedFee,
+          }]);
+      } catch (feeErr) {
+        logger.warn({ err: feeErr, paymentId: data.id }, "Public donation platform fee recording failed");
+      }
     }
 
     // Store donor details in subscription_events for admin visibility
