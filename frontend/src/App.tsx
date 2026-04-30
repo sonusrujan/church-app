@@ -201,11 +201,15 @@ function App() {
     : 0;
   const loggedInDonationChurch = useMemo(() => {
     if (isSuperAdmin || !authContext?.auth?.church_id) return undefined;
+    const churchName =
+      memberDashboard?.church?.name ||
+      churches.find((church) => church.id === authContext.auth.church_id)?.name ||
+      "";
     return {
       id: authContext.auth.church_id,
-      name: memberDashboard?.church?.name || "",
+      name: churchName,
     };
-  }, [authContext?.auth?.church_id, isSuperAdmin, memberDashboard?.church?.name]);
+  }, [authContext?.auth?.church_id, churches, isSuperAdmin, memberDashboard?.church?.name]);
 
   // ── Context value ──
 

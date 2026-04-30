@@ -66,6 +66,29 @@ router.get("/public-search", publicSearchLimiter, async (req, res) => {
   }
 });
 
+router.get("/public-info", publicSearchLimiter, async (req, res) => {
+  try {
+    const churchId = typeof req.query.church_id === "string" ? req.query.church_id.trim() : "";
+    if (!churchId || !UUID_REGEX.test(churchId)) {
+      return res.status(400).json({ error: "church_id query parameter is required" });
+    }
+
+    const church = await getChurchById(churchId);
+    if (!church) {
+      return res.status(404).json({ error: "Church not found" });
+    }
+
+    return res.json({
+      id: church.id,
+      name: church.name,
+      location: church.location || null,
+      logo_url: church.logo_url || null,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: safeErrorMessage(err, "Failed to fetch church") });
+  }
+});
+
 function resolveScopedChurchId(req: AuthRequest, requestedChurchId?: string) {
   if (!req.user) {
     throw new Error("Unauthenticated");

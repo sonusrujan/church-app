@@ -93,10 +93,10 @@ export default function PublicDonationPage({ isLoggedIn = false, userChurch }: P
 
   useEffect(() => {
     if (!userChurch?.id || userChurch.id !== selectedChurchId || !userChurch.name) return;
-    if (!selectedChurchName || selectedChurchName === "...") {
+    if (!selectedChurchName || selectedChurchName === "..." || selectedChurchName === t("donation.selectedChurch")) {
       setSelectedChurchName(userChurch.name);
     }
-  }, [selectedChurchId, selectedChurchName, userChurch?.id, userChurch?.name]);
+  }, [selectedChurchId, selectedChurchName, t, userChurch?.id, userChurch?.name]);
 
   // Fetch dioceses on mount (only if no pre-selected church)
   useEffect(() => {
