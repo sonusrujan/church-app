@@ -249,9 +249,9 @@ export default function IncomeDashboardTab() {
       if (reportPeriod === "custom") { params.set("start_date", customStart); params.set("end_date", customEnd); }
       const blob = await apiBlobRequest(`/api/admins/payment-report?${params}`, {
         token,
-        accept: "text/csv",
+        accept: "application/vnd.ms-excel",
       });
-      const filename = `payment_report_${reportPeriod}.csv`;
+      const filename = `payment_report_${reportPeriod}.xls`;
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a"); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
       setNotice({ tone: "success", text: t("adminTabs.incomeDashboard.successDownloaded") });

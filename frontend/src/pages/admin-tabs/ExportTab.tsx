@@ -40,12 +40,12 @@ export default function ExportTab() {
       const churchParam = isSuperAdmin ? `?church_id=${encodeURIComponent(selectedChurch)}` : "";
       const blob = await apiBlobRequest(
         `/api/admin/export/${type}${churchParam}`,
-        { token, accept: "text/csv" },
+        { token, accept: "application/vnd.ms-excel" },
       );
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${type}.csv`;
+      a.download = `${type}.xls`;
       a.click();
       URL.revokeObjectURL(url);
     }, t("adminTabs.export.successExported", { type }));
@@ -116,20 +116,20 @@ function SuperAdminExports({ token, busyKey, withAuthRequest, selectedChurch }: 
   async function downloadAdminAudit() {
     await withAuthRequest("export-audit-log", async () => {
       const params = new URLSearchParams({ limit: auditLimit });
-      const blob = await apiBlobRequest(`/api/ops/audit-logs/export?${params.toString()}`, { token: token ?? undefined, accept: "text/csv" });
+      const blob = await apiBlobRequest(`/api/ops/audit-logs/export?${params.toString()}`, { token: token ?? undefined, accept: "application/vnd.ms-excel" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url; a.download = `audit-log-${new Date().toISOString().split("T")[0]}.csv`; a.click();
+      a.href = url; a.download = `audit-log-${new Date().toISOString().split("T")[0]}.xls`; a.click();
       URL.revokeObjectURL(url);
     }, t("adminTabs.export.auditDownloaded"));
   }
 
   async function downloadSaasBilling() {
     await withAuthRequest("export-saas-billing", async () => {
-      const blob = await apiBlobRequest(`/api/ops/saas-billing/export?limit=${auditLimit}`, { token: token ?? undefined, accept: "text/csv" });
+      const blob = await apiBlobRequest(`/api/ops/saas-billing/export?limit=${auditLimit}`, { token: token ?? undefined, accept: "application/vnd.ms-excel" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url; a.download = `saas-billing-${new Date().toISOString().split("T")[0]}.csv`; a.click();
+      a.href = url; a.download = `saas-billing-${new Date().toISOString().split("T")[0]}.xls`; a.click();
       URL.revokeObjectURL(url);
     }, t("adminTabs.export.saasDownloaded"));
   }
@@ -137,10 +137,10 @@ function SuperAdminExports({ token, busyKey, withAuthRequest, selectedChurch }: 
   async function downloadIncomeReport() {
     if (!selectedChurch) { setNotice({ tone: "error", text: t("adminTabs.export.selectChurchFirst") }); return; }
     await withAuthRequest("export-income-report", async () => {
-      const blob = await apiBlobRequest(`/api/admins/income-report?church_id=${encodeURIComponent(selectedChurch)}&period=monthly`, { token: token ?? undefined, accept: "text/csv" });
+      const blob = await apiBlobRequest(`/api/admins/income-report?church_id=${encodeURIComponent(selectedChurch)}&period=monthly`, { token: token ?? undefined, accept: "application/vnd.ms-excel" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url; a.download = `income-report-${new Date().toISOString().split("T")[0]}.csv`; a.click();
+      a.href = url; a.download = `income-report-${new Date().toISOString().split("T")[0]}.xls`; a.click();
       URL.revokeObjectURL(url);
     }, t("adminTabs.export.incomeDownloaded"));
   }

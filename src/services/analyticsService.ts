@@ -1,5 +1,6 @@
 import { rawQuery } from "./dbClient";
 import { logger } from "../utils/logger";
+import { buildExcelHtmlReport, excelFilename, formatExcelMoney } from "../utils/excelReport";
 
 const TZ = "Asia/Kolkata";
 const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -1000,7 +1001,7 @@ export async function getPlatformIncomeAnalytics(period?: string): Promise<Incom
   return getIncomeAnalyticsForScope(null, period, { includePlatformFees: true });
 }
 
-// ── Rich Payment Report (CSV) ──
+// ── Rich Payment Report (Excel-compatible workbook) ──
 
 interface PaymentReportRow {
   payment_date: string;
@@ -1028,10 +1029,11 @@ export async function generatePaymentReport(
   month?: number,
   startDate?: string,
   endDate?: string,
-): Promise<{ csv: string; filename: string; summary: Record<string, unknown> }> {
+): Promise<{ content: string; filename: string; summary: Record<string, unknown> }> {
   let dateFilter: string;
   let dateParams: unknown[];
   let filename: string;
+  let periodLabel: string;
   const now = new Date();
   const paramBase = [churchId, TZ];
 
@@ -1039,23 +1041,27 @@ export async function generatePaymentReport(
     dateFilter = `AND (p.payment_date AT TIME ZONE $2)::date = (NOW() AT TIME ZONE $2)::date`;
     dateParams = paramBase;
     const d = now.toISOString().slice(0, 10);
-    filename = `payment-report-daily-${d}.csv`;
+    filename = `payment-report-daily-${d}.xls`;
+    periodLabel = `Today (${d})`;
   } else if (period === "monthly") {
     const y = year || now.getFullYear();
     const m = month != null ? month : now.getMonth() + 1;
     dateFilter = `AND EXTRACT(YEAR FROM p.payment_date AT TIME ZONE $2) = $3 AND EXTRACT(MONTH FROM p.payment_date AT TIME ZONE $2) = $4`;
     dateParams = [...paramBase, y, m];
-    filename = `payment-report-${y}-${String(m).padStart(2, "0")}.csv`;
+    filename = `payment-report-${y}-${String(m).padStart(2, "0")}.xls`;
+    periodLabel = `${monthNames[m - 1] || `Month ${m}`} ${y}`;
   } else if (period === "yearly") {
     const y = year || now.getFullYear();
     dateFilter = `AND EXTRACT(YEAR FROM p.payment_date AT TIME ZONE $2) = $3`;
     dateParams = [...paramBase, y];
-    filename = `payment-report-${y}.csv`;
+    filename = `payment-report-${y}.xls`;
+    periodLabel = `Year ${y}`;
   } else {
     if (!startDate || !endDate) throw new Error("startDate and endDate required for custom period");
     dateFilter = `AND (p.payment_date AT TIME ZONE $2)::date >= $3::date AND (p.payment_date AT TIME ZONE $2)::date <= $4::date`;
     dateParams = [...paramBase, startDate, endDate];
-    filename = `payment-report-${startDate}-to-${endDate}.csv`;
+    filename = `payment-report-${startDate}-to-${endDate}.xls`;
+    periodLabel = `${startDate} to ${endDate}`;
   }
 
   const { rows } = await rawQuery<PaymentReportRow>(`
@@ -1129,61 +1135,95 @@ export async function generatePaymentReport(
     }
   }
 
-  // Build CSV
-  const csvLines: string[] = [];
+  const monthlyRows = Object.entries(monthlyBreakdown).map(([monthName, data]) => ({
+    month: monthName,
+    subscriptions: data.subscriptions,
+    donations: data.donations,
+    total: data.total,
+    payments: data.count,
+  }));
 
-  // Report header
-  csvLines.push(`"PAYMENT REPORT"`);
-  csvLines.push(`"Period","${period.toUpperCase()}"`);
-  csvLines.push(`"Generated","${now.toISOString().slice(0, 19).replace("T", " ")} IST"`);
-  csvLines.push(`"Total Records","${rows.length}"`);
-  csvLines.push(``);
+  const detailRows = rows.map((r) => ({
+    date: r.payment_date,
+    member_name: r.member_name || "Public donor",
+    membership_id: r.membership_id || "",
+    phone: r.phone || "",
+    email: r.email || "",
+    type: r.payment_type,
+    plan: r.plan_name || "N/A",
+    amount: Number(r.amount) || 0,
+    method: r.payment_method,
+    fund: r.fund_name || "",
+    status: r.payment_status,
+    receipt: r.receipt_number || "",
+    transaction: r.transaction_id || "",
+    billing_cycle: r.billing_cycle || "",
+    month: r.month_label,
+    months_covered: r.months_covered || "",
+  }));
 
-  // Summary section
-  csvLines.push(`"SUMMARY"`);
-  csvLines.push(`"Total Income","₹${totalAmount.toFixed(2)}"`);
-  csvLines.push(`"Subscription Income","₹${subscriptionTotal.toFixed(2)}","${subscriptionCount} payments"`);
-  csvLines.push(`"Donation Income","₹${donationTotal.toFixed(2)}","${donationCount} payments"`);
-  csvLines.push(``);
-
-  // Monthly breakdown for yearly reports
+  const sections = [];
   if (period === "yearly" || period === "custom") {
-    csvLines.push(`"MONTHLY BREAKDOWN"`);
-    csvLines.push(`"Month","Subscriptions","Donations","Total","# Payments"`);
-    for (const [ml, data] of Object.entries(monthlyBreakdown)) {
-      csvLines.push(`"${ml}","₹${data.subscriptions.toFixed(2)}","₹${data.donations.toFixed(2)}","₹${data.total.toFixed(2)}","${data.count}"`);
-    }
-    csvLines.push(``);
+    sections.push({
+      title: "Monthly Breakdown",
+      description: "A simple month-by-month view of subscription income, donations, total collections, and payment count.",
+      columns: [
+        { key: "month", header: "Month", type: "text" as const, width: 120 },
+        { key: "subscriptions", header: "Subscriptions", type: "currency" as const, width: 130 },
+        { key: "donations", header: "Donations", type: "currency" as const, width: 130 },
+        { key: "total", header: "Total", type: "currency" as const, width: 130 },
+        { key: "payments", header: "# Payments", type: "number" as const, width: 90 },
+      ],
+      rows: monthlyRows,
+    });
   }
 
-  // Detail header
-  csvLines.push(`"DETAILED TRANSACTIONS"`);
-  csvLines.push(`"Date","Member Name","Membership ID","Email","Phone","Type","Plan","Amount (₹)","Method","Fund","Status","Receipt #","Transaction ID","Billing Cycle","Month","Months Covered"`);
+  sections.push({
+    title: "Detailed Transactions",
+    description: "Every successful app payment in this period. Amounts exclude platform fees from church income where applicable.",
+    columns: [
+      { key: "date", header: "Date", type: "date" as const, width: 150 },
+      { key: "member_name", header: "Member / Donor", type: "text" as const, width: 190 },
+      { key: "membership_id", header: "Membership ID", type: "text" as const, width: 110 },
+      { key: "phone", header: "Phone", type: "text" as const, width: 120 },
+      { key: "type", header: "Type", type: "text" as const, width: 110 },
+      { key: "plan", header: "Plan / Purpose", type: "text" as const, width: 165 },
+      { key: "fund", header: "Fund", type: "text" as const, width: 150 },
+      { key: "amount", header: "Amount", type: "currency" as const, width: 120 },
+      { key: "method", header: "Method", type: "text" as const, width: 135 },
+      { key: "status", header: "Status", type: "status" as const, width: 90 },
+      { key: "receipt", header: "Receipt #", type: "text" as const, width: 205 },
+      { key: "transaction", header: "Transaction ID", type: "text" as const, width: 180 },
+      { key: "billing_cycle", header: "Billing Cycle", type: "text" as const, width: 105 },
+      { key: "month", header: "Payment Month", type: "text" as const, width: 115 },
+      { key: "months_covered", header: "Months Covered", type: "text" as const, width: 150 },
+      { key: "email", header: "Email", type: "text" as const, width: 190 },
+    ],
+    rows: detailRows,
+  });
 
-  for (const r of rows) {
-    csvLines.push([
-      `"${r.payment_date}"`,
-      `"${(r.member_name || "").replace(/"/g, '""')}"`,
-      `"${r.membership_id || ""}"`,
-      `"${(r.email || "").replace(/"/g, '""')}"`,
-      `"${r.phone || ""}"`,
-      `"${r.payment_type}"`,
-      `"${(r.plan_name || "N/A").replace(/"/g, '""')}"`,
-      `"${Number(r.amount).toFixed(2)}"`,
-      `"${r.payment_method}"`,
-      `"${r.fund_name || ""}"`,
-      `"${r.payment_status}"`,
-      `"${r.receipt_number || ""}"`,
-      `"${r.transaction_id || ""}"`,
-      `"${r.billing_cycle || ""}"`,
-      `"${r.month_label}"`,
-      `"${(r.months_covered || "").replace(/"/g, '""')}"`,
-    ].join(","));
-  }
+  const content = buildExcelHtmlReport({
+    title: "Payment Report",
+    subtitle: "Readable finance report for church collections recorded through Shalom.",
+    periodLabel,
+    generatedAt: now,
+    kpis: [
+      { label: "Total Income", value: formatExcelMoney(totalAmount), note: `${rows.length} records` },
+      { label: "Subscriptions", value: formatExcelMoney(subscriptionTotal), note: `${subscriptionCount} payments` },
+      { label: "Donations", value: formatExcelMoney(donationTotal), note: `${donationCount} payments` },
+      { label: "Report Period", value: periodLabel },
+    ],
+    notes: [
+      "The Summary cards show the totals first so office bearers can understand the report without scanning every row.",
+      "The Detailed Transactions table can be filtered and searched in Excel.",
+      "Donation and subscription amounts are church-facing amounts; platform fees are not counted as church income.",
+    ],
+    sections,
+  });
 
   return {
-    csv: csvLines.join("\n"),
-    filename,
+    content,
+    filename: excelFilename(filename),
     summary: { totalAmount, subscriptionTotal, donationTotal, subscriptionCount, donationCount, totalRecords: rows.length },
   };
 }

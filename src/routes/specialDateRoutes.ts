@@ -7,7 +7,7 @@ import { safeErrorMessage } from "../utils/safeError";
 import { isSuperAdminEmail } from "../middleware/requireSuperAdmin";
 import { persistAuditLog } from "../utils/auditLog";
 import { logger } from "../utils/logger";
-import { escapeCsvField } from "../utils/csv";
+import { buildExcelHtmlReport, excelFilename, EXCEL_HTML_MIME } from "../utils/excelReport";
 import { validate, createSpecialDateSchema, updateSpecialDateSchema } from "../utils/zodSchemas";
 import {
   createSpecialDate,
@@ -194,28 +194,51 @@ router.get("/export", requireAuth, requireRegisteredUser, async (req: AuthReques
 
     const rows = await listSpecialDatesForExport(churchId, range);
 
-    // Build CSV
-    const header = "Member Name,Email,Phone,Occasion,Date,Person Name,Spouse Name,Notes,From Profile";
-    const csvLines = rows.map((r) => {
-      const fields = [
-        r.member_name,
-        r.member_email,
-        r.member_phone || "",
-        r.occasion_type,
-        r.occasion_date,
-        r.person_name,
-        r.spouse_name || "",
-        r.notes || "",
-        r.is_from_profile ? "Yes" : "No",
-      ];
-      return fields.map(escapeCsvField).join(",");
+    const reportRows = rows.map((r) => ({
+      member_name: r.member_name,
+      email: r.member_email,
+      phone: r.member_phone || "",
+      occasion: r.occasion_type,
+      date: r.occasion_date,
+      person_name: r.person_name,
+      spouse_name: r.spouse_name || "",
+      notes: r.notes || "",
+      source: r.is_from_profile ? "Profile DOB" : "Manual special date",
+    }));
+
+    const content = buildExcelHtmlReport({
+      title: "Special Dates Report",
+      subtitle: "Birthdays, anniversaries, and profile DOB dates for church greetings.",
+      periodLabel: range,
+      kpis: [
+        { label: "Total Dates", value: reportRows.length },
+        { label: "Birthdays", value: reportRows.filter((r) => String(r.occasion).toLowerCase() === "birthday").length },
+        { label: "Anniversaries", value: reportRows.filter((r) => String(r.occasion).toLowerCase() === "anniversary").length },
+      ],
+      notes: [
+        "Use the Date column to plan greetings and reminders.",
+        "Profile DOB rows are included automatically so members do not need to add them twice.",
+      ],
+      sections: [{
+        title: "Special Dates",
+        columns: [
+          { key: "date", header: "Date", type: "date", width: 135 },
+          { key: "occasion", header: "Occasion", type: "text", width: 120 },
+          { key: "person_name", header: "Person Name", type: "text", width: 170 },
+          { key: "member_name", header: "Member", type: "text", width: 190 },
+          { key: "phone", header: "Phone", type: "text", width: 120 },
+          { key: "spouse_name", header: "Spouse Name", type: "text", width: 170 },
+          { key: "source", header: "Source", type: "text", width: 140 },
+          { key: "notes", header: "Notes", type: "text", width: 240 },
+          { key: "email", header: "Email", type: "text", width: 190 },
+        ],
+        rows: reportRows,
+      }],
     });
 
-    const csv = [header, ...csvLines].join("\n");
-
-    res.setHeader("Content-Type", "text/csv; charset=utf-8");
-    res.setHeader("Content-Disposition", `attachment; filename=special_dates_${range}.csv`);
-    return res.send(csv);
+    res.setHeader("Content-Type", EXCEL_HTML_MIME);
+    res.setHeader("Content-Disposition", `attachment; filename="${excelFilename(`special-dates-${range}.xls`)}"`);
+    return res.send(content);
   } catch (err: any) {
     logger.error({ err }, "Special dates export failed");
     return res.status(500).json({ error: safeErrorMessage(err, "Failed to export special dates") });

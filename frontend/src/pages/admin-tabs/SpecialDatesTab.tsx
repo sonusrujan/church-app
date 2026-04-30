@@ -15,12 +15,12 @@ export default function SpecialDatesTab() {
     await withAuthRequest("export-special-dates", async () => {
       const blob = await apiBlobRequest(
         `/api/special-dates/export?range=${range}`,
-        { token, accept: "text/csv" },
+        { token, accept: "application/vnd.ms-excel" },
       );
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `special_dates_${range}.csv`;
+      a.download = `special_dates_${range}.xls`;
       a.click();
       URL.revokeObjectURL(url);
     }, t("adminTabs.specialDates.exportSuccess", { range }));

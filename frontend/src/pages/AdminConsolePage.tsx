@@ -32,6 +32,7 @@ import {
   Megaphone,
   Bell,
   Trash2,
+  QrCode,
 } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import { useI18n } from "../i18n";
@@ -76,6 +77,7 @@ const AdBannerTab = lazy(() => import("./admin-tabs/AdBannerTab"));
 const AnnouncementsTab = lazy(() => import("./admin-tabs/AnnouncementsTab"));
 const SpecialDatesTab = lazy(() => import("./admin-tabs/SpecialDatesTab"));
 const DonationFundsTab = lazy(() => import("./admin-tabs/DonationFundsTab"));
+const DonationLinksTab = lazy(() => import("./admin-tabs/DonationLinksTab"));
 const PushNotificationTab = lazy(() => import("./admin-tabs/PushNotificationTab"));
 const AccountDeletionRequestsTab = lazy(() => import("./admin-tabs/AccountDeletionRequestsTab"));
 
@@ -107,9 +109,9 @@ export default function AdminConsolePage() {
 
   // ── keyboard nav ──
   const adminTabs: AdminTabKey[] = isSuperAdmin
-    ? ["members", "churches", "leadership", "diocese", "ad-banners", "admins", "create-church", "roles", "payments", "saas-settings", "saas-subscriptions", "platform-razorpay", "pre-register", "membership-requests", "family-requests", "cancellation-requests", "account-deletion-requests", "trial", "income-dashboard", "manual-payment", "refunds", "refund-requests", "create-subscription", "subscriptions", "payment-history", "bulk-import", "restore", "scheduled-reports", "export", "special-dates", "audit-log", "announcements", "events", "activity", "push-notifications"]
+    ? ["members", "churches", "leadership", "diocese", "ad-banners", "admins", "create-church", "roles", "payments", "saas-settings", "saas-subscriptions", "platform-razorpay", "pre-register", "membership-requests", "family-requests", "cancellation-requests", "account-deletion-requests", "trial", "income-dashboard", "manual-payment", "refunds", "refund-requests", "create-subscription", "subscriptions", "payment-history", "donation-funds", "donation-links", "bulk-import", "restore", "scheduled-reports", "export", "special-dates", "audit-log", "announcements", "events", "activity", "push-notifications"]
     : isChurchAdmin
-      ? ["members", "leadership", "pre-register", "membership-requests", "family-requests", "cancellation-requests", "account-deletion-requests", "income-dashboard", "manual-payment", "refunds", "refund-requests", "create-subscription", "subscriptions", "payment-history", "bulk-import", "church-logo", "special-dates", "audit-log", "announcements", "events", "activity"]
+      ? ["members", "leadership", "pre-register", "membership-requests", "family-requests", "cancellation-requests", "account-deletion-requests", "income-dashboard", "manual-payment", "refunds", "refund-requests", "create-subscription", "subscriptions", "payment-history", "donation-funds", "donation-links", "bulk-import", "church-logo", "special-dates", "audit-log", "announcements", "events", "activity"]
       : [];
 
   function handleAdminNavKeyDown(e: React.KeyboardEvent<HTMLElement>) {
@@ -280,7 +282,7 @@ export default function AdminConsolePage() {
           <>
             <button className="admin-tree-group-toggle" onClick={() => toggleGroup("finance")} aria-expanded={!collapsedGroups.finance}>
               <span>{t("admin.finance")}</span>
-              <span className="group-badge">7</span>
+              <span className="group-badge">9</span>
               <ChevronDown size={14} strokeWidth={1.5} className={`group-chevron${collapsedGroups.finance ? " collapsed" : ""}`} />
             </button>
             <div className="admin-tree-group-items" data-collapsed={collapsedGroups.finance || undefined}>
@@ -307,6 +309,9 @@ export default function AdminConsolePage() {
               </button>
               <button className={`admin-tree-item${activeAdminTab === "donation-funds" ? " active" : ""}`} onClick={() => selectTab("donation-funds")}>
                 <Heart size={16} strokeWidth={1.5} /> <span>{t("admin.donationFunds")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
+              </button>
+              <button className={`admin-tree-item${activeAdminTab === "donation-links" ? " active" : ""}`} onClick={() => selectTab("donation-links")}>
+                <QrCode size={16} strokeWidth={1.5} /> <span>{t("adminTabs.donationLinks.title")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
               </button>
             </div>
           </>
@@ -464,6 +469,7 @@ export default function AdminConsolePage() {
         {activeAdminTab === "audit-log" && isAdminUser ? <Suspense fallback={<LoadingSkeleton />}><AuditLogTab /></Suspense> : null}
         {activeAdminTab === "push-notifications" && isSuperAdmin ? <Suspense fallback={<LoadingSkeleton />}><PushNotificationTab /></Suspense> : null}
         {activeAdminTab === "donation-funds" && isAdminUser ? <Suspense fallback={<LoadingSkeleton />}><DonationFundsTab /></Suspense> : null}
+        {activeAdminTab === "donation-links" && isAdminUser ? <Suspense fallback={<LoadingSkeleton />}><DonationLinksTab /></Suspense> : null}
       </section>
     </div>
   );

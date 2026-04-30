@@ -28,6 +28,7 @@ import {
 import { logSuperAdminAudit } from "../utils/superAdminAudit";
 import { persistAuditLog } from "../utils/auditLog";
 import { rlsStorage } from "../middleware/rlsContext";
+import { EXCEL_HTML_MIME } from "../utils/excelReport";
 
 const router = Router();
 
@@ -336,10 +337,10 @@ router.get(
         endDate,
       );
 
-      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Type", EXCEL_HTML_MIME);
       const safeFilename = report.filename.replace(/[^a-zA-Z0-9._-]/g, "_");
       res.setHeader("Content-Disposition", `attachment; filename="${safeFilename}"`);
-      return res.send(report.csv);
+      return res.send(report.content);
     } catch (err: any) {
       return res.status(400).json({ error: safeErrorMessage(err, "Failed to generate report") });
     }

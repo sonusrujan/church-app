@@ -9,7 +9,7 @@ import { safeErrorMessage } from "../utils/safeError";
 import { logSuperAdminAudit } from "../utils/superAdminAudit";
 import { persistAuditLog } from "../utils/auditLog";
 import { logger } from "../utils/logger";
-import { toCsvRow } from "../utils/csv";
+import { buildExcelHtmlReport, excelFilename, EXCEL_HTML_MIME, formatExcelMoney } from "../utils/excelReport";
 import { db, pool } from "../services/dbClient";
 import { getChurchSaaSSettings } from "../services/churchSubscriptionService";
 import { normalizeIndianPhone } from "../utils/phone";
@@ -1823,7 +1823,7 @@ router.post("/jobs/:jobName/trigger", requireAuth, requireRegisteredUser, requir
   }
 });
 
-// ── M3: Audit log CSV export (Super Admin only) ──
+// ── M3: Audit log Excel-compatible export (Super Admin only) ──
 router.get("/audit-logs/export", requireAuth, requireRegisteredUser, requireSuperAdmin, async (req: AuthRequest, res) => {
   try {
     const churchId = String(req.query.church_id || "").trim() || null;
@@ -1843,22 +1843,56 @@ router.get("/audit-logs/export", requireAuth, requireRegisteredUser, requireSupe
 
     const { rows } = await pool.query(query, params);
 
-    // CSV header
-    const header = "id,church_id,actor_user_id,actor_email,actor_role,action,entity_type,entity_id,ip_address,created_at";
-    const csvRows = rows.map((r: any) =>
-      toCsvRow([r.id, r.church_id, r.actor_user_id, r.actor_email, r.actor_role, r.action, r.entity_type, r.entity_id, r.ip_address, r.created_at])
-    );
+    const reportRows = rows.map((r: any) => ({
+      id: r.id,
+      church_id: r.church_id,
+      actor_user_id: r.actor_user_id,
+      actor_email: r.actor_email,
+      actor_role: r.actor_role,
+      action: r.action,
+      entity_type: r.entity_type,
+      entity_id: r.entity_id,
+      ip_address: r.ip_address,
+      created_at: r.created_at,
+    }));
 
-    const csv = [header, ...csvRows].join("\n");
-    res.setHeader("Content-Type", "text/csv");
-    res.setHeader("Content-Disposition", `attachment; filename="audit-logs-${new Date().toISOString().split("T")[0]}.csv"`);
-    return res.send(csv);
+    const content = buildExcelHtmlReport({
+      title: "Admin Audit Log",
+      subtitle: "Security and operations activity trail for super-admin review.",
+      kpis: [
+        { label: "Rows Exported", value: reportRows.length },
+        { label: "Scope", value: churchId ? "Single Church" : "Platform" },
+      ],
+      notes: [
+        "Use this report for accountability, incident review, and admin activity checks.",
+        "Rows are ordered from newest to oldest.",
+      ],
+      sections: [{
+        title: "Audit Events",
+        columns: [
+          { key: "created_at", header: "Created At", type: "date", width: 155 },
+          { key: "actor_email", header: "Actor", type: "text", width: 190 },
+          { key: "actor_role", header: "Role", type: "text", width: 100 },
+          { key: "action", header: "Action", type: "text", width: 180 },
+          { key: "entity_type", header: "Entity Type", type: "text", width: 120 },
+          { key: "entity_id", header: "Entity ID", type: "text", width: 180 },
+          { key: "ip_address", header: "IP Address", type: "text", width: 135 },
+          { key: "church_id", header: "Church ID", type: "text", width: 180 },
+          { key: "actor_user_id", header: "Actor User ID", type: "text", width: 180 },
+          { key: "id", header: "Audit ID", type: "text", width: 180 },
+        ],
+        rows: reportRows,
+      }],
+    });
+    res.setHeader("Content-Type", EXCEL_HTML_MIME);
+    res.setHeader("Content-Disposition", `attachment; filename="${excelFilename(`audit-logs-${new Date().toISOString().split("T")[0]}.xls`)}"`);
+    return res.send(content);
   } catch (err: any) {
     return res.status(500).json({ error: safeErrorMessage(err, "Audit log export failed") });
   }
 });
 
-// ── M3: SaaS billing history CSV export (Super Admin only) ──
+// ── M3: SaaS billing history Excel-compatible export (Super Admin only) ──
 router.get("/saas-billing/export", requireAuth, requireRegisteredUser, requireSuperAdmin, async (req: AuthRequest, res) => {
   try {
     const limit = Math.min(Math.max(Number(req.query.limit) || 1000, 1), 10000);
@@ -1873,15 +1907,49 @@ router.get("/saas-billing/export", requireAuth, requireRegisteredUser, requireSu
       [limit]
     );
 
-    const header = "id,church_id,church_name,amount,payment_method,transaction_id,payment_status,payment_date,note,created_at";
-    const csvRows = rows.map((r: any) =>
-      toCsvRow([r.id, r.church_id, r.church_name, r.amount, r.payment_method, r.transaction_id, r.payment_status, r.payment_date, r.note, r.created_at])
-    );
+    const reportRows = rows.map((r: any) => ({
+      id: r.id,
+      church_id: r.church_id,
+      church_name: r.church_name,
+      amount: Number(r.amount) || 0,
+      payment_method: r.payment_method,
+      transaction_id: r.transaction_id,
+      payment_status: r.payment_status,
+      payment_date: r.payment_date,
+      note: r.note,
+      created_at: r.created_at,
+    }));
+    const total = reportRows.reduce((sum, row) => sum + row.amount, 0);
 
-    const csv = [header, ...csvRows].join("\n");
-    res.setHeader("Content-Type", "text/csv");
-    res.setHeader("Content-Disposition", `attachment; filename="saas-billing-${new Date().toISOString().split("T")[0]}.csv"`);
-    return res.send(csv);
+    const content = buildExcelHtmlReport({
+      title: "SaaS Billing Report",
+      subtitle: "Platform billing history for super-admin reconciliation.",
+      kpis: [
+        { label: "Total Billing", value: formatExcelMoney(total) },
+        { label: "Rows Exported", value: reportRows.length },
+        { label: "Churches", value: new Set(reportRows.map((r) => r.church_id)).size },
+      ],
+      notes: ["This is a platform-only report and should not be shared as church income."],
+      sections: [{
+        title: "SaaS Billing Entries",
+        columns: [
+          { key: "payment_date", header: "Payment Date", type: "date", width: 155 },
+          { key: "church_name", header: "Church", type: "text", width: 220 },
+          { key: "amount", header: "Amount", type: "currency", width: 120 },
+          { key: "payment_method", header: "Method", type: "text", width: 130 },
+          { key: "payment_status", header: "Status", type: "status", width: 95 },
+          { key: "transaction_id", header: "Transaction ID", type: "text", width: 180 },
+          { key: "note", header: "Note", type: "text", width: 240 },
+          { key: "created_at", header: "Created At", type: "date", width: 155 },
+          { key: "church_id", header: "Church ID", type: "text", width: 180 },
+          { key: "id", header: "Payment ID", type: "text", width: 180 },
+        ],
+        rows: reportRows,
+      }],
+    });
+    res.setHeader("Content-Type", EXCEL_HTML_MIME);
+    res.setHeader("Content-Disposition", `attachment; filename="${excelFilename(`saas-billing-${new Date().toISOString().split("T")[0]}.xls`)}"`);
+    return res.send(content);
   } catch (err: any) {
     return res.status(500).json({ error: safeErrorMessage(err, "SaaS billing export failed") });
   }

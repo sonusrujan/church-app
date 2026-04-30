@@ -11,6 +11,76 @@ type ChurchItem = { id: string; name: string; location?: string | null };
 type FundItem = string;
 
 const SITE_URL = "https://shalomapp.in";
+const QR_POSTER_WIDTH = 900;
+const QR_POSTER_HEIGHT = 1180;
+const QR_SIZE = 560;
+
+function sanitizeFilePart(value: string) {
+  return (value || "church")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64) || "church";
+}
+
+function loadCanvasImage(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = src;
+  });
+}
+
+function drawRoundRect(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.arcTo(x + width, y, x + width, y + height, radius);
+  ctx.arcTo(x + width, y + height, x, y + height, radius);
+  ctx.arcTo(x, y + height, x, y, radius);
+  ctx.arcTo(x, y, x + width, y, radius);
+  ctx.closePath();
+}
+
+function drawCenteredLines(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  centerX: number,
+  y: number,
+  maxWidth: number,
+  lineHeight: number,
+  maxLines = 2,
+) {
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let current = "";
+
+  words.forEach((word) => {
+    const next = current ? `${current} ${word}` : word;
+    if (ctx.measureText(next).width <= maxWidth || !current) {
+      current = next;
+      return;
+    }
+    lines.push(current);
+    current = word;
+  });
+  if (current) lines.push(current);
+
+  const visible = lines.slice(0, maxLines);
+  if (lines.length > maxLines) {
+    let last = visible[visible.length - 1] || "";
+    while (ctx.measureText(`${last}...`).width > maxWidth && last.length > 1) {
+      last = last.slice(0, -1);
+    }
+    visible[visible.length - 1] = `${last}...`;
+  }
+
+  visible.forEach((line, index) => {
+    ctx.fillText(line, centerX, y + index * lineHeight);
+  });
+  return y + visible.length * lineHeight;
+}
 
 export default function DonationLinksTab() {
   const { memberDashboard, isSuperAdmin } = useApp();
@@ -35,6 +105,14 @@ export default function DonationLinksTab() {
   const [donationLink, setDonationLink] = useState("");
   const [qrDataUrl, setQrDataUrl] = useState("");
   const [copiedLink, setCopiedLink] = useState(false);
+
+  useEffect(() => {
+    if (isSuperAdmin || selectedChurchId) return;
+    const nextChurchId = getActiveChurchId() || memberDashboard?.church?.id || "";
+    if (!nextChurchId) return;
+    setSelectedChurchId(nextChurchId);
+    setSelectedChurchName(memberDashboard?.church?.name || selectedChurchName);
+  }, [isSuperAdmin, memberDashboard?.church?.id, memberDashboard?.church?.name, selectedChurchId, selectedChurchName]);
 
   // Load dioceses for super admin
   useEffect(() => {
@@ -73,65 +151,107 @@ export default function DonationLinksTab() {
     setDonationLink(`${SITE_URL}/donate?${params.toString()}`);
   }, [selectedChurchId, selectedFund]);
 
-  // Generate QR code with logo overlay
+  // Generate print/share-ready QR poster.
   const generateQR = useCallback(async () => {
     if (!donationLink) return;
     try {
-      // Generate QR as data URL at high resolution
       const qrUrl = await QRCodeLib.toDataURL(donationLink, {
-        width: 512,
+        width: QR_SIZE,
         margin: 2,
-        errorCorrectionLevel: "H", // High EC to accommodate logo overlay
-        color: { dark: "#041627", light: "#ffffff" },
+        errorCorrectionLevel: "H",
+        color: { dark: "#241d53", light: "#ffffff" },
       });
 
-      // Create canvas and draw QR + logo
       const canvas = document.createElement("canvas");
-      canvas.width = 512;
-      canvas.height = 512;
+      canvas.width = QR_POSTER_WIDTH;
+      canvas.height = QR_POSTER_HEIGHT;
       const ctx = canvas.getContext("2d")!;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
 
-      // Draw QR
-      const qrImg = new Image();
-      qrImg.crossOrigin = "anonymous";
-      qrImg.onload = () => {
-        ctx.drawImage(qrImg, 0, 0, 512, 512);
+      ctx.fillStyle = "#f5f1ff";
+      ctx.fillRect(0, 0, QR_POSTER_WIDTH, QR_POSTER_HEIGHT);
 
-        // Draw logo in center
-        const logo = new Image();
-        logo.crossOrigin = "anonymous";
-        logo.onload = () => {
-          const logoSize = 100;
-          const x = (512 - logoSize) / 2;
-          const y = (512 - logoSize) / 2;
+      ctx.fillStyle = "#241d53";
+      ctx.fillRect(0, 0, QR_POSTER_WIDTH, 250);
 
-          // White circle background
-          ctx.beginPath();
-          ctx.arc(256, 256, logoSize / 2 + 6, 0, Math.PI * 2);
-          ctx.fillStyle = "#ffffff";
-          ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "700 30px Arial, Helvetica, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("SHALOM CHURCH APP", QR_POSTER_WIDTH / 2, 78);
 
-          // Clip to circle for logo
-          ctx.save();
-          ctx.beginPath();
-          ctx.arc(256, 256, logoSize / 2, 0, Math.PI * 2);
-          ctx.clip();
-          ctx.drawImage(logo, x, y, logoSize, logoSize);
-          ctx.restore();
+      ctx.font = "800 64px Arial, Helvetica, sans-serif";
+      ctx.fillText("SCAN TO DONATE", QR_POSTER_WIDTH / 2, 160);
 
-          setQrDataUrl(canvas.toDataURL("image/png"));
-        };
-        logo.onerror = () => {
-          // If logo fails to load, still show QR without logo
-          setQrDataUrl(canvas.toDataURL("image/png"));
-        };
-        logo.src = qrLogoSrc;
-      };
-      qrImg.src = qrUrl;
+      ctx.font = "500 24px Arial, Helvetica, sans-serif";
+      ctx.fillStyle = "#ded7ff";
+      ctx.fillText("Secure church donation link", QR_POSTER_WIDTH / 2, 208);
+
+      ctx.save();
+      ctx.shadowColor = "rgba(36, 29, 83, 0.16)";
+      ctx.shadowBlur = 28;
+      ctx.shadowOffsetY = 14;
+      drawRoundRect(ctx, 70, 286, 760, 770, 36);
+      ctx.fillStyle = "#ffffff";
+      ctx.fill();
+      ctx.restore();
+
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#241d53";
+      ctx.font = "800 36px Arial, Helvetica, sans-serif";
+      const titleY = drawCenteredLines(ctx, selectedChurchName || "Church Donation", QR_POSTER_WIDTH / 2, 350, 650, 42, 2);
+
+      if (selectedFund) {
+        ctx.font = "700 23px Arial, Helvetica, sans-serif";
+        ctx.fillStyle = "#6b5fb4";
+        drawCenteredLines(ctx, `Fund: ${selectedFund}`, QR_POSTER_WIDTH / 2, titleY + 18, 620, 30, 2);
+      }
+
+      const qrX = (QR_POSTER_WIDTH - QR_SIZE) / 2;
+      const qrY = 480;
+      const qrImage = await loadCanvasImage(qrUrl);
+      ctx.save();
+      ctx.shadowColor = "rgba(36, 29, 83, 0.10)";
+      ctx.shadowBlur = 18;
+      ctx.shadowOffsetY = 8;
+      drawRoundRect(ctx, qrX - 24, qrY - 24, QR_SIZE + 48, QR_SIZE + 48, 28);
+      ctx.fillStyle = "#ffffff";
+      ctx.fill();
+      ctx.restore();
+      ctx.drawImage(qrImage, qrX, qrY, QR_SIZE, QR_SIZE);
+
+      try {
+        const logo = await loadCanvasImage(qrLogoSrc);
+        const logoSize = 112;
+        const logoX = QR_POSTER_WIDTH / 2 - logoSize / 2;
+        const logoY = qrY + QR_SIZE / 2 - logoSize / 2;
+        ctx.beginPath();
+        ctx.arc(QR_POSTER_WIDTH / 2, qrY + QR_SIZE / 2, logoSize / 2 + 12, 0, Math.PI * 2);
+        ctx.fillStyle = "#ffffff";
+        ctx.fill();
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(QR_POSTER_WIDTH / 2, qrY + QR_SIZE / 2, logoSize / 2, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.drawImage(logo, logoX, logoY, logoSize, logoSize);
+        ctx.restore();
+      } catch {
+        // QR still remains usable if the optional logo cannot be loaded.
+      }
+
+      ctx.fillStyle = "#241d53";
+      ctx.font = "800 29px Arial, Helvetica, sans-serif";
+      ctx.fillText("Open camera, scan, and complete the payment", QR_POSTER_WIDTH / 2, 1110);
+
+      ctx.fillStyle = "#6b6387";
+      ctx.font = "500 20px Arial, Helvetica, sans-serif";
+      drawCenteredLines(ctx, donationLink, QR_POSTER_WIDTH / 2, 1144, 760, 24, 2);
+
+      setQrDataUrl(canvas.toDataURL("image/png"));
     } catch {
       setQrDataUrl("");
     }
-  }, [donationLink]);
+  }, [donationLink, selectedChurchName, selectedFund]);
 
   useEffect(() => { generateQR(); }, [generateQR]);
 
@@ -147,7 +267,7 @@ export default function DonationLinksTab() {
     if (!qrDataUrl) return;
     const a = document.createElement("a");
     a.href = qrDataUrl;
-    a.download = `donation-qr-${selectedChurchName.replace(/\s+/g, "-").toLowerCase() || "church"}.png`;
+    a.download = `donation-qr-poster-${sanitizeFilePart(selectedChurchName)}.png`;
     a.click();
   }
 

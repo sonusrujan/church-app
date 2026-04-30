@@ -4,11 +4,12 @@ import { requireAuth, AuthRequest } from "../middleware/requireAuth";
 import { requireRegisteredUser } from "../middleware/requireRegisteredUser";
 import { requireSuperAdmin } from "../middleware/requireSuperAdmin";
 import { grantFreeTrial, revokeFreeTrial, getChurchTrialStatus } from "../services/trialService";
-import { exportMembersCsv, exportPaymentsCsv, exportDonationSummaryCsv, exportMonthlyDuesCsv } from "../services/exportService";
+import { exportMembersReport, exportPaymentsReport, exportDonationSummaryReport, exportMonthlyDuesReport } from "../services/exportService";
 import { listAuditLogs } from "../utils/auditLog";
 import { persistAuditLog } from "../utils/auditLog";
 import { safeErrorMessage } from "../utils/safeError";
 import { SUPER_ADMIN_EMAILS, SUPER_ADMIN_PHONES } from "../config";
+import { EXCEL_HTML_MIME } from "../utils/excelReport";
 import {
   createScheduledReport,
   listScheduledReports,
@@ -105,13 +106,13 @@ router.get("/export/members", requireAuth, requireRegisteredUser, async (req: Au
     const churchId = resolveChurchId(req);
     if (!churchId) return res.status(400).json({ error: "Church ID required." });
 
-    const csv = await exportMembersCsv(churchId);
+    const report = await exportMembersReport(churchId);
 
     await persistAuditLog(req, "export.members", "church", churchId);
 
-    res.setHeader("Content-Type", "text/csv");
-    res.setHeader("Content-Disposition", 'attachment; filename="members.csv"');
-    return res.send(csv);
+    res.setHeader("Content-Type", EXCEL_HTML_MIME);
+    res.setHeader("Content-Disposition", `attachment; filename="${report.filename}"`);
+    return res.send(report.content);
   } catch (err: any) {
     return res.status(400).json({ error: safeErrorMessage(err, "Export failed.") });
   }
@@ -125,13 +126,13 @@ router.get("/export/payments", requireAuth, requireRegisteredUser, async (req: A
     const churchId = resolveChurchId(req);
     if (!churchId) return res.status(400).json({ error: "Church ID required." });
 
-    const csv = await exportPaymentsCsv(churchId);
+    const report = await exportPaymentsReport(churchId);
 
     await persistAuditLog(req, "export.payments", "church", churchId);
 
-    res.setHeader("Content-Type", "text/csv");
-    res.setHeader("Content-Disposition", 'attachment; filename="payments.csv"');
-    return res.send(csv);
+    res.setHeader("Content-Type", EXCEL_HTML_MIME);
+    res.setHeader("Content-Disposition", `attachment; filename="${report.filename}"`);
+    return res.send(report.content);
   } catch (err: any) {
     return res.status(400).json({ error: safeErrorMessage(err, "Export failed.") });
   }
@@ -145,13 +146,13 @@ router.get("/export/donations", requireAuth, requireRegisteredUser, async (req: 
     const churchId = resolveChurchId(req);
     if (!churchId) return res.status(400).json({ error: "Church ID required." });
 
-    const csv = await exportDonationSummaryCsv(churchId);
+    const report = await exportDonationSummaryReport(churchId);
 
     await persistAuditLog(req, "export.donations", "church", churchId);
 
-    res.setHeader("Content-Type", "text/csv");
-    res.setHeader("Content-Disposition", 'attachment; filename="donation_summary.csv"');
-    return res.send(csv);
+    res.setHeader("Content-Type", EXCEL_HTML_MIME);
+    res.setHeader("Content-Disposition", `attachment; filename="${report.filename}"`);
+    return res.send(report.content);
   } catch (err: any) {
     return res.status(400).json({ error: safeErrorMessage(err, "Export failed.") });
   }
@@ -165,13 +166,13 @@ router.get("/export/monthly-dues", requireAuth, requireRegisteredUser, async (re
     const churchId = resolveChurchId(req);
     if (!churchId) return res.status(400).json({ error: "Church ID required." });
 
-    const csv = await exportMonthlyDuesCsv(churchId);
+    const report = await exportMonthlyDuesReport(churchId);
 
     await persistAuditLog(req, "export.monthly_dues", "church", churchId);
 
-    res.setHeader("Content-Type", "text/csv");
-    res.setHeader("Content-Disposition", 'attachment; filename="monthly_dues.csv"');
-    return res.send(csv);
+    res.setHeader("Content-Type", EXCEL_HTML_MIME);
+    res.setHeader("Content-Disposition", `attachment; filename="${report.filename}"`);
+    return res.send(report.content);
   } catch (err: any) {
     return res.status(400).json({ error: safeErrorMessage(err, "Export failed.") });
   }
