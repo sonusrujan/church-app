@@ -25,6 +25,7 @@ import {
   RotateCcw,
   Clock,
   Crown,
+  Route,
   Settings,
   BarChart3,
   AlertTriangle,
@@ -53,6 +54,7 @@ const PaymentGatewayTab = lazy(() => import("./admin-tabs/PaymentGatewayTab"));
 const SaaSSettingsTab = lazy(() => import("./admin-tabs/SaaSSettingsTab"));
 const SaaSSubscriptionsTab = lazy(() => import("./admin-tabs/SaaSSubscriptionsTab"));
 const PlatformRazorpayTab = lazy(() => import("./admin-tabs/PlatformRazorpayTab"));
+const RazorpayRoutesTab = lazy(() => import("./admin-tabs/RazorpayRoutesTab"));
 const PreRegisterTab = lazy(() => import("./admin-tabs/PreRegisterTab"));
 const MembershipRequestsTab = lazy(() => import("./admin-tabs/MembershipRequestsTab"));
 const FamilyRequestsTab = lazy(() => import("./admin-tabs/FamilyRequestsTab"));
@@ -109,7 +111,7 @@ export default function AdminConsolePage() {
 
   // ── keyboard nav ──
   const adminTabs: AdminTabKey[] = isSuperAdmin
-    ? ["members", "churches", "leadership", "diocese", "ad-banners", "admins", "create-church", "roles", "payments", "saas-settings", "saas-subscriptions", "platform-razorpay", "pre-register", "membership-requests", "family-requests", "cancellation-requests", "account-deletion-requests", "trial", "income-dashboard", "manual-payment", "refunds", "refund-requests", "create-subscription", "subscriptions", "payment-history", "donation-funds", "donation-links", "bulk-import", "restore", "scheduled-reports", "export", "special-dates", "audit-log", "announcements", "events", "activity", "push-notifications"]
+    ? ["members", "churches", "leadership", "diocese", "ad-banners", "admins", "create-church", "roles", "payments", "saas-settings", "saas-subscriptions", "platform-razorpay", "razorpay-routes", "pre-register", "membership-requests", "family-requests", "cancellation-requests", "account-deletion-requests", "trial", "income-dashboard", "manual-payment", "refunds", "refund-requests", "create-subscription", "subscriptions", "payment-history", "donation-funds", "donation-links", "bulk-import", "restore", "scheduled-reports", "export", "special-dates", "audit-log", "announcements", "events", "activity", "push-notifications"]
     : isChurchAdmin
       ? ["members", "leadership", "pre-register", "membership-requests", "family-requests", "cancellation-requests", "account-deletion-requests", "income-dashboard", "manual-payment", "refunds", "refund-requests", "create-subscription", "subscriptions", "payment-history", "donation-funds", "donation-links", "bulk-import", "church-logo", "special-dates", "audit-log", "announcements", "events", "activity"]
       : [];
@@ -247,7 +249,7 @@ export default function AdminConsolePage() {
 
             <button className="admin-tree-group-toggle" onClick={() => toggleGroup("saas")} aria-expanded={!collapsedGroups.saas}>
               <span>{t("admin.saasPlatform")}</span>
-              <span className="group-badge">3</span>
+              <span className="group-badge">4</span>
               <ChevronDown size={14} strokeWidth={1.5} className={`group-chevron${collapsedGroups.saas ? " collapsed" : ""}`} />
             </button>
             <div className="admin-tree-group-items" data-collapsed={collapsedGroups.saas || undefined}>
@@ -259,6 +261,9 @@ export default function AdminConsolePage() {
               </button>
               <button className={`admin-tree-item${activeAdminTab === "platform-razorpay" ? " active" : ""}`} onClick={() => selectTab("platform-razorpay")}>
                 <DollarSign size={16} strokeWidth={1.5} /> <span>{t("admin.platformRazorpay")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
+              </button>
+              <button className={`admin-tree-item${activeAdminTab === "razorpay-routes" ? " active" : ""}`} onClick={() => selectTab("razorpay-routes")}>
+                <Route size={16} strokeWidth={1.5} /> <span>{t("admin.razorpayRoutes")}</span> <ChevronRight size={14} strokeWidth={1.5} className="admin-tree-arrow" />
               </button>
             </div>
 
@@ -439,6 +444,7 @@ export default function AdminConsolePage() {
         {activeAdminTab === "saas-settings" && isSuperAdmin ? <Suspense fallback={<LoadingSkeleton />}><SaaSSettingsTab /></Suspense> : null}
         {activeAdminTab === "saas-subscriptions" && isSuperAdmin ? <Suspense fallback={<LoadingSkeleton />}><SaaSSubscriptionsTab /></Suspense> : null}
         {activeAdminTab === "platform-razorpay" && isSuperAdmin ? <Suspense fallback={<LoadingSkeleton />}><PlatformRazorpayTab /></Suspense> : null}
+        {activeAdminTab === "razorpay-routes" && isSuperAdmin ? <Suspense fallback={<LoadingSkeleton />}><RazorpayRoutesTab /></Suspense> : null}
         {activeAdminTab === "refund-requests" && isAdminUser ? <Suspense fallback={<LoadingSkeleton />}><RefundRequestsTab /></Suspense> : null}
         {activeAdminTab === "diocese" && isSuperAdmin ? <Suspense fallback={<LoadingSkeleton />}><DioceseTab /></Suspense> : null}
         {activeAdminTab === "ad-banners" && isSuperAdmin ? <Suspense fallback={<LoadingSkeleton />}><AdBannerTab /></Suspense> : null}

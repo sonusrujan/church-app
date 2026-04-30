@@ -389,26 +389,62 @@ export async function getTransferSummary(): Promise<{
   pending_count: number;
   settled_count: number;
   failed_count: number;
+  by_church: Array<{
+    church_id: string;
+    church_name: string;
+    total_transfers: number;
+    total_amount: number;
+    total_platform_fee: number;
+    pending_count: number;
+    settled_count: number;
+    failed_count: number;
+  }>;
 }> {
-  const { rows } = await rawQuery<{
-    total_transfers: string;
-    total_transferred: string;
-    total_platform_fees: string;
-    pending_count: string;
-    settled_count: string;
-    failed_count: string;
-  }>(
-    `SELECT
-       count(*)::text AS total_transfers,
-       COALESCE(sum(transfer_amount), 0)::text AS total_transferred,
-       COALESCE(sum(platform_fee_amount), 0)::text AS total_platform_fees,
-       count(*) FILTER (WHERE transfer_status IN ('created', 'pending'))::text AS pending_count,
-       count(*) FILTER (WHERE transfer_status = 'settled')::text AS settled_count,
-       count(*) FILTER (WHERE transfer_status = 'failed')::text AS failed_count
-     FROM payment_transfers`,
-  );
+  const [aggregateResult, byChurchResult] = await Promise.all([
+    rawQuery<{
+      total_transfers: string;
+      total_transferred: string;
+      total_platform_fees: string;
+      pending_count: string;
+      settled_count: string;
+      failed_count: string;
+    }>(
+      `SELECT
+         count(*)::text AS total_transfers,
+         COALESCE(sum(transfer_amount), 0)::text AS total_transferred,
+         COALESCE(sum(platform_fee_amount), 0)::text AS total_platform_fees,
+         count(*) FILTER (WHERE transfer_status IN ('created', 'pending'))::text AS pending_count,
+         count(*) FILTER (WHERE transfer_status = 'settled')::text AS settled_count,
+         count(*) FILTER (WHERE transfer_status = 'failed')::text AS failed_count
+       FROM payment_transfers`,
+    ),
+    rawQuery<{
+      church_id: string;
+      church_name: string;
+      total_transfers: string;
+      total_amount: string;
+      total_platform_fee: string;
+      pending_count: string;
+      settled_count: string;
+      failed_count: string;
+    }>(
+      `SELECT
+         pt.church_id,
+         c.name AS church_name,
+         count(*)::text AS total_transfers,
+         COALESCE(sum(pt.transfer_amount), 0)::text AS total_amount,
+         COALESCE(sum(pt.platform_fee_amount), 0)::text AS total_platform_fee,
+         count(*) FILTER (WHERE pt.transfer_status IN ('created', 'pending'))::text AS pending_count,
+         count(*) FILTER (WHERE pt.transfer_status = 'settled')::text AS settled_count,
+         count(*) FILTER (WHERE pt.transfer_status = 'failed')::text AS failed_count
+       FROM payment_transfers pt
+       JOIN churches c ON c.id = pt.church_id
+       GROUP BY pt.church_id, c.name
+       ORDER BY COALESCE(sum(pt.transfer_amount), 0) DESC, c.name ASC`,
+    ),
+  ]);
 
-  const r = rows[0];
+  const r = aggregateResult.rows[0];
   return {
     total_transfers: Number(r?.total_transfers || 0),
     total_transferred: Number(r?.total_transferred || 0),
@@ -416,6 +452,16 @@ export async function getTransferSummary(): Promise<{
     pending_count: Number(r?.pending_count || 0),
     settled_count: Number(r?.settled_count || 0),
     failed_count: Number(r?.failed_count || 0),
+    by_church: byChurchResult.rows.map((row) => ({
+      church_id: row.church_id,
+      church_name: row.church_name,
+      total_transfers: Number(row.total_transfers || 0),
+      total_amount: Number(row.total_amount || 0),
+      total_platform_fee: Number(row.total_platform_fee || 0),
+      pending_count: Number(row.pending_count || 0),
+      settled_count: Number(row.settled_count || 0),
+      failed_count: Number(row.failed_count || 0),
+    })),
   };
 }
 

@@ -25,6 +25,40 @@ type TransferSummaryRow = {
   total_transfers: number;
   total_amount: number;
   total_platform_fee: number;
+  pending_count: number;
+  settled_count: number;
+  failed_count: number;
+};
+
+type TransferSummary = {
+  total_transfers: number;
+  total_transferred: number;
+  total_platform_fees: number;
+  pending_count: number;
+  settled_count: number;
+  failed_count: number;
+  by_church: TransferSummaryRow[];
+};
+
+type PaymentTransfer = {
+  id: string;
+  payment_id: string;
+  church_id: string;
+  church_name: string;
+  linked_account_id: string;
+  razorpay_transfer_id: string | null;
+  transfer_amount: number;
+  platform_fee_amount: number;
+  transfer_status: string;
+  razorpay_order_id: string | null;
+  settled_at: string | null;
+  failure_reason: string | null;
+  created_at: string;
+};
+
+type TransferListResponse = {
+  transfers: PaymentTransfer[];
+  total: number;
 };
 
 type ChurchOption = { id: string; name: string };
@@ -35,17 +69,37 @@ function normalizeChurchOptions(data: ChurchOptionsResponse): ChurchOption[] {
   return Array.isArray(data.churches) ? data.churches : [];
 }
 
+function formatMoney(value: number | string | null | undefined) {
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 2,
+  }).format(Number(value || 0));
+}
+
+function formatDate(value: string | null | undefined) {
+  if (!value) return "-";
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
 export default function RazorpayRoutesTab() {
   const { t } = useI18n();
   const { token, busyKey, withAuthRequest } = useApp();
 
   const [accounts, setAccounts] = useState<LinkedAccount[]>([]);
-  const [summary, setSummary] = useState<TransferSummaryRow[]>([]);
+  const [summary, setSummary] = useState<TransferSummary | null>(null);
+  const [transfers, setTransfers] = useState<PaymentTransfer[]>([]);
+  const [transferTotal, setTransferTotal] = useState(0);
   const [churches, setChurches] = useState<ChurchOption[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [showForm, setShowForm] = useState(false);
 
-  // Form fields
   const [form, setForm] = useState({
     church_id: "",
     email: "",
@@ -59,24 +113,32 @@ export default function RazorpayRoutesTab() {
   });
 
   const loadAll = useCallback(async () => {
-    const [accts, sum] = await Promise.all([
+    const [accts, transferSummary, transferList] = await Promise.all([
       withAuthRequest(
         "load-linked-accounts",
         () => apiRequest<LinkedAccount[]>("/api/razorpay-routes/linked-accounts", { token }),
       ),
       withAuthRequest(
         "load-transfer-summary",
-        () => apiRequest<TransferSummaryRow[]>("/api/razorpay-routes/transfers/summary", { token }),
+        () => apiRequest<TransferSummary>("/api/razorpay-routes/transfers/summary", { token }),
+      ),
+      withAuthRequest(
+        "load-transfers",
+        () => apiRequest<TransferListResponse>("/api/razorpay-routes/transfers?limit=10", { token }),
       ),
     ]);
-    if (accts && Array.isArray(accts)) setAccounts(accts);
-    if (sum && Array.isArray(sum)) setSummary(sum);
+
+    if (Array.isArray(accts)) setAccounts(accts);
+    if (transferSummary && !Array.isArray(transferSummary)) setSummary(transferSummary);
+    if (transferList && Array.isArray(transferList.transfers)) {
+      setTransfers(transferList.transfers);
+      setTransferTotal(Number(transferList.total || transferList.transfers.length));
+    }
     setLoaded(true);
   }, [token, withAuthRequest]);
 
   useEffect(() => {
     void Promise.resolve().then(loadAll);
-    // load churches for the dropdown
     void (async () => {
       const data = await apiRequest<ChurchOptionsResponse>("/api/churches/summary", { token });
       setChurches(normalizeChurchOptions(data));
@@ -96,7 +158,17 @@ export default function RazorpayRoutesTab() {
     );
     if (result) {
       setShowForm(false);
-      setForm({ church_id: "", email: "", phone: "", legal_business_name: "", business_type: "not_yet_categorised", contact_name: "", bank_account_name: "", bank_account_number: "", bank_ifsc_code: "" });
+      setForm({
+        church_id: "",
+        email: "",
+        phone: "",
+        legal_business_name: "",
+        business_type: "not_yet_categorised",
+        contact_name: "",
+        bank_account_name: "",
+        bank_account_number: "",
+        bank_ifsc_code: "",
+      });
       void loadAll();
     }
   }
@@ -126,13 +198,12 @@ export default function RazorpayRoutesTab() {
     void loadAll();
   }
 
-  // Filter churches that already have linked accounts
   const linkedChurchIds = new Set(accounts.map((a) => a.church_id));
   const availableChurches = churches.filter((c) => !linkedChurchIds.has(c.id));
 
   const statusColor = (status: string) => {
-    if (status === "activated") return "var(--color-success, #16a34a)";
-    if (status === "created" || status === "needs_clarification") return "var(--color-warning, #d97706)";
+    if (status === "activated" || status === "settled" || status === "processed") return "var(--color-success, #16a34a)";
+    if (status === "created" || status === "pending" || status === "needs_clarification" || status === "under_review") return "var(--color-warning, #d97706)";
     return "var(--color-danger, #dc2626)";
   };
 
@@ -142,11 +213,47 @@ export default function RazorpayRoutesTab() {
 
   return (
     <article className="panel">
-      <h3>{t("adminTabs.razorpayRoutes.title")}</h3>
-      <p className="muted">{t("adminTabs.razorpayRoutes.description")}</p>
+      <div className="actions-row" style={{ alignItems: "flex-start", gap: "0.75rem" }}>
+        <div>
+          <h3>{t("adminTabs.razorpayRoutes.title")}</h3>
+          <p className="muted">{t("adminTabs.razorpayRoutes.description")}</p>
+        </div>
+        <button className="btn btn-sm" style={{ marginLeft: "auto" }} onClick={() => void loadAll()}>
+          {t("common.refresh")}
+        </button>
+      </div>
 
-      {/* ── Linked Accounts ── */}
       <section style={{ marginTop: "1.25rem" }}>
+        <h4>{t("adminTabs.razorpayRoutes.transferOverviewTitle")}</h4>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "0.75rem", marginTop: "0.75rem" }}>
+          <div className="list-item">
+            <span className="muted">{t("adminTabs.razorpayRoutes.totalTransfers")}</span>
+            <strong>{summary?.total_transfers || 0}</strong>
+          </div>
+          <div className="list-item">
+            <span className="muted">{t("adminTabs.razorpayRoutes.totalTransferred")}</span>
+            <strong>{formatMoney(summary?.total_transferred)}</strong>
+          </div>
+          <div className="list-item">
+            <span className="muted">{t("adminTabs.razorpayRoutes.totalPlatformFees")}</span>
+            <strong>{formatMoney(summary?.total_platform_fees)}</strong>
+          </div>
+          <div className="list-item">
+            <span className="muted">{t("adminTabs.razorpayRoutes.pendingTransfers")}</span>
+            <strong>{summary?.pending_count || 0}</strong>
+          </div>
+          <div className="list-item">
+            <span className="muted">{t("adminTabs.razorpayRoutes.settledTransfers")}</span>
+            <strong>{summary?.settled_count || 0}</strong>
+          </div>
+          <div className="list-item">
+            <span className="muted">{t("adminTabs.razorpayRoutes.failedTransfers")}</span>
+            <strong>{summary?.failed_count || 0}</strong>
+          </div>
+        </div>
+      </section>
+
+      <section style={{ marginTop: "1.5rem" }}>
         <div className="actions-row" style={{ marginBottom: "0.75rem" }}>
           <h4 style={{ margin: 0 }}>{t("adminTabs.razorpayRoutes.linkedAccountsTitle", { count: accounts.length })}</h4>
           <button className="btn btn-primary btn-sm" style={{ marginLeft: "auto" }} onClick={() => setShowForm(!showForm)}>
@@ -174,7 +281,7 @@ export default function RazorpayRoutesTab() {
                 {t("adminTabs.razorpayRoutes.contactNameLabel")}
                 <input value={form.contact_name} onChange={(e) => setForm({ ...form, contact_name: e.target.value })} required />
               </label>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "0.75rem" }}>
                 <label>
                   {t("adminTabs.razorpayRoutes.emailLabel")}
                   <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
@@ -222,20 +329,20 @@ export default function RazorpayRoutesTab() {
           <div className="list-stack">
             {accounts.map((account) => (
               <div key={account.id} className="list-item">
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", alignItems: "flex-start", flexWrap: "wrap" }}>
                   <div>
                     <strong>{account.church_name || account.church_id}</strong>
                     <div className="muted" style={{ fontSize: "0.85rem" }}>
-                      {account.business_name} — {account.contact_name}
+                      {account.business_name || "-"} - {account.contact_name || "-"}
                     </div>
                     <div style={{ fontSize: "0.8rem", marginTop: "0.25rem" }}>
                       <span style={{ color: statusColor(account.account_status), fontWeight: 600 }}>
                         {account.account_status.toUpperCase()}
                       </span>
-                      {" · "}RZP: {account.razorpay_account_id}
+                      {" | "}RZP: {account.razorpay_account_id}
                     </div>
                   </div>
-                  <div style={{ display: "flex", gap: "0.5rem" }}>
+                  <div className="actions-row">
                     <button
                       className="btn btn-sm"
                       onClick={() => void syncAccount(account.church_id)}
@@ -258,10 +365,9 @@ export default function RazorpayRoutesTab() {
         )}
       </section>
 
-      {/* ── Transfer Summary ── */}
       <section style={{ marginTop: "1.5rem" }}>
-        <h4>{t("adminTabs.razorpayRoutes.transferSummaryTitle")}</h4>
-        {summary.length === 0 ? (
+        <h4>{t("adminTabs.razorpayRoutes.churchSummaryTitle")}</h4>
+        {!summary?.by_church?.length ? (
           <p className="muted">{t("adminTabs.razorpayRoutes.noTransfers")}</p>
         ) : (
           <div className="table-wrapper">
@@ -272,15 +378,61 @@ export default function RazorpayRoutesTab() {
                   <th style={{ textAlign: "right" }}>{t("adminTabs.razorpayRoutes.columnTransfers")}</th>
                   <th style={{ textAlign: "right" }}>{t("adminTabs.razorpayRoutes.columnAmount")}</th>
                   <th style={{ textAlign: "right" }}>{t("adminTabs.razorpayRoutes.columnPlatformFee")}</th>
+                  <th style={{ textAlign: "right" }}>{t("adminTabs.razorpayRoutes.columnPending")}</th>
+                  <th style={{ textAlign: "right" }}>{t("adminTabs.razorpayRoutes.columnSettled")}</th>
+                  <th style={{ textAlign: "right" }}>{t("adminTabs.razorpayRoutes.columnFailed")}</th>
                 </tr>
               </thead>
               <tbody>
-                {summary.map((row) => (
+                {summary.by_church.map((row) => (
                   <tr key={row.church_id}>
                     <td>{row.church_name}</td>
                     <td style={{ textAlign: "right" }}>{row.total_transfers}</td>
-                    <td style={{ textAlign: "right" }}>{Number(row.total_amount).toLocaleString("en-IN")}</td>
-                    <td style={{ textAlign: "right" }}>{Number(row.total_platform_fee).toLocaleString("en-IN")}</td>
+                    <td style={{ textAlign: "right" }}>{formatMoney(row.total_amount)}</td>
+                    <td style={{ textAlign: "right" }}>{formatMoney(row.total_platform_fee)}</td>
+                    <td style={{ textAlign: "right" }}>{row.pending_count}</td>
+                    <td style={{ textAlign: "right" }}>{row.settled_count}</td>
+                    <td style={{ textAlign: "right" }}>{row.failed_count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <section style={{ marginTop: "1.5rem" }}>
+        <h4>{t("adminTabs.razorpayRoutes.recentTransfersTitle", { count: transferTotal })}</h4>
+        {!transfers.length ? (
+          <p className="muted">{t("adminTabs.razorpayRoutes.noRecentTransfers")}</p>
+        ) : (
+          <div className="table-wrapper">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>{t("adminTabs.razorpayRoutes.columnChurch")}</th>
+                  <th>{t("adminTabs.razorpayRoutes.columnStatus")}</th>
+                  <th style={{ textAlign: "right" }}>{t("adminTabs.razorpayRoutes.columnAmount")}</th>
+                  <th style={{ textAlign: "right" }}>{t("adminTabs.razorpayRoutes.columnPlatformFee")}</th>
+                  <th>{t("adminTabs.razorpayRoutes.columnOrder")}</th>
+                  <th>{t("adminTabs.razorpayRoutes.columnCreated")}</th>
+                  <th>{t("adminTabs.razorpayRoutes.columnFailure")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {transfers.map((row) => (
+                  <tr key={row.id}>
+                    <td>{row.church_name}</td>
+                    <td>
+                      <span style={{ color: statusColor(row.transfer_status), fontWeight: 700 }}>
+                        {row.transfer_status}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: "right" }}>{formatMoney(row.transfer_amount)}</td>
+                    <td style={{ textAlign: "right" }}>{formatMoney(row.platform_fee_amount)}</td>
+                    <td>{row.razorpay_order_id || "-"}</td>
+                    <td>{formatDate(row.created_at)}</td>
+                    <td>{row.failure_reason || "-"}</td>
                   </tr>
                 ))}
               </tbody>
