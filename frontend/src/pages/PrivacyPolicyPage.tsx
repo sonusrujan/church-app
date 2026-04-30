@@ -114,7 +114,7 @@ export default function PrivacyPolicyPage() {
         <h2>13. Contact Us</h2>
         <p>
           If you have questions about this Privacy Policy, please reach out to your church administrator
-          or contact us at <a href="mailto:sonusrujan76@gmail.comapp.in" style={{ color: "var(--primary)" }}>sonusrujan76@gmail.comapp.in</a>.
+          or contact us at <a href="mailto:sonusrujan76@gmail.com" style={{ color: "var(--primary)" }}>sonusrujan76@gmail.com</a>.
         </p>
       </section>
 

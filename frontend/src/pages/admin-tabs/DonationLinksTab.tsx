@@ -8,7 +8,7 @@ import { useI18n } from "../../i18n";
 
 type Diocese = { id: string; name: string };
 type ChurchItem = { id: string; name: string; location?: string | null };
-type FundItem = string;
+type FundOption = { name: string; description?: string | null };
 
 const SITE_URL = "https://shalomapp.in";
 const QR_POSTER_WIDTH = 900;
@@ -98,7 +98,7 @@ export default function DonationLinksTab() {
   const [selectedChurchName, setSelectedChurchName] = useState(defaultChurchName);
 
   // Funds
-  const [funds, setFunds] = useState<FundItem[]>([]);
+  const [funds, setFunds] = useState<FundOption[]>([]);
   const [selectedFund, setSelectedFund] = useState("");
 
   // Generated link & QR
@@ -133,11 +133,11 @@ export default function DonationLinksTab() {
   // Load funds for selected church
   useEffect(() => {
     if (!selectedChurchId) { setFunds([]); return; }
-    apiRequest<FundItem[]>(`/api/donation-funds/public?church_id=${encodeURIComponent(selectedChurchId)}`)
+    apiRequest<FundOption[]>(`/api/donation-funds/public?church_id=${encodeURIComponent(selectedChurchId)}`)
       .then((data) => {
         if (Array.isArray(data) && data.length > 0) {
           setFunds(data);
-          setSelectedFund(data[0]);
+          setSelectedFund(data[0].name);
         }
       })
       .catch((e) => console.warn("Failed to load funds", e));
@@ -340,7 +340,7 @@ export default function DonationLinksTab() {
             onChange={(e) => setSelectedFund(e.target.value)}
           >
             {funds.map((f) => (
-              <option key={f} value={f}>{f}</option>
+              <option key={f.name} value={f.name}>{f.name}</option>
             ))}
           </select>
         </div>
