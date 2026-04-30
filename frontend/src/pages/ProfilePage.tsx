@@ -1345,18 +1345,15 @@ export default function ProfilePage() {
               <h4>{t("profile.yourRequests")}</h4>
               <div className="list-stack">
                 {familyRequests.map((fr) => (
-                  <div key={fr.id} className="list-item">
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <div>
+                  <div key={fr.id} className="list-item family-request-card">
+                    <div className="family-request-head">
+                      <div className="family-request-name">
                         <strong>{fr.target_name}</strong>
                         <span className="muted"> — {fr.relation}</span>
                       </div>
                       <span
+                        className="family-request-status"
                         style={{
-                          fontSize: "0.8rem",
-                          fontWeight: 600,
-                          padding: "0.2rem 0.5rem",
-                          borderRadius: "4px",
                           background:
                             fr.status === "approved"
                               ? "#e6f4ea"
@@ -1444,8 +1441,8 @@ export default function ProfilePage() {
           )}
 
           {/* ── Add new special date form ── */}
-          <div style={{ background: "var(--surface-variant, #f8fafc)", borderRadius: "8px", padding: "1rem", border: "1px solid var(--border, #e2e8f0)" }}>
-            <h4 style={{ marginBottom: "0.75rem", fontSize: "0.95rem" }}>{t("profile.addSpecialDate")}</h4>
+          <div className="profile-special-date-form">
+            <h4>{t("profile.addSpecialDate")}</h4>
             <div className="profile-sd-form-grid">
               <label>
                 {t("profile.type")}
