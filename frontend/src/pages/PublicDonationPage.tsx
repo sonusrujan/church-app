@@ -91,6 +91,13 @@ export default function PublicDonationPage({ isLoggedIn = false, userChurch }: P
     }
   }, [selectedChurchId, urlChurchId, userChurch?.id, userChurch?.name]);
 
+  useEffect(() => {
+    if (!userChurch?.id || userChurch.id !== selectedChurchId || !userChurch.name) return;
+    if (!selectedChurchName || selectedChurchName === "...") {
+      setSelectedChurchName(userChurch.name);
+    }
+  }, [selectedChurchId, selectedChurchName, userChurch?.id, userChurch?.name]);
+
   // Fetch dioceses on mount (only if no pre-selected church)
   useEffect(() => {
     if (isChurchPreSelected) return;
@@ -113,15 +120,14 @@ export default function PublicDonationPage({ isLoggedIn = false, userChurch }: P
       .finally(() => setLoadingChurches(false));
   }, [selectedDioceseId]);
 
-  // When URL has church param, resolve the actual church name from the API
+  // When a route or logged-in session provides only a church id, resolve the name.
   useEffect(() => {
-    if (!urlChurchId || selectedChurchName) return;
-    // Set temporary placeholder while loading
+    if (!selectedChurchId || selectedChurchName) return;
     setSelectedChurchName("...");
-    apiRequest<{ name: string }>(`/api/churches/public-info?church_id=${encodeURIComponent(urlChurchId)}`)
+    apiRequest<{ name: string }>(`/api/churches/public-info?church_id=${encodeURIComponent(selectedChurchId)}`)
       .then((data) => { if (data?.name) setSelectedChurchName(data.name); })
       .catch(() => { setSelectedChurchName(t("donation.selectedChurch")); });
-  }, [urlChurchId, selectedChurchName]);
+  }, [selectedChurchId, selectedChurchName, t]);
 
   // Fetch funds when church is selected
   useEffect(() => {
@@ -323,7 +329,7 @@ export default function PublicDonationPage({ isLoggedIn = false, userChurch }: P
                       onClick={() => handleSelectChurch(c)}
                     >
                       <div className="public-donation-church-info">
-                        <Church size={18} />
+                        <span className="public-donation-church-icon"><Church size={18} /></span>
                         <div>
                           <strong>{c.name}</strong>
                           {c.location && <span className="public-donation-church-loc"><MapPin size={12} /> {c.location}</span>}
@@ -344,7 +350,7 @@ export default function PublicDonationPage({ isLoggedIn = false, userChurch }: P
               <h2>{t("donation.churchSelected")}</h2>
             </div>
             <div className="public-donation-selected-church">
-              <Church size={18} />
+              <span className="public-donation-church-icon"><Church size={18} /></span>
               <strong>{selectedChurchName}</strong>
               {!isChurchPreSelected && (
                 <button type="button" className="btn btn-ghost btn-sm" onClick={handleChangeChurch}>

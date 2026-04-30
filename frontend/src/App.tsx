@@ -199,6 +199,13 @@ function App() {
     ? adminCounts.membership_requests + adminCounts.family_requests + adminCounts.cancellation_requests
       + adminCounts.account_deletion_requests + adminCounts.refund_requests + adminCounts.prayer_requests
     : 0;
+  const loggedInDonationChurch = useMemo(() => {
+    if (isSuperAdmin || !authContext?.auth?.church_id) return undefined;
+    return {
+      id: authContext.auth.church_id,
+      name: memberDashboard?.church?.name || "",
+    };
+  }, [authContext?.auth?.church_id, isSuperAdmin, memberDashboard?.church?.name]);
 
   // ── Context value ──
 
@@ -628,7 +635,7 @@ function App() {
             <Route path="/profile" element={<ProfilePage />} />
             <Route path="/history" element={isSuperAdmin ? <Navigate to="/dashboard" replace /> : <HistoryPage />} />
             <Route path="/events" element={<EventsPage />} />
-            <Route path="/donate" element={<PublicDonationPage isLoggedIn={true} />} />
+            <Route path="/donate" element={<PublicDonationPage isLoggedIn={true} userChurch={loggedInDonationChurch} />} />
             <Route path="/donate/checkout" element={<DonationCheckoutPage isLoggedIn={true} />} />
             <Route path="/prayer-request" element={<PrayerRequestPage />} />
             <Route path="/privacy" element={<PrivacyPolicyPage />} />
